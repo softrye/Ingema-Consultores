@@ -1,0 +1,20 @@
+                        -HC:\Users\PC-02\Develop\flutter-3.44.9\flutter\packages\flutter_tools\gradle\src\main\scripts
+-DCMAKE_SYSTEM_NAME=Android
+-DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+-DCMAKE_SYSTEM_VERSION=24
+-DANDROID_PLATFORM=android-24
+-DANDROID_ABI=x86
+-DCMAKE_ANDROID_ARCH_ABI=x86
+-DANDROID_NDK=C:\Users\PC-02\AppData\Local\Android\Sdk\ndk\28.2.13676358
+-DCMAKE_ANDROID_NDK=C:\Users\PC-02\AppData\Local\Android\Sdk\ndk\28.2.13676358
+-DCMAKE_TOOLCHAIN_FILE=C:\Users\PC-02\AppData\Local\Android\Sdk\ndk\28.2.13676358\build\cmake\android.toolchain.cmake
+-DCMAKE_MAKE_PROGRAM=C:\Users\PC-02\AppData\Local\Android\Sdk\cmake\3.22.1\bin\ninja.exe
+-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=C:\Users\PC-02\Documents\InGePlus\AppCalicatasDemo\flutter\inge_earth\.android\Flutter\build\intermediates\cxx\profile\721c3x1d\obj\x86
+-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=C:\Users\PC-02\Documents\InGePlus\AppCalicatasDemo\flutter\inge_earth\.android\Flutter\build\intermediates\cxx\profile\721c3x1d\obj\x86
+-BC:\Users\PC-02\Documents\InGePlus\AppCalicatasDemo\flutter\inge_earth\.android\Flutter\.cxx\profile\721c3x1d\x86
+-GNinja
+-Wno-dev
+--no-warn-unused-cli
+-DCMAKE_BUILD_TYPE=profile
+                        Build command args: []
+                        Version: 2

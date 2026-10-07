@@ -1,0 +1,137 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.it_nomads.fluttersecurestorage",
+    "module": "flutter_secure_storage_release",
+    "version": "1.0",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.1.0"
+    }
+  },
+  "variants": [
+    {
+      "name": "releaseVariantReleaseApiPublication",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-api"
+      },
+      "dependencies": [
+        {
+          "group": "io.flutter",
+          "module": "flutter_embedding_release",
+          "version": {
+            "requires": "1.0.0-5a2a6a42cce67f965cf540fcecf616faca624aa1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.3.20"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "flutter_secure_storage_release-1.0.aar",
+          "url": "flutter_secure_storage_release-1.0.aar",
+          "size": 72828,
+          "sha512": "28b91e90e80327e030fa1c3fab0366c4da80af68f9df9f81a34354d0159f8a314cf65f5e5d7d315f903cbe19c73777c149aa0894c5f395cac5a530798d219044",
+          "sha256": "8804f4c35f71e217f5c040c7b63c3f95d64357868a36339e8023cc31840e3378",
+          "sha1": "a1843401037364039c08969f7d8140e700a9f6e4",
+          "md5": "6fd2b26f769cdd218e8403741ed17041"
+        }
+      ]
+    },
+    {
+      "name": "releaseVariantReleaseRuntimePublication",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "io.flutter",
+          "module": "flutter_embedding_release",
+          "version": {
+            "requires": "1.0.0-5a2a6a42cce67f965cf540fcecf616faca624aa1"
+          }
+        },
+        {
+          "group": "com.google.crypto.tink",
+          "module": "tink-android",
+          "version": {
+            "requires": "1.23.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.3.20"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "flutter_secure_storage_release-1.0.aar",
+          "url": "flutter_secure_storage_release-1.0.aar",
+          "size": 72828,
+          "sha512": "28b91e90e80327e030fa1c3fab0366c4da80af68f9df9f81a34354d0159f8a314cf65f5e5d7d315f903cbe19c73777c149aa0894c5f395cac5a530798d219044",
+          "sha256": "8804f4c35f71e217f5c040c7b63c3f95d64357868a36339e8023cc31840e3378",
+          "sha1": "a1843401037364039c08969f7d8140e700a9f6e4",
+          "md5": "6fd2b26f769cdd218e8403741ed17041"
+        }
+      ]
+    },
+    {
+      "name": "releaseVariantReleaseSourcePublication",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "flutter_secure_storage_release-1.0-sources.jar",
+          "url": "flutter_secure_storage_release-1.0-sources.jar",
+          "size": 37232,
+          "sha512": "d35a2324866c9962dacf7f4181a8aa509037337ad3592a42acbcc268c557f05e146599c11ebf3bef7a057ac05702598875129df14448a1681ef1ecda1a34fc9c",
+          "sha256": "f06a5221a7a921f5579d2fc998cb93f12410f3de1ed63ce6580b63988c947a3a",
+          "sha1": "0a0a9b74860560bf7394b43287a56e6f5b17537e",
+          "md5": "25890bde3b8b09b248c8aa79fff3e272"
+        }
+      ]
+    },
+    {
+      "name": "releaseVariantReleaseJavaDocPublication",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "javadoc",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "flutter_secure_storage_release-1.0-javadoc.jar",
+          "url": "flutter_secure_storage_release-1.0-javadoc.jar",
+          "size": 343149,
+          "sha512": "5d9b9ecc0853fc9e9d5ff2b9cef25bea183cda174b5e46ea8eda84c184c6734c4db5637f26ce5c0dd31b7e63bae0f2cd9b29135381f2c345b6ee837b9d9be9bb",
+          "sha256": "b8af646b18ed456be0012f44c8650154219bd9bdaec0741cd9b5d7f67b6bbd79",
+          "sha1": "7ede6aa767f666b5c719b16b251c862095509fd7",
+          "md5": "7ce1ab237ded80ea4edc006714824c0d"
+        }
+      ]
+    }
+  ]
+}

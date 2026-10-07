@@ -1,0 +1,6 @@
+$dokka.format:javadoc-v1
+$dokka.linkExtension:html
+
+io.flutter.embedding.engine.plugins.lifecycle
+io.flutter.plugins.flutter_plugin_android_lifecycle
+

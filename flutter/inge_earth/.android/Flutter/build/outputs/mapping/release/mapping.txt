@@ -1,0 +1,10 @@
+# compiler: R8
+# compiler_version: 9.0.32
+# common_typos_disable
+# {"id":"com.android.tools.r8.mapping","version":"2.2"}
+# pg_map_id: 5a8dcfacc70f64d45a490d110e31fb5636bff7caf029228da8090b642aa036f3
+# pg_map_hash: SHA-256 5a8dcfacc70f64d45a490d110e31fb5636bff7caf029228da8090b642aa036f3
+io.flutter.plugins.GeneratedPluginRegistrant -> io.flutter.plugins.GeneratedPluginRegistrant:
+# {"id":"sourceFile","fileName":"GeneratedPluginRegistrant.java"}
+    1:1:void <init>():15:15 -> <init>
+    1:28:void registerWith(io.flutter.embedding.engine.FlutterEngine):19:46 -> registerWith

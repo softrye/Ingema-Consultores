@@ -1,0 +1,2 @@
+ninja: Entering directory `C:\Users\PC-02\AppData\Local\Pub\Cache\hosted\pub.dev\jni-1.0.3\android\.cxx\Debug\426u336y\x86'
+ninja: no work to do.

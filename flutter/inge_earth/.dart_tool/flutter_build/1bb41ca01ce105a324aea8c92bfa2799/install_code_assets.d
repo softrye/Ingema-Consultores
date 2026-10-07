@@ -1,0 +1,1 @@
+ C:\\Users\\PC-02\\Documents\\InGePlus\\AppCalicatasDemo\\flutter\\inge_earth\\.dart_tool\\flutter_build\\1bb41ca01ce105a324aea8c92bfa2799\\native_assets.json: 

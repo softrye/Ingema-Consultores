@@ -1,0 +1,25 @@
+$dokka.format:javadoc-v1
+$dokka.linkExtension:html
+$dokka.location:io.flutter.plugins.videoplayer.platformview/PlatformVideoViewFactory.VideoPlayerProvider///PointingToDeclaration/io/flutter/plugins/videoplayer/platformview/PlatformVideoViewFactory.VideoPlayerProvider.html
+$dokka.location:io.flutter.plugins.videoplayer/AndroidVideoPlayerApi.Companion///PointingToDeclaration/io/flutter/plugins/videoplayer/AndroidVideoPlayerApi.Companion.html
+$dokka.location:io.flutter.plugins.videoplayer/AudioTrackChangedEvent.Companion///PointingToDeclaration/io/flutter/plugins/videoplayer/AudioTrackChangedEvent.Companion.html
+$dokka.location:io.flutter.plugins.videoplayer/AudioTrackMessage.Companion///PointingToDeclaration/io/flutter/plugins/videoplayer/AudioTrackMessage.Companion.html
+$dokka.location:io.flutter.plugins.videoplayer/CreationOptions.Companion///PointingToDeclaration/io/flutter/plugins/videoplayer/CreationOptions.Companion.html
+$dokka.location:io.flutter.plugins.videoplayer/ExoPlayerAudioTrackData.Companion///PointingToDeclaration/io/flutter/plugins/videoplayer/ExoPlayerAudioTrackData.Companion.html
+$dokka.location:io.flutter.plugins.videoplayer/InitializationEvent.Companion///PointingToDeclaration/io/flutter/plugins/videoplayer/InitializationEvent.Companion.html
+$dokka.location:io.flutter.plugins.videoplayer/IsPlayingStateEvent.Companion///PointingToDeclaration/io/flutter/plugins/videoplayer/IsPlayingStateEvent.Companion.html
+$dokka.location:io.flutter.plugins.videoplayer/NativeAudioTrackData.Companion///PointingToDeclaration/io/flutter/plugins/videoplayer/NativeAudioTrackData.Companion.html
+$dokka.location:io.flutter.plugins.videoplayer/PlatformPlaybackState.Companion///PointingToDeclaration/io/flutter/plugins/videoplayer/PlatformPlaybackState.Companion.html
+$dokka.location:io.flutter.plugins.videoplayer/PlatformVideoFormat.Companion///PointingToDeclaration/io/flutter/plugins/videoplayer/PlatformVideoFormat.Companion.html
+$dokka.location:io.flutter.plugins.videoplayer/PlatformVideoViewCreationParams.Companion///PointingToDeclaration/io/flutter/plugins/videoplayer/PlatformVideoViewCreationParams.Companion.html
+$dokka.location:io.flutter.plugins.videoplayer/PlaybackState.Companion///PointingToDeclaration/io/flutter/plugins/videoplayer/PlaybackState.Companion.html
+$dokka.location:io.flutter.plugins.videoplayer/PlaybackStateChangeEvent.Companion///PointingToDeclaration/io/flutter/plugins/videoplayer/PlaybackStateChangeEvent.Companion.html
+$dokka.location:io.flutter.plugins.videoplayer/TexturePlayerIds.Companion///PointingToDeclaration/io/flutter/plugins/videoplayer/TexturePlayerIds.Companion.html
+$dokka.location:io.flutter.plugins.videoplayer/VideoEventsStreamHandler.Companion///PointingToDeclaration/io/flutter/plugins/videoplayer/VideoEventsStreamHandler.Companion.html
+$dokka.location:io.flutter.plugins.videoplayer/VideoPlayer.DisposeHandler///PointingToDeclaration/io/flutter/plugins/videoplayer/VideoPlayer.DisposeHandler.html
+$dokka.location:io.flutter.plugins.videoplayer/VideoPlayer.ExoPlayerProvider///PointingToDeclaration/io/flutter/plugins/videoplayer/VideoPlayer.ExoPlayerProvider.html
+$dokka.location:io.flutter.plugins.videoplayer/VideoPlayerInstanceApi.Companion///PointingToDeclaration/io/flutter/plugins/videoplayer/VideoPlayerInstanceApi.Companion.html
+io.flutter.plugins.videoplayer
+io.flutter.plugins.videoplayer.platformview
+io.flutter.plugins.videoplayer.texture
+

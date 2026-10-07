@@ -1,0 +1,10 @@
+$dokka.format:javadoc-v1
+$dokka.linkExtension:html
+$dokka.location:io.flutter.plugins.localauth/AuthClassification.Companion///PointingToDeclaration/io/flutter/plugins/localauth/AuthClassification.Companion.html
+$dokka.location:io.flutter.plugins.localauth/AuthOptions.Companion///PointingToDeclaration/io/flutter/plugins/localauth/AuthOptions.Companion.html
+$dokka.location:io.flutter.plugins.localauth/AuthResult.Companion///PointingToDeclaration/io/flutter/plugins/localauth/AuthResult.Companion.html
+$dokka.location:io.flutter.plugins.localauth/AuthResultCode.Companion///PointingToDeclaration/io/flutter/plugins/localauth/AuthResultCode.Companion.html
+$dokka.location:io.flutter.plugins.localauth/AuthStrings.Companion///PointingToDeclaration/io/flutter/plugins/localauth/AuthStrings.Companion.html
+$dokka.location:io.flutter.plugins.localauth/LocalAuthApi.Companion///PointingToDeclaration/io/flutter/plugins/localauth/LocalAuthApi.Companion.html
+io.flutter.plugins.localauth
+

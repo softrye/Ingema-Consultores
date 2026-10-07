@@ -1,0 +1,19 @@
+// Generated file. Do not edit.
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: "com.android.library"
+
+android {
+    namespace = "com.ingema.inge_earth"
+    compileSdk = 37
+    defaultConfig {
+        minSdk = 24
+        targetSdk = 36
+    }
+}

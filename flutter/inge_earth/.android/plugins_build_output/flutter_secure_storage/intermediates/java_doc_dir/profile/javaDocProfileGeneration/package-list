@@ -1,0 +1,6 @@
+$dokka.format:javadoc-v1
+$dokka.linkExtension:html
+
+com.it_nomads.fluttersecurestorage
+com.it_nomads.fluttersecurestorage.ciphers
+

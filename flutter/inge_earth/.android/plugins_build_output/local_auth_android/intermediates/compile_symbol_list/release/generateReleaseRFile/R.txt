@@ -1,0 +1,5 @@
+int color black_text 0x0
+int color grey_text 0x0
+int dimen huge_text_size 0x0
+int dimen medium_text_size 0x0
+int style AlertDialogCustom 0x0

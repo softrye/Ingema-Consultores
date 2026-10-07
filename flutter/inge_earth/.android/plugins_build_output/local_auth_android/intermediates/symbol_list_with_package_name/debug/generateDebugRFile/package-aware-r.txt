@@ -1,0 +1,6 @@
+io.flutter.plugins.localauth
+color black_text
+color grey_text
+dimen huge_text_size
+dimen medium_text_size
+style AlertDialogCustom

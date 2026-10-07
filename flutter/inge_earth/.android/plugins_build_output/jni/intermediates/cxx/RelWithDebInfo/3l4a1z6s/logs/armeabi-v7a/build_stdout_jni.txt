@@ -1,0 +1,5 @@
+ninja: Entering directory `C:\Users\PC-02\AppData\Local\Pub\Cache\hosted\pub.dev\jni-1.0.3\android\.cxx\RelWithDebInfo\3l4a1z6s\armeabi-v7a'
+[1/4 12.1/sec] Building C object CMakeFiles/jni.dir/include/dart_api_dl.c.o
+[2/4 18.0/sec] Building C object CMakeFiles/jni.dir/dartjni.c.o
+[3/4 7.0/sec] Building C object CMakeFiles/jni.dir/third_party/global_jni_env.c.o
+[4/4 7.7/sec] Linking C shared library C:\Users\PC-02\Documents\InGePlus\AppCalicatasDemo\flutter\inge_earth\.android\plugins_build_output\jni\intermediates\cxx\RelWithDebInfo\3l4a1z6s\obj\armeabi-v7a\libdartjni.so
