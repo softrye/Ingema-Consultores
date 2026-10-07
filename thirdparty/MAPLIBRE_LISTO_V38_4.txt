@@ -1,0 +1,7 @@
+MAPLIBRE LISTO - InGe+ V38.4 SOLO BAT
+Fecha: 16/07/2026 15:47:07,14
+ABI: arm64-v8a
+Qt Android: C:\Qt\6.9.3\android_arm64_v8a
+Qt Host: C:\Qt\6.9.3\mingw_64
+NDK: C:\Users\Javier\AppData\Local\Android\Sdk\ndk\27.2.12479018
+QMapLibre_DIR: C:\Users\Javier\Documents\InGePlus\AppCalicatasDemo\thirdparty\maplibre-install\arm64-v8a\lib\cmake\QMapLibre
