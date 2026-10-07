@@ -1,0 +1,205 @@
+<RCC>
+    <qresource prefix="/images">
+        <file alias="ICONO_LOGO_MTC.jpeg">images/ICONO_LOGO_MTC.jpeg</file>
+        <file alias="app_logo_company.png">images/app_logo_company.png</file>
+        <file alias="INGEMA_LOGO_COMPLETO.png">images/INGEMA_LOGO_COMPLETO.png</file>
+        <file>images/LOGO_APP1.png</file>
+        <file>images/logo_tierra_borde_blanco.png</file>
+        <file>images/ICONO_CALICATA.jpeg</file>
+        <file>images/ICONO_EG.jpeg</file>
+        <file>images/ICONO_TS.jpeg</file>
+        <file>images/ICONO_PE.jpeg</file>
+        <file>images/CLASI_AASHTO.png</file>
+        <file>images/CLASI_SUCS.png</file>
+        <file>images/ESTABILIDAD.png</file>
+        <file>images/EXCAVABILIDAD.png</file>
+        <file>images/HUMEDAD.png</file>
+        <file alias="default_avatar_men.png">images/default_avatar_men.png</file>
+        <file alias="default_avatar_women.png">images/default_avatar_women.png</file>
+        <file>images/LOGO_APP.png</file>
+        <file alias="APP_ICON_EXPLORER.ico">images/APP_ICON_EXPLORER.ico</file>
+    </qresource>
+    <qresource prefix="/icons">
+        <file>images/account_circle.png</file>
+        <file>images/description.png</file>
+        <file>images/home.png</file>
+        <file>images/location.png</file>
+        <file>images/BUTTON.png</file>
+        <file>images/Icono_folder_blue.png</file>
+        <file>images/Icono_Folder_Proyect.png</file>
+        <file>images/Icono_Folder_Edit.png</file>
+        <file>images/Icono_Folder_Calicata.png</file>
+        <file>images/Icono_Folder_Excel.png</file>
+        <file>images/Icono_Folder_PDF.png</file>
+        <file>images/Icono_Folder_Recursos.png</file>
+        <file>images/GPS_Activo.gif</file>
+        <file>images/GPS_Inactivo.png</file>
+        <file alias="OJO_CLOSE.png">images/OJO_CLOSE.png</file>
+        <file alias="OJO_OPEN.png">images/OJO_OPEN.png</file>
+        <file alias="Conflict.png">images/Conflict.png</file>
+        <file alias="LocalOnly.png">images/LocalOnly.png</file>
+        <file alias="Synced.png">images/Synced.png</file>
+        <file alias="Syncing.png">images/Syncing.png</file>
+        <file alias="ICONO_APP.png">images/ICONO_APP.png</file>
+        <file alias="chevron-down.svg">images/chevron-down.svg</file>
+        <file>images/ICONO_EXCEL.png</file>
+        <file>images/ICONO_JPG.png</file>
+        <file>images/ICONO_PDF.png</file>
+        <file>images/ICONO_PNG.png</file>
+        <file>images/ICONO_CALICATA.png</file>
+        <file>images/ICONO_DOCX.png</file>
+        <file>images/SAVE_ICON.png</file>
+        <file>images/SUBIR_IMAGEN.png</file>
+        <file>images/folder-open.svg</file>
+        <file>images/x.svg</file>
+        <file alias="check_blue.svg">images/check_blue.svg.svg</file>
+        <file>images/camera_thin_dark.svg</file>
+        <file>images/camera_thin_white.svg</file>
+        <file>images/check_green.svg</file>
+    </qresource>
+    <qresource prefix="/templates">
+        <file alias="Calicata_Formato.xlsx">Templates/Calicata_Formato.xlsx</file>
+        <file alias="Calicata_Formato_Paginado.xlsx">Templates/Calicata_Formato_Paginado.xlsx</file>
+    </qresource>
+    <qresource prefix="/Logos">
+        <file>images/ICONO_LOGO_MTC.jpeg</file>
+        <file>images/aldesa_logo.png</file>
+    </qresource>
+    <qresource prefix="/gps">
+        <file alias="demo.nmea">gps/demo.nmea</file>
+    </qresource>
+    <qresource prefix="/qml">
+        <file alias="MapWidget.qml">qml/Desktop/MapWidget.qml</file>
+        <file alias="Mobile/Main.qml">qml/Mobile/Main.qml</file>
+        <file alias="Mobile/pages/LoginPage.qml">qml/Mobile/pages/LoginPage.qml</file>
+        <file alias="Mobile/pages/RegisterPage.qml">qml/Mobile/pages/RegisterPage.qml</file>
+        <file alias="Mobile/pages/LoginPageForm.qml">qml/Mobile/pages/LoginPageForm.qml</file>
+        <file alias="Mobile/pages/RegisterPageForm.qml">qml/Mobile/pages/RegisterPageForm.qml</file>
+        <file alias="Mobile/pages/HomePage.qml">qml/Mobile/pages/HomePage.qml</file>
+        <file alias="Mobile/pages/HomePageContent.qml">qml/Mobile/pages/HomePageContent.qml</file>
+        <file alias="Mobile/pages/MapPage.qml">qml/Mobile/pages/MapPage.qml</file>
+        <file alias="Mobile/pages/ProfilePage.qml">qml/Mobile/pages/ProfilePage.qml</file>
+        <file alias="Mobile/pages/MapPageContent.qml">qml/Mobile/pages/MapPageContent.qml</file>
+        <file alias="Mobile/pages/ProfilePageContent.qml">qml/Mobile/pages/ProfilePageContent.qml</file>
+        <file alias="Mobile/AppShell.qml">qml/Mobile/AppShell.qml</file>
+        <file alias="Mobile/HeaderBar.qml">qml/Mobile/HeaderBar.qml</file>
+        <file alias="Mobile/BottomNav.qml">qml/Mobile/BottomNav.qml</file>
+        <file alias="Mobile/components/FlowIcon.qml">qml/Mobile/components/FlowIcon.qml</file>
+        <file alias="Mobile/components/FlowIconButton.qml">qml/Mobile/components/FlowIconButton.qml</file>
+        <file alias="Mobile/lib/IconCatalog.js">qml/Mobile/lib/IconCatalog.js</file>
+        <file alias="Mobile/pages/CalicatasEditorPage.qml">qml/Mobile/pages/CalicatasEditorPage.qml</file>
+        <file alias="Mobile/pages/CalicataFormPage.qml">qml/Mobile/pages/CalicataFormPage.qml</file>
+    <file alias="Mobile/pages/CalicataReview.qml">qml/Mobile/pages/CalicataReview.qml</file>
+    <file alias="Mobile/pages/CalicataLiquidGlass.qml">qml/Mobile/pages/CalicataLiquidGlass.qml</file>
+    <file alias="Mobile/pages/CalicataProfile.qml">qml/Mobile/pages/CalicataProfile.qml</file>
+    <file alias="Mobile/pages/CalicataPointPicker.qml">qml/Mobile/pages/CalicataPointPicker.qml</file>
+        <file alias="Mobile/CalicataSaveOpenDialog.qml">qml/Mobile/CalicataSaveOpenDialog.qml</file>
+        <file alias="Mobile/lib/GpsBus.js">qml/Mobile/lib/GpsBus.js</file>
+            <file alias="Mobile/lib/CalicataRules.js">qml/Mobile/lib/CalicataRules.js</file>
+    </qresource>
+    <qresource prefix="/scripts">
+        <file alias="export_excel.ps1">scripts/export_excel.ps1</file>
+        <file alias="excel_to_pdf.ps1">scripts/excel_to_pdf.ps1</file>
+    </qresource>
+    <qresource prefix="/SUCS">
+        <file alias="CH.svg">SUCS/CH.svg</file>
+        <file alias="OH.svg">SUCS/OH.svg</file>
+        <file alias="Pt.svg">SUCS/Pt.svg</file>
+        <file alias="CL.png">SUCS/CL.png</file>
+        <file alias="GC.png">SUCS/GC.png</file>
+        <file alias="GP.png">SUCS/GP.png</file>
+        <file alias="GW.png">SUCS/GW.png</file>
+        <file alias="MH.png">SUCS/MH.png</file>
+        <file alias="ML.png">SUCS/ML.png</file>
+        <file alias="OL.png">SUCS/OL.png</file>
+        <file alias="SC.png">SUCS/SC.png</file>
+        <file alias="SM.png">SUCS/SM.png</file>
+        <file alias="SP.png">SUCS/SP.png</file>
+        <file alias="SW.png">SUCS/SW.png</file>
+        <file alias="GM.png">SUCS/GM.png</file>
+    </qresource>
+    <!-- Teselas SUCS idénticas a Web (sucsSymbols.ts); generadas y verificadas por tests/calicatas/web_sucs_symbols.cjs -->
+    <qresource prefix="/SUCS/web">
+        <file alias="GW.svg">SUCS/web/GW.svg</file>
+        <file alias="GP.svg">SUCS/web/GP.svg</file>
+        <file alias="GM.svg">SUCS/web/GM.svg</file>
+        <file alias="GC.svg">SUCS/web/GC.svg</file>
+        <file alias="SW.svg">SUCS/web/SW.svg</file>
+        <file alias="SP.svg">SUCS/web/SP.svg</file>
+        <file alias="SM.svg">SUCS/web/SM.svg</file>
+        <file alias="SC.svg">SUCS/web/SC.svg</file>
+        <file alias="ML.svg">SUCS/web/ML.svg</file>
+        <file alias="CL.svg">SUCS/web/CL.svg</file>
+        <file alias="OL.svg">SUCS/web/OL.svg</file>
+        <file alias="MH.svg">SUCS/web/MH.svg</file>
+        <file alias="CH.svg">SUCS/web/CH.svg</file>
+        <file alias="OH.svg">SUCS/web/OH.svg</file>
+        <file alias="PT.svg">SUCS/web/PT.svg</file>
+    </qresource>
+    <qresource prefix="/SUCS/web/export">
+        <file alias="GW.svg">SUCS/web/export/GW.svg</file>
+        <file alias="GP.svg">SUCS/web/export/GP.svg</file>
+        <file alias="GM.svg">SUCS/web/export/GM.svg</file>
+        <file alias="GC.svg">SUCS/web/export/GC.svg</file>
+        <file alias="SW.svg">SUCS/web/export/SW.svg</file>
+        <file alias="SP.svg">SUCS/web/export/SP.svg</file>
+        <file alias="SM.svg">SUCS/web/export/SM.svg</file>
+        <file alias="SC.svg">SUCS/web/export/SC.svg</file>
+        <file alias="ML.svg">SUCS/web/export/ML.svg</file>
+        <file alias="CL.svg">SUCS/web/export/CL.svg</file>
+        <file alias="OL.svg">SUCS/web/export/OL.svg</file>
+        <file alias="MH.svg">SUCS/web/export/MH.svg</file>
+        <file alias="CH.svg">SUCS/web/export/CH.svg</file>
+        <file alias="OH.svg">SUCS/web/export/OH.svg</file>
+        <file alias="PT.svg">SUCS/web/export/PT.svg</file>
+    </qresource>
+    <qresource prefix="/SUCS/mtc">
+        <file alias="CH.svg">SUCS/mtc/CH.svg</file>
+        <file alias="chevron-right.svg">SUCS/mtc/chevron-right.svg</file>
+        <file alias="CL-ML.svg">SUCS/mtc/CL-ML.svg</file>
+        <file alias="CL.svg">SUCS/mtc/CL.svg</file>
+        <file alias="droplet.svg">SUCS/mtc/droplet.svg</file>
+        <file alias="GC-GM.svg">SUCS/mtc/GC-GM.svg</file>
+        <file alias="GC.svg">SUCS/mtc/GC.svg</file>
+        <file alias="GM-GC.svg">SUCS/mtc/GM-GC.svg</file>
+        <file alias="GM.svg">SUCS/mtc/GM.svg</file>
+        <file alias="GP-GC.svg">SUCS/mtc/GP-GC.svg</file>
+        <file alias="GP-GM.svg">SUCS/mtc/GP-GM.svg</file>
+        <file alias="GP.svg">SUCS/mtc/GP.svg</file>
+        <file alias="GW-GC.svg">SUCS/mtc/GW-GC.svg</file>
+        <file alias="GW-GM.svg">SUCS/mtc/GW-GM.svg</file>
+        <file alias="GW.svg">SUCS/mtc/GW.svg</file>
+        <file alias="MH.svg">SUCS/mtc/MH.svg</file>
+        <file alias="ML.svg">SUCS/mtc/ML.svg</file>
+        <file alias="OH.svg">SUCS/mtc/OH.svg</file>
+        <file alias="OL.svg">SUCS/mtc/OL.svg</file>
+        <file alias="Pt.svg">SUCS/mtc/Pt.svg</file>
+        <file alias="RE_Relleno_Antropico.svg">SUCS/mtc/RE_Relleno_Antropico.svg</file>
+        <file alias="cuadro43/A-1-a.svg">SUCS/mtc/cuadro43/A-1-a.svg</file>
+        <file alias="cuadro43/A-1-b.svg">SUCS/mtc/cuadro43/A-1-b.svg</file>
+        <file alias="cuadro43/A-3.svg">SUCS/mtc/cuadro43/A-3.svg</file>
+        <file alias="cuadro43/A-2-4.svg">SUCS/mtc/cuadro43/A-2-4.svg</file>
+        <file alias="cuadro43/A-2-5.svg">SUCS/mtc/cuadro43/A-2-5.svg</file>
+        <file alias="cuadro43/A-2-6.svg">SUCS/mtc/cuadro43/A-2-6.svg</file>
+        <file alias="cuadro43/A-2-7.svg">SUCS/mtc/cuadro43/A-2-7.svg</file>
+        <file alias="cuadro43/A-4.svg">SUCS/mtc/cuadro43/A-4.svg</file>
+        <file alias="cuadro43/A-5.svg">SUCS/mtc/cuadro43/A-5.svg</file>
+        <file alias="cuadro43/A-6.svg">SUCS/mtc/cuadro43/A-6.svg</file>
+        <file alias="cuadro43/A-7-5.svg">SUCS/mtc/cuadro43/A-7-5.svg</file>
+        <file alias="cuadro43/A-7-6.svg">SUCS/mtc/cuadro43/A-7-6.svg</file>
+        <file alias="cuadro43/ORGANIC.svg">SUCS/mtc/cuadro43/ORGANIC.svg</file>
+        <file alias="cuadro43/ROCK_SOUND.svg">SUCS/mtc/cuadro43/ROCK_SOUND.svg</file>
+        <file alias="cuadro43/ROCK_WEATHERED.svg">SUCS/mtc/cuadro43/ROCK_WEATHERED.svg</file>
+        <file alias="ruler.svg">SUCS/mtc/ruler.svg</file>
+        <file alias="SC-SM.svg">SUCS/mtc/SC-SM.svg</file>
+        <file alias="SC.svg">SUCS/mtc/SC.svg</file>
+        <file alias="SM.svg">SUCS/mtc/SM.svg</file>
+        <file alias="SP-SC.svg">SUCS/mtc/SP-SC.svg</file>
+        <file alias="SP-SM.svg">SUCS/mtc/SP-SM.svg</file>
+        <file alias="SP.svg">SUCS/mtc/SP.svg</file>
+        <file alias="sucs_patterns_manifest.json">SUCS/mtc/sucs_patterns_manifest.json</file>
+        <file alias="SW-SC.svg">SUCS/mtc/SW-SC.svg</file>
+        <file alias="SW-SM.svg">SUCS/mtc/SW-SM.svg</file>
+        <file alias="SW.svg">SUCS/mtc/SW.svg</file>
+    </qresource>
+</RCC>

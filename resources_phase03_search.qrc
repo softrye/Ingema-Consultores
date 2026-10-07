@@ -1,0 +1,17 @@
+<RCC>
+  <qresource prefix="/ui/v2/search">
+    <file alias="icon_close.svg">qml/Mobile/assets_ui_v2/search/icon_close.svg</file>
+    <file alias="icon_empty_search.svg">qml/Mobile/assets_ui_v2/search/icon_empty_search.svg</file>
+    <file alias="icon_result_calicata.svg">qml/Mobile/assets_ui_v2/search/icon_result_calicata.svg</file>
+    <file alias="icon_result_document.svg">qml/Mobile/assets_ui_v2/search/icon_result_document.svg</file>
+    <file alias="icon_result_excel.svg">qml/Mobile/assets_ui_v2/search/icon_result_excel.svg</file>
+    <file alias="icon_result_folder.svg">qml/Mobile/assets_ui_v2/search/icon_result_folder.svg</file>
+    <file alias="icon_result_map.svg">qml/Mobile/assets_ui_v2/search/icon_result_map.svg</file>
+    <file alias="icon_result_photo.svg">qml/Mobile/assets_ui_v2/search/icon_result_photo.svg</file>
+    <file alias="icon_result_profile.svg">qml/Mobile/assets_ui_v2/search/icon_result_profile.svg</file>
+    <file alias="icon_result_settings.svg">qml/Mobile/assets_ui_v2/search/icon_result_settings.svg</file>
+    <file alias="icon_result_speed.svg">qml/Mobile/assets_ui_v2/search/icon_result_speed.svg</file>
+    <file alias="icon_result_support.svg">qml/Mobile/assets_ui_v2/search/icon_result_support.svg</file>
+    <file alias="icon_search.svg">qml/Mobile/assets_ui_v2/search/icon_search.svg</file>
+  </qresource>
+</RCC>

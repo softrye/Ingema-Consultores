@@ -1,0 +1,123 @@
+{
+    "$schema":  "https://opencode.ai/config.json",
+    "model":  "ollama/inge-repair-coder",
+    "small_model":  "ollama/inge-repair-coder",
+    "enabled_providers":  [
+                              "ollama"
+                          ],
+    "share":  "disabled",
+    "autoupdate":  false,
+    "snapshot":  true,
+    "shell":  "C:\\Windows\\system32\\cmd.exe",
+    "subagent_depth":  0,
+    "provider":  {
+                     "ollama":  {
+                                    "npm":  "@ai-sdk/openai-compatible",
+                                    "name":  "Ollama Local - InGe",
+                                    "options":  {
+                                                    "baseURL":  "http://127.0.0.1:11434/v1",
+                                                    "timeout":  false,
+                                                    "chunkTimeout":  180000
+                                                },
+                                    "models":  {
+                                                   "inge-repair-coder":  {
+                                                                             "name":  "InGe Repair Coder Local",
+                                                                             "tool_call":  true,
+                                                                             "limit":  {
+                                                                                           "context":  32768,
+                                                                                           "output":  2048
+                                                                                       }
+                                                                         }
+                                               }
+                                }
+                 },
+    "compaction":  {
+                       "auto":  true,
+                       "prune":  true,
+                       "reserved":  4096
+                   },
+    "watcher":  {
+                    "ignore":  [
+                                   "repair_ai/**",
+                                   "repair_backups/**",
+                                   "**/build/**",
+                                   "**/.gradle/**",
+                                   "**/.dart_tool/**",
+                                   "**/node_modules/**",
+                                   "**/*.log",
+                                   "**/*.bak"
+                               ]
+                },
+    "instructions":  [
+                         "INGE_OPENCODE_RULES.md",
+                         "OPENCODE_WORKING_STATE.md"
+                     ],
+    "permission":  {
+                       "read":  {
+                                    "*":  "allow",
+                                    "*.env":  "deny",
+                                    "*.env.*":  "deny",
+                                    "*.env.example":  "allow"
+                                },
+                       "edit":  {
+                                    "*":  "allow",
+                                    "*opencode.json":  "deny",
+                                    "*INGE_OPENCODE_RULES.md":  "deny",
+                                    "*OPEN_INGE_REPAIR_AGENT_OPENCODE.bat":  "deny",
+                                    "*RUN_INGE_REPAIR_AGENT_AUTONOMO.bat":  "deny",
+                                    "*INGE_OPENCODE_FINAL_STATUS.txt":  "deny",
+                                    "*QWEN.md":  "deny",
+                                    "*.qwen/settings.json":  "deny"
+                                },
+                       "glob":  "allow",
+                       "grep":  "allow",
+                       "list":  "allow",
+                       "lsp":  "allow",
+                       "todowrite":  "allow",
+                       "skill":  "allow",
+                       "task":  "deny",
+                       "question":  "deny",
+                       "webfetch":  "deny",
+                       "websearch":  "deny",
+                       "doom_loop":  "deny",
+                       "external_directory":  {
+                                                  "*":  "deny",
+                                                  "C:/Users/PC-02/Documents/InGePlus_Builds/**":  "allow",
+                                                  "C:/Users/PC-02/AppData/Local/Android/Sdk/**":  "allow",
+                                                  "C:/Users/PC-02/Develop/flutter-3.44.9/**":  "allow",
+                                                  "C:/Qt/**":  "allow",
+                                                  "C:/Users/PC-02/.cache/inge-earth/**":  "allow"
+                                              },
+                       "bash":  {
+                                    "*":  "allow",
+                                    "git push":  "deny",
+                                    "git push *":  "deny",
+                                    "git reset":  "deny",
+                                    "git reset *":  "deny",
+                                    "git clean":  "deny",
+                                    "git clean *":  "deny",
+                                    "git checkout":  "deny",
+                                    "git checkout *":  "deny",
+                                    "git switch":  "deny",
+                                    "git switch *":  "deny",
+                                    "git restore":  "deny",
+                                    "git restore *":  "deny",
+                                    "git commit":  "deny",
+                                    "git commit *":  "deny",
+                                    "git merge":  "deny",
+                                    "git merge *":  "deny",
+                                    "git rebase":  "deny",
+                                    "git rebase *":  "deny",
+                                    "git cherry-pick":  "deny",
+                                    "git cherry-pick *":  "deny",
+                                    "npm uninstall *":  "deny",
+                                    "winget *":  "deny",
+                                    "choco *":  "deny",
+                                    "format *":  "deny",
+                                    "diskpart *":  "deny",
+                                    "shutdown *":  "deny",
+                                    "adb uninstall *":  "deny",
+                                    "adb shell pm clear *":  "deny"
+                                }
+                   }
+}

@@ -1,0 +1,479 @@
+#include "permissionhelper.h"
+
+#include <QCoreApplication>
+#include <QDebug>
+#include <QFuture>
+#include <QGeoCoordinate>
+#include <QGeoPositionInfo>
+#include <QGeoPositionInfoSource>
+#include <QLocationPermission>
+#include <QPermission>
+#include <QVariant>
+#include <limits>
+#include <QtMath>
+
+#ifdef Q_OS_ANDROID
+#include <QJniEnvironment>
+#include <QJniObject>
+#include <QtCore/qnativeinterface.h>
+#endif
+
+namespace {
+constexpr int kContinuousIntervalMs = 1000;
+constexpr int kImmediateTimeoutMs = 15000;
+constexpr int kWatchdogIntervalMs = 12000;
+constexpr qint64 kMaximumFixAgeMs = 2 * 60 * 1000;
+constexpr double kMaximumAcceptedAccuracyMeters = 500.0;
+
+#ifdef Q_OS_ANDROID
+QJniObject androidContext()
+{
+    return QNativeInterface::QAndroidApplication::context();
+}
+
+QJniObject settingsIntent(const char *action)
+{
+    const QJniObject actionString = QJniObject::fromString(QString::fromLatin1(action));
+    return QJniObject("android/content/Intent",
+                      "(Ljava/lang/String;)V",
+                      actionString.object<jstring>());
+}
+
+bool clearJniException(const char *where)
+{
+    QJniEnvironment env;
+    if (!env->ExceptionCheck())
+        return false;
+    qWarning() << "[InGe+ V38.12] JNI exception in" << where;
+    env->ExceptionDescribe();
+    env->ExceptionClear();
+    return true;
+}
+
+bool startAndroidActivity(const QJniObject &intent)
+{
+    if (!intent.isValid())
+        return false;
+
+    QFuture<QVariant> task =
+        QNativeInterface::QAndroidApplication::runOnAndroidMainThread(
+            [intent]() -> QVariant {
+                const QJniObject context = androidContext();
+                if (!context.isValid())
+                    return QVariant(false);
+
+                context.callMethod<void>(
+                    "startActivity",
+                    "(Landroid/content/Intent;)V",
+                    intent.object<jobject>());
+                return QVariant(!clearJniException("startActivity"));
+            });
+    task.waitForFinished();
+    return task.result().toBool();
+}
+
+QJniObject androidLocationManager()
+{
+    const QJniObject context = androidContext();
+    if (!context.isValid())
+        return {};
+
+    const QJniObject serviceName = QJniObject::fromString(QStringLiteral("location"));
+    return context.callObjectMethod(
+        "getSystemService",
+        "(Ljava/lang/String;)Ljava/lang/Object;",
+        serviceName.object<jstring>());
+}
+#endif
+
+QString errorTextForSource(QGeoPositionInfoSource::Error error)
+{
+    switch (error) {
+    case QGeoPositionInfoSource::AccessError:
+        return QStringLiteral("Android bloqueo el acceso a la ubicacion");
+    case QGeoPositionInfoSource::ClosedError:
+        return QStringLiteral("La ubicacion del dispositivo esta desactivada");
+    case QGeoPositionInfoSource::UnknownSourceError:
+        return QStringLiteral("No hay un proveedor de ubicacion disponible");
+    case QGeoPositionInfoSource::UpdateTimeoutError:
+        return QStringLiteral("La ubicacion todavia no responde");
+    case QGeoPositionInfoSource::NoError:
+        break;
+    }
+    return QString();
+}
+} // namespace
+
+PermissionHelper::PermissionHelper(QObject *parent)
+    : QObject(parent)
+{
+    m_watchdogTimer.setInterval(kWatchdogIntervalMs);
+    m_watchdogTimer.setTimerType(Qt::CoarseTimer);
+    connect(&m_watchdogTimer, &QTimer::timeout, this, [this]() {
+        if (!m_nativeTracking || !m_positionSource)
+            return;
+
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        const bool stale = !m_nativeHasFix
+                || m_nativeTimestampMs <= 0
+                || now - m_nativeTimestampMs > 15000;
+        if (stale) {
+            m_positionSource->requestUpdate(kImmediateTimeoutMs);
+            setNativeStatus(QStringLiteral("searching"), QString());
+        }
+    });
+}
+
+PermissionHelper::~PermissionHelper()
+{
+    stopNativeLocationUpdates();
+}
+
+bool PermissionHelper::nativeLocationSupported() const
+{
+    return true;
+}
+
+bool PermissionHelper::hasLocationPermission() const
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    // Approximate is sufficient to start the platform source. The permission
+    // request still asks Android for Precise, so the source improves the fix.
+    QLocationPermission permission;
+    permission.setAccuracy(QLocationPermission::Approximate);
+    permission.setAvailability(QLocationPermission::WhenInUse);
+    return qApp->checkPermission(permission) == Qt::PermissionStatus::Granted;
+#else
+    return true;
+#endif
+}
+
+void PermissionHelper::requestLocationPermission()
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    QLocationPermission permission;
+    permission.setAccuracy(QLocationPermission::Precise);
+    permission.setAvailability(QLocationPermission::WhenInUse);
+
+    const auto status = qApp->checkPermission(permission);
+    if (status == Qt::PermissionStatus::Granted) {
+        startNativeLocationUpdates();
+        requestImmediateLocationUpdate();
+        return;
+    }
+
+    qApp->requestPermission(permission, this, [this](const QPermission &result) {
+        const bool granted = result.status() == Qt::PermissionStatus::Granted;
+        qInfo() << "[InGe+ V38.12] location permission granted:" << granted;
+        if (granted) {
+            startNativeLocationUpdates();
+            requestImmediateLocationUpdate();
+        } else {
+            setNativeStatus(QStringLiteral("permission_denied"),
+                            QStringLiteral("Permite ubicacion precisa en Android"));
+        }
+    });
+#else
+    startNativeLocationUpdates();
+#endif
+}
+
+void PermissionHelper::requestLocation()
+{
+    requestLocationPermission();
+}
+
+void PermissionHelper::requestPermissions()
+{
+    requestLocationPermission();
+}
+
+bool PermissionHelper::isLocationServiceEnabled() const
+{
+#ifdef Q_OS_ANDROID
+    const QJniObject manager = androidLocationManager();
+    if (!manager.isValid())
+        return false;
+    const jboolean enabled = manager.callMethod<jboolean>("isLocationEnabled", "()Z");
+    if (clearJniException("LocationManager.isLocationEnabled"))
+        return false;
+    return enabled == JNI_TRUE;
+#else
+    return true;
+#endif
+}
+
+bool PermissionHelper::openLocationSettings()
+{
+#ifdef Q_OS_ANDROID
+    if (startAndroidActivity(settingsIntent("android.settings.LOCATION_SOURCE_SETTINGS")))
+        return true;
+    return startAndroidActivity(settingsIntent("android.settings.SETTINGS"));
+#else
+    return false;
+#endif
+}
+
+bool PermissionHelper::openApplicationSettings()
+{
+#ifdef Q_OS_ANDROID
+    QJniObject intent = settingsIntent("android.settings.APPLICATION_DETAILS_SETTINGS");
+    if (!intent.isValid())
+        return false;
+
+    const QJniObject context = androidContext();
+    if (!context.isValid())
+        return false;
+
+    const QJniObject packageName = context.callObjectMethod(
+        "getPackageName", "()Ljava/lang/String;");
+    const QJniObject uriText = QJniObject::fromString(
+        QStringLiteral("package:") + packageName.toString());
+    const QJniObject packageUri = QJniObject::callStaticObjectMethod(
+        "android/net/Uri",
+        "parse",
+        "(Ljava/lang/String;)Landroid/net/Uri;",
+        uriText.object<jstring>());
+
+    if (!packageUri.isValid())
+        return false;
+
+    intent.callObjectMethod("setData",
+                            "(Landroid/net/Uri;)Landroid/content/Intent;",
+                            packageUri.object<jobject>());
+    return startAndroidActivity(intent);
+#else
+    return false;
+#endif
+}
+
+bool PermissionHelper::ensurePositionSource()
+{
+    if (m_positionSource)
+        return true;
+
+    m_positionSource = QGeoPositionInfoSource::createDefaultSource(this);
+    if (!m_positionSource) {
+        setNativeStatus(QStringLiteral("no_provider"),
+                        QStringLiteral("Qt no encontro el proveedor de ubicacion de Android"));
+        return false;
+    }
+
+    m_positionSource->setPreferredPositioningMethods(
+        QGeoPositionInfoSource::AllPositioningMethods);
+    const int minimum = m_positionSource->minimumUpdateInterval();
+    m_positionSource->setUpdateInterval(qMax(kContinuousIntervalMs, minimum));
+
+    connect(m_positionSource, &QGeoPositionInfoSource::positionUpdated,
+            this, &PermissionHelper::handlePositionUpdated);
+    connect(m_positionSource, &QGeoPositionInfoSource::errorOccurred,
+            this, [this](QGeoPositionInfoSource::Error error) {
+                if (error == QGeoPositionInfoSource::UpdateTimeoutError) {
+                    handleUpdateTimeout();
+                    return;
+                }
+                handleSourceError(static_cast<int>(error));
+            });
+
+    qInfo() << "[InGe+ V38.12] position source created:"
+            << m_positionSource->sourceName()
+            << "minimum interval:" << minimum
+            << "methods:" << m_positionSource->supportedPositioningMethods();
+    return true;
+}
+
+bool PermissionHelper::startNativeLocationUpdates()
+{
+    if (!hasLocationPermission()) {
+        setNativeStatus(QStringLiteral("permission_denied"),
+                        QStringLiteral("Permiso de ubicacion no concedido"));
+        return false;
+    }
+    if (!isLocationServiceEnabled()) {
+        setNativeStatus(QStringLiteral("service_disabled"),
+                        QStringLiteral("La ubicacion del dispositivo esta desactivada"));
+        return false;
+    }
+    if (!ensurePositionSource())
+        return false;
+
+    // Idempotent: never stop/recreate the source when the location button is
+    // pressed again. This is the key difference from the previous loop.
+    if (!m_nativeTracking) {
+        const QGeoPositionInfo cached = m_positionSource->lastKnownPosition(false);
+        if (cached.isValid())
+            acceptPosition(cached);
+        m_positionSource->startUpdates();
+        setNativeTracking(true);
+        m_watchdogTimer.start();
+        qInfo() << "[InGe+ V38.12] continuous location started";
+    }
+
+    setNativeStatus(m_nativeHasFix ? QStringLiteral("tracking")
+                                   : QStringLiteral("searching"),
+                    QString());
+    m_positionSource->requestUpdate(kImmediateTimeoutMs);
+    return true;
+}
+
+void PermissionHelper::stopNativeLocationUpdates()
+{
+    m_watchdogTimer.stop();
+    if (m_positionSource)
+        m_positionSource->stopUpdates();
+    setNativeTracking(false);
+    setNativeStatus(m_nativeHasFix ? QStringLiteral("paused_with_fix")
+                                   : QStringLiteral("idle"),
+                    QString());
+}
+
+void PermissionHelper::refreshNativeLocation()
+{
+    if (!m_nativeTracking) {
+        startNativeLocationUpdates();
+        return;
+    }
+    requestImmediateLocationUpdate();
+}
+
+bool PermissionHelper::requestImmediateLocationUpdate()
+{
+    if (!m_nativeTracking && !startNativeLocationUpdates())
+        return false;
+    if (!m_positionSource)
+        return false;
+
+    setNativeStatus(m_nativeHasFix ? QStringLiteral("tracking")
+                                   : QStringLiteral("searching"),
+                    QString());
+    m_positionSource->requestUpdate(kImmediateTimeoutMs);
+    qInfo() << "[InGe+ V38.12] immediate location requested";
+    return true;
+}
+
+void PermissionHelper::handlePositionUpdated(const QGeoPositionInfo &info)
+{
+    acceptPosition(info);
+}
+
+bool PermissionHelper::acceptPosition(const QGeoPositionInfo &info)
+{
+    if (!info.isValid() || !info.coordinate().isValid())
+        return false;
+
+    const QGeoCoordinate coordinate = info.coordinate();
+    const double latitude = coordinate.latitude();
+    const double longitude = coordinate.longitude();
+    const bool hasAccuracy = info.hasAttribute(QGeoPositionInfo::HorizontalAccuracy);
+    const double accuracy = hasAccuracy
+            ? info.attribute(QGeoPositionInfo::HorizontalAccuracy)
+            : qQNaN();
+    const qint64 timestamp = info.timestamp().isValid()
+            ? info.timestamp().toMSecsSinceEpoch()
+            : QDateTime::currentMSecsSinceEpoch();
+    const qint64 age = qMax<qint64>(0, QDateTime::currentMSecsSinceEpoch() - timestamp);
+
+    if (!qIsFinite(latitude) || !qIsFinite(longitude)
+            || latitude < -90.0 || latitude > 90.0
+            || longitude < -180.0 || longitude > 180.0)
+        return false;
+
+    if (!qIsFinite(accuracy) || accuracy <= 0.0
+            || accuracy > kMaximumAcceptedAccuracyMeters) {
+        setNativeStatus(QStringLiteral("searching"), QString());
+        qInfo() << "[InGe+ V38.12] fix rejected by accuracy:" << accuracy;
+        return false;
+    }
+
+    if (age > kMaximumFixAgeMs) {
+        qInfo() << "[InGe+ V38.12] stale fix rejected age ms:" << age;
+        return false;
+    }
+
+    bool accept = !m_nativeHasFix;
+    if (m_nativeHasFix) {
+        const qint64 currentAge = m_nativeTimestampMs > 0
+                ? qMax<qint64>(0, QDateTime::currentMSecsSinceEpoch() - m_nativeTimestampMs)
+                : std::numeric_limits<qint64>::max();
+        const bool newer = timestamp >= m_nativeTimestampMs;
+        const bool better = accuracy + 5.0 < m_nativeAccuracy;
+        const bool currentStale = currentAge > 15000;
+        const bool acceptableRegression = accuracy <= qMax(120.0, m_nativeAccuracy * 1.8);
+        accept = better || (newer && currentStale) || (newer && acceptableRegression);
+    }
+
+    if (!accept)
+        return false;
+
+    m_nativeHasFix = true;
+    m_nativeLatitude = latitude;
+    m_nativeLongitude = longitude;
+    m_nativeAltitude = qIsFinite(coordinate.altitude())
+            ? coordinate.altitude()
+            : qQNaN();
+    m_nativeAccuracy = accuracy;
+    m_nativeTimestampMs = timestamp;
+    m_lastAcceptedMonotonicMs = QDateTime::currentMSecsSinceEpoch();
+    m_nativeProvider = m_positionSource && !m_positionSource->sourceName().isEmpty()
+            ? m_positionSource->sourceName()
+            : QStringLiteral("Android");
+
+    setNativeStatus(QStringLiteral("tracking"), QString());
+    emit nativeLocationChanged();
+
+    qInfo() << "[InGe+ V38.12] location accepted"
+            << m_nativeLatitude << m_nativeLongitude
+            << "accuracy:" << m_nativeAccuracy
+            << "provider:" << m_nativeProvider;
+    return true;
+}
+
+void PermissionHelper::handleSourceError(int errorValue)
+{
+    const auto error = static_cast<QGeoPositionInfoSource::Error>(errorValue);
+    if (error == QGeoPositionInfoSource::NoError)
+        return;
+
+    const QString text = errorTextForSource(error);
+    if (error == QGeoPositionInfoSource::AccessError) {
+        setNativeStatus(QStringLiteral("permission_denied"), text);
+        setNativeTracking(false);
+    } else if (error == QGeoPositionInfoSource::ClosedError) {
+        setNativeStatus(QStringLiteral("service_disabled"), text);
+        setNativeTracking(false);
+    } else if (error == QGeoPositionInfoSource::UnknownSourceError) {
+        setNativeStatus(QStringLiteral("no_provider"), text);
+    } else {
+        // A timeout must not stop continuous tracking. Android often needs a
+        // few seconds to obtain a satellite fix after returning from indoors.
+        setNativeStatus(QStringLiteral("searching"), QString());
+    }
+    qWarning() << "[InGe+ V38.12] position source error:" << error << text;
+}
+
+void PermissionHelper::handleUpdateTimeout()
+{
+    if (!m_nativeTracking)
+        return;
+    setNativeStatus(m_nativeHasFix ? QStringLiteral("tracking")
+                                   : QStringLiteral("searching"),
+                    QString());
+    qInfo() << "[InGe+ V38.12] one-shot update timed out; continuous tracking remains active";
+}
+
+void PermissionHelper::setNativeTracking(bool tracking)
+{
+    if (m_nativeTracking == tracking)
+        return;
+    m_nativeTracking = tracking;
+    emit nativeTrackingChanged();
+}
+
+void PermissionHelper::setNativeStatus(const QString &status, const QString &error)
+{
+    if (m_nativeLocationStatus == status && m_nativeLocationError == error)
+        return;
+    m_nativeLocationStatus = status;
+    m_nativeLocationError = error;
+    emit nativeLocationStatusChanged();
+}

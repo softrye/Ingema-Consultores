@@ -1,0 +1,2551 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>TaludSueloWindow</class>
+ <widget class="QMainWindow" name="TaludSueloWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1233</width>
+    <height>1039</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">/* =========================================================
+   InGe+ — TaludSueloWindow
+   SOLO ESTILO VISUAL
+   Depurado:
+   - Sin bloques repetidos de hover/pressed para clear / pick / foto grande
+   - Franja tipología unificada
+   ========================================================= */
+
+/* =========================
+   Base
+   ========================= */
+QMainWindow#TaludSueloWindow,
+QWidget#centralwidget {
+    background-color: #005282;
+    color: #0F1F2A;
+}
+
+/* =========================
+   Scroll principal
+   ========================= */
+QAbstractScrollArea#scrollAreaMain,
+QScrollArea#scrollAreaMain,
+QScrollArea#scrollAreaMain &gt; QWidget#qt_scrollarea_viewport,
+QWidget#scrollAreaWidgetContents {
+    background: transparent;
+    border: none;
+}
+
+/* =========================
+   Scrollbars
+   ========================= */
+QMainWindow#TaludSueloWindow QScrollBar:vertical,
+QMainWindow#TaludSueloWindow QScrollBar:horizontal {
+    background: transparent;
+    border: none;
+}
+
+QMainWindow#TaludSueloWindow QScrollBar::handle:vertical,
+QMainWindow#TaludSueloWindow QScrollBar::handle:horizontal {
+    background: rgba(0,135,174,55);
+    border-radius: 6px;
+}
+
+QMainWindow#TaludSueloWindow QScrollBar::handle:vertical:hover,
+QMainWindow#TaludSueloWindow QScrollBar::handle:horizontal:hover {
+    background: #0087AE;
+}
+
+QMainWindow#TaludSueloWindow QScrollBar::add-line:vertical,
+QMainWindow#TaludSueloWindow QScrollBar::sub-line:vertical,
+QMainWindow#TaludSueloWindow QScrollBar::add-line:horizontal,
+QMainWindow#TaludSueloWindow QScrollBar::sub-line:horizontal {
+    background: transparent;
+    border: none;
+}
+
+/* =========================
+   Contenedores grandes
+   ========================= */
+QFrame#frameHeader,
+QFrame#frameContentLeft,
+QFrame#frameContentRight {
+    background-color: #D9EDF3;
+    border: 1px solid rgba(255,255,255,18);
+    border-radius: 12px;
+}
+
+/* =========================
+   Frames principales oscuros
+   ========================= */
+QFrame#frameHeaderLogo,
+QFrame#frameHeaderDatos,
+QFrame#frameGeoTalud,
+QFrame#frameCaracteristicas,
+QFrame#frameEstadoTalud,
+QFrame#framePerfilTransversal,
+QFrame#frameObservaciones,
+QFrame#frameFotografia,
+QFrame#frameFotografiaAerea {
+    background-color: #005282;
+    border: 1px solid rgba(255,255,255,22);
+    border-radius: 8px;
+}
+
+/* =========================
+   Frames internos claros
+   ========================= */
+QFrame#frameDatos,
+QFrame#frameDatosEstabilidad,
+QFrame#framePaint {
+    background-color: #CCE7EF;
+    border: 1px solid rgba(0,82,130,45);
+    border-radius: 8px;
+}
+
+/* =========================
+   Contenedores de opciones
+   ========================= */
+QFrame#frameEstbOptions,
+QFrame#frameOptionsA,
+QFrame#frameOptionsB,
+QFrame#frameOptionsC,
+QFrame#frameOptionsD,
+QFrame#frameOptionsE,
+QFrame#frameOptionsF {
+    background-color: #D9EDF3;
+    border: 1px solid #9FCFDD;
+    border-radius: 8px;
+}
+
+/* =========================
+   Labels por defecto
+   ========================= */
+QMainWindow#TaludSueloWindow QLabel {
+    background: transparent;
+    color: #0F1F2A;
+    border: none;
+}
+
+/* =========================
+   Franja lateral tipología
+   ========================= */
+QFrame#frameTipologia {
+    background-color: #005282;
+    border: 1px solid rgba(255,255,255,22);
+    border-radius: 8px;
+}
+
+QMainWindow#TaludSueloWindow QFrame#frameTipologia QLabel,
+QMainWindow#TaludSueloWindow #lblTipologiaVertical {
+    background: transparent;
+    color: #FFFFFF;
+    border: none;
+    font-weight: bold;
+}
+
+/* =========================
+   Títulos blancos
+   ========================= */
+QMainWindow#TaludSueloWindow QFrame#frameHeaderDatos QLabel,
+QMainWindow#TaludSueloWindow QFrame#frameGeoTalud QLabel,
+QMainWindow#TaludSueloWindow QLabel#lblCaracteristicas,
+QMainWindow#TaludSueloWindow QLabel#lblEstadoTalud,
+QMainWindow#TaludSueloWindow QLabel#lblPerfilTransversal,
+QMainWindow#TaludSueloWindow QLabel#lblObservaciones,
+QMainWindow#TaludSueloWindow QLabel#lblFotografia,
+QMainWindow#TaludSueloWindow QLabel#lblFotografiaAerea {
+    color: #FFFFFF;
+    font-weight: bold;
+}
+
+/* =========================
+   Inputs
+   ========================= */
+QMainWindow#TaludSueloWindow QLineEdit,
+QMainWindow#TaludSueloWindow QDoubleSpinBox,
+QMainWindow#TaludSueloWindow QTextEdit,
+QMainWindow#TaludSueloWindow QPlainTextEdit,
+QMainWindow#TaludSueloWindow QDateEdit,
+QMainWindow#TaludSueloWindow QComboBox {
+    background-color: #FFFFFF;
+    color: #0F1F2A;
+    border: 1px solid rgba(0,135,174,70);
+    border-radius: 6px;
+}
+QMainWindow#TaludSueloWindow QLineEdit:focus,
+QMainWindow#TaludSueloWindow QDoubleSpinBox:focus,
+QMainWindow#TaludSueloWindow QTextEdit:focus,
+QMainWindow#TaludSueloWindow QPlainTextEdit:focus,
+QMainWindow#TaludSueloWindow QDateEdit:focus,
+QMainWindow#TaludSueloWindow QComboBox:focus {
+    border: 1px solid rgba(0,135,174,180);
+}
+/* =========================
+   Observaciones
+   ========================= */
+QTextEdit#textObservaciones,
+QPlainTextEdit#textObservaciones {
+    background-color: #FFFFFF;
+    color: #0F1F2A;
+    border: 1px solid rgba(0,135,174,80);
+    border-radius: 12px;
+}
+
+QTextEdit#textObservaciones QWidget,
+QPlainTextEdit#textObservaciones QWidget {
+    background: transparent;
+    border-radius: 12px;
+}
+
+/* =========================
+   Botones base
+   ========================= */
+QMainWindow#TaludSueloWindow QPushButton {
+    background-color: #FFFFFF;
+    color: #005282;
+    border: 1px solid rgba(0,135,174,70);
+    border-radius: 12px;
+    padding: 8px 12px;
+    font-weight: bold;
+}
+
+QMainWindow#TaludSueloWindow QPushButton:hover {
+    background-color: rgba(0,135,174,6);
+}
+
+QMainWindow#TaludSueloWindow QPushButton:pressed {
+    background-color: rgba(0,135,174,10);
+}
+
+/* =========================
+   Header: ajuste visual
+   ========================= */
+QMainWindow#TaludSueloWindow QFrame#frameHeader QPushButton {
+    padding: 6px 10px;
+    border-radius: 10px;
+}
+
+/* =========================
+   CTA naranja
+   ========================= */
+QMainWindow#TaludSueloWindow QPushButton#btnActualizarCoordenadas,
+QMainWindow#TaludSueloWindow QPushButton#btnTituloTalud {
+    background-color: #FDAC11;
+    color: #FFFFFF;
+    border: 2px dashed #FFFFFF;
+    font-weight: bold;
+}
+
+QMainWindow#TaludSueloWindow QPushButton#btnActualizarCoordenadas:hover,
+QMainWindow#TaludSueloWindow QPushButton#btnTituloTalud:hover {
+    background-color: #FFB52B;
+    color: #FFFFFF;
+    border: 2px dashed #FFFFFF;
+}
+
+QMainWindow#TaludSueloWindow QPushButton#btnActualizarCoordenadas:pressed,
+QMainWindow#TaludSueloWindow QPushButton#btnTituloTalud:pressed {
+    background-color: #E59A00;
+    color: #FFFFFF;
+    border: 2px dashed #FFFFFF;
+}
+
+/* =========================
+   Botón logo
+   ========================= */
+QMainWindow#TaludSueloWindow QPushButton#btnLogo {
+    background-color: #FFFFFF;
+    color: #0F1F2A;
+    border: 1px solid rgba(0,135,174,55);
+    border-radius: 12px;
+    padding: 8px;
+    font-weight: bold;
+}
+
+QMainWindow#TaludSueloWindow QPushButton#btnLogo:hover {
+    background-color: #FFFFFF;
+    border: 1px solid rgba(0,135,174,110);
+}
+
+QMainWindow#TaludSueloWindow QPushButton#btnLogo:pressed {
+    background-color: #FFFFFF;
+    border: 1px solid rgba(0,82,130,140);
+}
+
+/* =========================
+   Checkboxes
+   ========================= */
+QMainWindow#TaludSueloWindow QCheckBox {
+    background: transparent;
+    color: #0F1F2A;
+    spacing: 6px;
+}
+
+QMainWindow#TaludSueloWindow QCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+    background-color: #FFFFFF;
+    border: 1px solid #7FB8CB;
+    border-radius: 3px;
+}
+
+QMainWindow#TaludSueloWindow QCheckBox::indicator:hover {
+    background-color: #F5FBFD;
+    border: 1px solid #0087AE;
+}
+
+QMainWindow#TaludSueloWindow QCheckBox::indicator:checked {
+    width: 14px;
+    height: 14px;
+    background-color: #FFFFFF;
+    border: 1px solid #6FC04A;
+    image: url(:/icons/images/check_green.svg);
+}
+
+QMainWindow#TaludSueloWindow QCheckBox::indicator:checked:hover {
+    background-color: #F8FFF4;
+    border: 1px solid #62B53E;
+    image: url(:/icons/images/check_green.svg);
+}
+
+/* =========================
+   Combo / Date visual
+   ========================= */
+QMainWindow#TaludSueloWindow QComboBox::drop-down,
+QMainWindow#TaludSueloWindow QDateEdit::drop-down {
+    border-left: 1px solid #A7D2DF;
+    background-color: #F4FBFD;
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
+}
+
+QMainWindow#TaludSueloWindow QComboBox::drop-down:hover,
+QMainWindow#TaludSueloWindow QDateEdit::drop-down:hover {
+    background-color: #EAF7FA;
+}
+
+QMainWindow#TaludSueloWindow QComboBox::drop-down:pressed,
+QMainWindow#TaludSueloWindow QDateEdit::drop-down:pressed {
+    background-color: #DDEFF5;
+}
+
+/* =========================
+   Flecha del ComboBox / DateEdit
+   ========================= */
+QMainWindow#TaludSueloWindow QComboBox::down-arrow,
+QMainWindow#TaludSueloWindow QDateEdit::down-arrow {
+    image: url(:/icons/chevron-down.svg);
+}
+
+/* =========================
+   Popup del ComboBox
+   ========================= */
+QMainWindow#TaludSueloWindow QComboBoxPrivateContainer {
+    background-color: #005282;
+    border: 1px solid rgba(255,255,255,28);
+    border-radius: 12px;
+    padding: 4px;
+}
+
+QMainWindow#TaludSueloWindow QComboBoxPrivateContainer QAbstractItemView {
+    background-color: #005282;
+    border: none;
+    outline: 0;
+    color: #FFFFFF;
+    border-radius: 10px;
+}
+
+QMainWindow#TaludSueloWindow QComboBoxPrivateContainer QAbstractItemView::viewport {
+    background-color: #005282;
+    border-radius: 10px;
+}
+
+QMainWindow#TaludSueloWindow QComboBoxPrivateContainer QAbstractItemView::item {
+    color: #FFFFFF;
+    background: transparent;
+}
+
+QMainWindow#TaludSueloWindow QComboBoxPrivateContainer QAbstractItemView::item:hover {
+    background-color: #FFFFFF;
+    color: #0F1F2A;
+}
+
+QMainWindow#TaludSueloWindow QComboBoxPrivateContainer QAbstractItemView::item:selected {
+    background-color: rgba(255,255,255,220);
+    color: #0F1F2A;
+}
+
+/* =========================
+   Menús
+   ========================= */
+QMenu {
+    background-color: #005282;
+    border: 1px solid rgba(255,255,255,28);
+    border-radius: 12px;
+    padding: 4px;
+}
+
+QMenu::item {
+    color: #FFFFFF;
+    border-radius: 8px;
+}
+
+QMenu::item:selected {
+    background: #FFFFFF;
+    color: #0F1F2A;
+}
+
+/* =========================
+   Color semántico preparado
+   ========================= */
+QWidget[status=&quot;success&quot;],
+QFrame[status=&quot;success&quot;],
+QPushButton[status=&quot;success&quot;] {
+    border-color: #6FC04A;
+}
+
+/* =========================
+   TALUD — toolClear logo
+   ========================= */
+QMainWindow#TaludSueloWindow QFrame#frameHeader QToolButton#toolClear {
+    background-color: #FFFFFF;
+    border: 1px solid rgba(0,135,174,70);
+    border-radius: 8px;
+    padding: 2px;
+    min-width: 24px;
+    min-height: 24px;
+    max-width: 24px;
+    max-height: 24px;
+    qproperty-iconSize: 14px 14px;
+}
+
+QMainWindow#TaludSueloWindow QFrame#frameHeader QToolButton#toolClear:hover {
+    background-color: #FFFFFF;
+    border: 1px solid #0087AE;
+}
+
+QMainWindow#TaludSueloWindow QFrame#frameHeader QToolButton#toolClear:pressed {
+    background-color: #0087AE;
+    border: 1px solid #FFFFFF;
+}
+
+/* =========================
+   TALUD — pick / clear fotos
+   ========================= */
+QMainWindow#TaludSueloWindow QToolButton#toolFotoPick,
+QMainWindow#TaludSueloWindow QToolButton#toolFotoClear,
+QMainWindow#TaludSueloWindow QToolButton#toolFotoAereaPick,
+QMainWindow#TaludSueloWindow QToolButton#toolFotoAereaClear {
+    background-color: #FFFFFF;
+    border: 1px solid rgba(0,135,174,70);
+    border-radius: 10px;
+    padding: 2px;
+    min-width: 28px;
+    min-height: 28px;
+    max-width: 28px;
+    max-height: 28px;
+    qproperty-iconSize: 16px 16px;
+}
+
+QMainWindow#TaludSueloWindow QToolButton#toolFotoPick:hover,
+QMainWindow#TaludSueloWindow QToolButton#toolFotoClear:hover,
+QMainWindow#TaludSueloWindow QToolButton#toolFotoAereaPick:hover,
+QMainWindow#TaludSueloWindow QToolButton#toolFotoAereaClear:hover {
+    background-color: #FFFFFF;
+    border: 1px solid #0087AE;
+}
+
+QMainWindow#TaludSueloWindow QToolButton#toolFotoPick:pressed,
+QMainWindow#TaludSueloWindow QToolButton#toolFotoClear:pressed,
+QMainWindow#TaludSueloWindow QToolButton#toolFotoAereaPick:pressed,
+QMainWindow#TaludSueloWindow QToolButton#toolFotoAereaClear:pressed {
+    background-color: #0087AE;
+    border: 1px solid #FFFFFF;
+}
+
+/* =========================================================
+   TALUD — BOTONES GRANDES DE CÁMARA
+   Inversión real + icono más grande
+   ========================================================= */
+QMainWindow#TaludSueloWindow QPushButton#btnFotografia,
+QMainWindow#TaludSueloWindow QPushButton#btnFotografiaAerea {
+    background-color: #FFFFFF;
+    color: #005282;
+    border: 2px solid #005282;
+    border-radius: 16px;
+    padding: 0px;
+    qproperty-iconSize: 180px 180px;
+}
+
+QMainWindow#TaludSueloWindow QPushButton#btnFotografia:hover,
+QMainWindow#TaludSueloWindow QPushButton#btnFotografiaAerea:hover {
+    background-color: #FFFFFF;
+    border: 2px solid #005282;
+    color: #0087AE;
+}
+
+QMainWindow#TaludSueloWindow QPushButton#btnFotografia:pressed,
+QMainWindow#TaludSueloWindow QPushButton#btnFotografiaAerea:pressed {
+    background-color: #005282;
+    border: 2px solid #FFFFFF;
+    color: #FFFFFF;
+}
+
+/* =========================
+   TALUD — títulos de fotos como Calicata
+   ========================= */
+QMainWindow#TaludSueloWindow QFrame#frameContentRight QLabel#lblFotografia,
+QMainWindow#TaludSueloWindow QFrame#frameContentRight QLabel#lblFotografiaAerea {
+    color: #FFFFFF;
+    background-color: #005282;
+    border: none;
+    border-radius: 8px;
+    font-weight: bold;
+    padding: 4px 10px;
+}</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <property name="autoFillBackground">
+    <bool>false</bool>
+   </property>
+   <layout class="QGridLayout" name="gridLayout" rowstretch="3" columnstretch="5" rowminimumheight="0" columnminimumwidth="0">
+    <property name="bottomMargin">
+     <number>0</number>
+    </property>
+    <item row="0" column="0">
+     <widget class="QScrollArea" name="scrollAreaMain">
+      <property name="frameShape">
+       <enum>QFrame::Shape::NoFrame</enum>
+      </property>
+      <property name="verticalScrollBarPolicy">
+       <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOn</enum>
+      </property>
+      <property name="horizontalScrollBarPolicy">
+       <enum>Qt::ScrollBarPolicy::ScrollBarAsNeeded</enum>
+      </property>
+      <property name="widgetResizable">
+       <bool>true</bool>
+      </property>
+      <widget class="QWidget" name="scrollAreaWidgetContents">
+       <property name="geometry">
+        <rect>
+         <x>-64</x>
+         <y>-303</y>
+         <width>1258</width>
+         <height>1264</height>
+        </rect>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="autoFillBackground">
+        <bool>false</bool>
+       </property>
+       <layout class="QGridLayout" name="gridLayout_8" rowstretch="3,0" columnstretch="5,3">
+        <property name="leftMargin">
+         <number>0</number>
+        </property>
+        <property name="topMargin">
+         <number>0</number>
+        </property>
+        <property name="rightMargin">
+         <number>0</number>
+        </property>
+        <property name="bottomMargin">
+         <number>0</number>
+        </property>
+        <item row="0" column="0" colspan="2">
+         <widget class="QFrame" name="frameHeader">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="frameShape">
+           <enum>QFrame::Shape::StyledPanel</enum>
+          </property>
+          <property name="frameShadow">
+           <enum>QFrame::Shadow::Raised</enum>
+          </property>
+          <layout class="QGridLayout" name="gridLayout_2" columnstretch="2,5">
+           <item row="0" column="0">
+            <widget class="QFrame" name="frameHeaderLogo">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>0</width>
+               <height>0</height>
+              </size>
+             </property>
+             <property name="frameShadow">
+              <enum>QFrame::Shadow::Plain</enum>
+             </property>
+             <layout class="QHBoxLayout" name="horizontalLayout_2">
+              <property name="spacing">
+               <number>6</number>
+              </property>
+              <property name="leftMargin">
+               <number>10</number>
+              </property>
+              <property name="topMargin">
+               <number>13</number>
+              </property>
+              <property name="rightMargin">
+               <number>7</number>
+              </property>
+              <property name="bottomMargin">
+               <number>13</number>
+              </property>
+              <item>
+               <widget class="QPushButton" name="btnLogo">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="font">
+                 <font>
+                  <pointsize>10</pointsize>
+                  <bold>true</bold>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>INSERTAR LOGO</string>
+                </property>
+                <property name="iconSize">
+                 <size>
+                  <width>25</width>
+                  <height>25</height>
+                 </size>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QToolButton" name="toolClear">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="text">
+                 <string>...</string>
+                </property>
+                <property name="icon">
+                 <iconset theme="QIcon::ThemeIcon::EditClear"/>
+                </property>
+                <property name="autoRaise">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item row="1" column="0" colspan="2">
+            <widget class="QFrame" name="frameGeoTalud">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="layoutDirection">
+              <enum>Qt::LayoutDirection::LeftToRight</enum>
+             </property>
+             <property name="frameShape">
+              <enum>QFrame::Shape::StyledPanel</enum>
+             </property>
+             <property name="frameShadow">
+              <enum>QFrame::Shadow::Raised</enum>
+             </property>
+             <layout class="QHBoxLayout" name="horizontalLayout" stretch="4,19,2,5">
+              <item>
+               <widget class="QLabel" name="lblDescripcion">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="font">
+                 <font>
+                  <pointsize>10</pointsize>
+                  <bold>true</bold>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;DESCRIPCIÓN LITOLÓGICA:&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLineEdit" name="txtDescripcion">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>0</width>
+                  <height>25</height>
+                 </size>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="lblEdad">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="font">
+                 <font>
+                  <pointsize>10</pointsize>
+                  <bold>true</bold>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;EDAD:&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLineEdit" name="txtEdad">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>0</width>
+                  <height>25</height>
+                 </size>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item row="0" column="1">
+            <widget class="QFrame" name="frameHeaderDatos">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="autoFillBackground">
+              <bool>false</bool>
+             </property>
+             <property name="frameShape">
+              <enum>QFrame::Shape::StyledPanel</enum>
+             </property>
+             <property name="frameShadow">
+              <enum>QFrame::Shadow::Raised</enum>
+             </property>
+             <layout class="QGridLayout" name="gridLayoutHeaderDatos" rowstretch="2,0,0" rowminimumheight="0,0,0">
+              <property name="sizeConstraint">
+               <enum>QLayout::SizeConstraint::SetDefaultConstraint</enum>
+              </property>
+              <property name="leftMargin">
+               <number>8</number>
+              </property>
+              <property name="topMargin">
+               <number>5</number>
+              </property>
+              <property name="rightMargin">
+               <number>8</number>
+              </property>
+              <property name="bottomMargin">
+               <number>5</number>
+              </property>
+              <property name="horizontalSpacing">
+               <number>10</number>
+              </property>
+              <property name="verticalSpacing">
+               <number>3</number>
+              </property>
+              <item row="1" column="2">
+               <widget class="QLineEdit" name="txtGeologo">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>140</width>
+                  <height>24</height>
+                 </size>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="3">
+               <widget class="QLabel" name="lblUTMX">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>50</width>
+                  <height>0</height>
+                 </size>
+                </property>
+                <property name="font">
+                 <font>
+                  <pointsize>10</pointsize>
+                  <bold>true</bold>
+                  <kerning>true</kerning>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;X UTM&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="7" colspan="4">
+               <widget class="QLineEdit" name="txtFichaTaludN">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>120</width>
+                  <height>25</height>
+                 </size>
+                </property>
+                <property name="autoFillBackground">
+                 <bool>false</bool>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item row="2" column="9" colspan="2">
+               <widget class="QLineEdit" name="txtHojaTotal">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>50</width>
+                  <height>24</height>
+                 </size>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="3">
+               <widget class="QLabel" name="lblUTMY">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>50</width>
+                  <height>0</height>
+                 </size>
+                </property>
+                <property name="font">
+                 <font>
+                  <pointsize>10</pointsize>
+                  <bold>true</bold>
+                  <kerning>true</kerning>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;Y UTM&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item row="2" column="8">
+               <widget class="QLabel" name="lblde">
+                <property name="font">
+                 <font>
+                  <pointsize>10</pointsize>
+                  <bold>true</bold>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;de&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="1">
+               <widget class="QLabel" name="lblGeologo">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="font">
+                 <font>
+                  <pointsize>10</pointsize>
+                  <bold>true</bold>
+                  <kerning>true</kerning>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;GEÓLOGO&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item row="2" column="3">
+               <widget class="QLabel" name="lblZona">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>50</width>
+                  <height>0</height>
+                 </size>
+                </property>
+                <property name="font">
+                 <font>
+                  <pointsize>10</pointsize>
+                  <bold>true</bold>
+                  <kerning>true</kerning>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;ZONA&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item row="2" column="6">
+               <widget class="QLabel" name="lblHojaN">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="font">
+                 <font>
+                  <pointsize>10</pointsize>
+                  <bold>true</bold>
+                  <kerning>true</kerning>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;HOJA Nº&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="4">
+               <widget class="QLineEdit" name="txtUTMY">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>150</width>
+                  <height>24</height>
+                 </size>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="6">
+               <widget class="QLabel" name="lblFichaTaludN">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="font">
+                 <font>
+                  <pointsize>10</pointsize>
+                  <bold>true</bold>
+                  <kerning>true</kerning>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;FICHA DE TALUD Nº&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="2">
+               <widget class="QDateEdit" name="dateEdit">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>140</width>
+                  <height>25</height>
+                 </size>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignCenter</set>
+                </property>
+                <property name="specialValueText">
+                 <string>00/00/0000</string>
+                </property>
+                <property name="dateTime">
+                 <datetime>
+                  <hour>0</hour>
+                  <minute>0</minute>
+                  <second>0</second>
+                  <year>2026</year>
+                  <month>3</month>
+                  <day>25</day>
+                 </datetime>
+                </property>
+                <property name="minimumDate">
+                 <date>
+                  <year>1900</year>
+                  <month>1</month>
+                  <day>1</day>
+                 </date>
+                </property>
+                <property name="displayFormat">
+                 <string>dd/MM/yyyy</string>
+                </property>
+                <property name="calendarPopup">
+                 <bool>true</bool>
+                </property>
+                <property name="date">
+                 <date>
+                  <year>2026</year>
+                  <month>3</month>
+                  <day>25</day>
+                 </date>
+                </property>
+               </widget>
+              </item>
+              <item row="2" column="7">
+               <widget class="QLineEdit" name="txtHojaActual">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>50</width>
+                  <height>24</height>
+                 </size>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item row="2" column="2">
+               <widget class="NoWheelComboBox" name="comboLadoVia">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>140</width>
+                  <height>24</height>
+                 </size>
+                </property>
+                <property name="editable">
+                 <bool>false</bool>
+                </property>
+                <property name="frame">
+                 <bool>true</bool>
+                </property>
+                <item>
+                 <property name="text">
+                  <string>-- Seleccione lado --</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>Derecho</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>Izquierdo</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>Ambos</string>
+                 </property>
+                </item>
+               </widget>
+              </item>
+              <item row="2" column="4">
+               <widget class="QLineEdit" name="txtZona">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>150</width>
+                  <height>24</height>
+                 </size>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item row="2" column="1">
+               <widget class="QLabel" name="lblLadoVia">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="font">
+                 <font>
+                  <pointsize>10</pointsize>
+                  <bold>true</bold>
+                  <kerning>true</kerning>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;LADO DE VÍA&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="6">
+               <widget class="QLabel" name="lblProgresiva">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="font">
+                 <font>
+                  <pointsize>10</pointsize>
+                  <bold>true</bold>
+                  <kerning>true</kerning>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;PROGRESIVA&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="4">
+               <widget class="QLineEdit" name="txtUTMX">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>150</width>
+                  <height>25</height>
+                 </size>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="7" colspan="4">
+               <widget class="QLineEdit" name="txtProgresiva">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>120</width>
+                  <height>24</height>
+                 </size>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="1">
+               <widget class="QLabel" name="lblFecha">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="font">
+                 <font>
+                  <pointsize>10</pointsize>
+                  <bold>true</bold>
+                  <kerning>true</kerning>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;FECHA&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="0" rowspan="3">
+               <widget class="QPushButton" name="btnTituloTalud">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>60</width>
+                  <height>0</height>
+                 </size>
+                </property>
+                <property name="font">
+                 <font>
+                  <pointsize>10</pointsize>
+                  <bold>true</bold>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>Título
+Talud</string>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="5" rowspan="3">
+               <widget class="QPushButton" name="btnActualizarCoordenadas">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>90</width>
+                  <height>0</height>
+                 </size>
+                </property>
+                <property name="font">
+                 <font>
+                  <pointsize>10</pointsize>
+                  <bold>true</bold>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>Actualizar
+coordenadas</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QFrame" name="frameContentLeft">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="frameShape">
+           <enum>QFrame::Shape::StyledPanel</enum>
+          </property>
+          <property name="frameShadow">
+           <enum>QFrame::Shadow::Raised</enum>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout" stretch="5,7,6">
+           <item>
+            <widget class="QFrame" name="frameCaracteristicas">
+             <property name="frameShape">
+              <enum>QFrame::Shape::StyledPanel</enum>
+             </property>
+             <property name="frameShadow">
+              <enum>QFrame::Shadow::Raised</enum>
+             </property>
+             <layout class="QVBoxLayout" name="verticalLayout_2" stretch="1,8">
+              <item>
+               <widget class="QLabel" name="lblCaracteristicas">
+                <property name="font">
+                 <font>
+                  <pointsize>11</pointsize>
+                  <bold>true</bold>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;CARACTERÍSTICAS GEOMÉTRICAS:&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QFrame" name="frameDatos">
+                <property name="frameShape">
+                 <enum>QFrame::Shape::StyledPanel</enum>
+                </property>
+                <property name="frameShadow">
+                 <enum>QFrame::Shadow::Raised</enum>
+                </property>
+                <layout class="QGridLayout" name="gridLayout_3" columnstretch="0,0,0,0,0">
+                 <item row="3" column="2">
+                  <widget class="QLabel" name="lblCuneton">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <pointsize>10</pointsize>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;CUNETÓN:&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="1" column="3" colspan="2">
+                  <widget class="QLineEdit" name="txtNBermas">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="minimumSize">
+                    <size>
+                     <width>200</width>
+                     <height>24</height>
+                    </size>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignmentFlag::AlignCenter</set>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="1" column="2">
+                  <widget class="QLabel" name="lblNBermas">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <pointsize>10</pointsize>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;N° BERMAS:&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="1" column="0">
+                  <widget class="QLabel" name="lblLongitud">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <pointsize>10</pointsize>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;LONGITUD:&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="0" column="4">
+                  <widget class="QCheckBox" name="checkNoBermas">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="minimumSize">
+                    <size>
+                     <width>0</width>
+                     <height>0</height>
+                    </size>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <pointsize>10</pointsize>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>NO</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="0" column="2">
+                  <widget class="QLabel" name="lblBermas">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <pointsize>10</pointsize>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;BERMAS:&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="2" column="0">
+                  <widget class="QLabel" name="lblDireccion">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <pointsize>10</pointsize>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;DIRECCIÓN:&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="0" column="0">
+                  <widget class="QLabel" name="lblAltura">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <pointsize>10</pointsize>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;ALTURA:&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="0" column="3">
+                  <widget class="QCheckBox" name="checkSiBermas">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="minimumSize">
+                    <size>
+                     <width>0</width>
+                     <height>0</height>
+                    </size>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <pointsize>10</pointsize>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>SI</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="2" column="1">
+                  <widget class="QLineEdit" name="txtDireccion">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="minimumSize">
+                    <size>
+                     <width>200</width>
+                     <height>24</height>
+                    </size>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignmentFlag::AlignCenter</set>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="3" column="0">
+                  <widget class="QLabel" name="lblInclinacion">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <pointsize>10</pointsize>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;INCLINACIÓN:&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="2" column="2">
+                  <widget class="QLabel" name="lblAnchoBermas">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <pointsize>10</pointsize>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;ANCHO DE BERMAS:&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="3" column="3">
+                  <widget class="QCheckBox" name="checkSiCuneton">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="minimumSize">
+                    <size>
+                     <width>0</width>
+                     <height>0</height>
+                    </size>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <pointsize>10</pointsize>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>SI</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="3" column="4">
+                  <widget class="QCheckBox" name="checkNoCuneton">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="minimumSize">
+                    <size>
+                     <width>0</width>
+                     <height>0</height>
+                    </size>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <pointsize>10</pointsize>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>NO</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="0" column="1">
+                  <widget class="QDoubleSpinBox" name="spnAltura">
+                   <property name="enabled">
+                    <bool>true</bool>
+                   </property>
+                   <property name="frame">
+                    <bool>true</bool>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignmentFlag::AlignCenter</set>
+                   </property>
+                   <property name="buttonSymbols">
+                    <enum>QAbstractSpinBox::ButtonSymbols::NoButtons</enum>
+                   </property>
+                   <property name="correctionMode">
+                    <enum>QAbstractSpinBox::CorrectionMode::CorrectToPreviousValue</enum>
+                   </property>
+                   <property name="keyboardTracking">
+                    <bool>false</bool>
+                   </property>
+                   <property name="suffix">
+                    <string> m</string>
+                   </property>
+                   <property name="maximum">
+                    <double>9999.989999999999782</double>
+                   </property>
+                   <property name="singleStep">
+                    <double>0.100000000000000</double>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="1" column="1">
+                  <widget class="QDoubleSpinBox" name="spnLongitud">
+                   <property name="frame">
+                    <bool>true</bool>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignmentFlag::AlignCenter</set>
+                   </property>
+                   <property name="buttonSymbols">
+                    <enum>QAbstractSpinBox::ButtonSymbols::NoButtons</enum>
+                   </property>
+                   <property name="keyboardTracking">
+                    <bool>false</bool>
+                   </property>
+                   <property name="suffix">
+                    <string> m</string>
+                   </property>
+                   <property name="maximum">
+                    <double>9999.989999999999782</double>
+                   </property>
+                   <property name="singleStep">
+                    <double>0.100000000000000</double>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="3" column="1">
+                  <widget class="QDoubleSpinBox" name="spnInclinacion">
+                   <property name="frame">
+                    <bool>true</bool>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignmentFlag::AlignCenter</set>
+                   </property>
+                   <property name="buttonSymbols">
+                    <enum>QAbstractSpinBox::ButtonSymbols::NoButtons</enum>
+                   </property>
+                   <property name="keyboardTracking">
+                    <bool>false</bool>
+                   </property>
+                   <property name="suffix">
+                    <string> °</string>
+                   </property>
+                   <property name="maximum">
+                    <double>90.000000000000000</double>
+                   </property>
+                   <property name="singleStep">
+                    <double>0.100000000000000</double>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="2" column="3" colspan="2">
+                  <widget class="QDoubleSpinBox" name="spnAnchoBermas">
+                   <property name="frame">
+                    <bool>true</bool>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignmentFlag::AlignCenter</set>
+                   </property>
+                   <property name="buttonSymbols">
+                    <enum>QAbstractSpinBox::ButtonSymbols::NoButtons</enum>
+                   </property>
+                   <property name="keyboardTracking">
+                    <bool>false</bool>
+                   </property>
+                   <property name="suffix">
+                    <string> m</string>
+                   </property>
+                   <property name="maximum">
+                    <double>9999.989999999999782</double>
+                   </property>
+                   <property name="singleStep">
+                    <double>0.100000000000000</double>
+                   </property>
+                  </widget>
+                 </item>
+                </layout>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <widget class="QFrame" name="frameEstadoTalud">
+             <property name="frameShape">
+              <enum>QFrame::Shape::StyledPanel</enum>
+             </property>
+             <property name="frameShadow">
+              <enum>QFrame::Shadow::Raised</enum>
+             </property>
+             <layout class="QVBoxLayout" name="verticalLayout_3" stretch="1,0">
+              <item>
+               <widget class="QLabel" name="lblEstadoTalud">
+                <property name="font">
+                 <font>
+                  <pointsize>11</pointsize>
+                  <bold>true</bold>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;ESTADO DEL TALUD / INESTABILIDADES:&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QFrame" name="frameDatosEstabilidad">
+                <property name="frameShape">
+                 <enum>QFrame::Shape::StyledPanel</enum>
+                </property>
+                <property name="frameShadow">
+                 <enum>QFrame::Shadow::Raised</enum>
+                </property>
+                <layout class="QGridLayout" name="gridLayout_4">
+                 <item row="1" column="1">
+                  <widget class="QLabel" name="lblDeslizamientos">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;A. DESLIZAMIENTOS&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="1" column="0" rowspan="7">
+                  <widget class="QFrame" name="frameTipologia">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="minimumSize">
+                    <size>
+                     <width>20</width>
+                     <height>0</height>
+                    </size>
+                   </property>
+                   <property name="frameShape">
+                    <enum>QFrame::Shape::StyledPanel</enum>
+                   </property>
+                   <property name="frameShadow">
+                    <enum>QFrame::Shadow::Raised</enum>
+                   </property>
+                   <layout class="QVBoxLayout" name="verticalLayout_7">
+                    <item>
+                     <widget class="VerticalLabel" name="lblTipologiaVertical">
+                      <property name="sizePolicy">
+                       <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                        <horstretch>0</horstretch>
+                        <verstretch>0</verstretch>
+                       </sizepolicy>
+                      </property>
+                      <property name="text">
+                       <string>TIPOLOGÍA DE LA INESTABILIDAD</string>
+                      </property>
+                      <property name="alignment">
+                       <set>Qt::AlignmentFlag::AlignCenter</set>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
+                 </item>
+                 <item row="0" column="0" colspan="2">
+                  <widget class="QLabel" name="lblEstabilidad">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <pointsize>10</pointsize>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;ESTABILIDAD GENERAL:&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="4" column="1">
+                  <widget class="QLabel" name="lblDesprendimientos">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;C. DESPRENDIMIENTOS&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="5" column="1">
+                  <widget class="QLabel" name="lblColadas">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;D. COLADAS&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="7" column="1">
+                  <widget class="QLabel" name="lblOtros">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;F. OTROS&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="3" column="1">
+                  <widget class="QLabel" name="lblVuelcos">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;B. VUELCOS&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="6" column="1">
+                  <widget class="QLabel" name="lblErosivos">
+                   <property name="sizePolicy">
+                    <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                     <horstretch>0</horstretch>
+                     <verstretch>0</verstretch>
+                    </sizepolicy>
+                   </property>
+                   <property name="font">
+                    <font>
+                     <bold>true</bold>
+                    </font>
+                   </property>
+                   <property name="text">
+                    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;E. EROSIVOS&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="3" column="3">
+                  <widget class="QFrame" name="frameOptionsB">
+                   <property name="frameShape">
+                    <enum>QFrame::Shape::StyledPanel</enum>
+                   </property>
+                   <property name="frameShadow">
+                    <enum>QFrame::Shadow::Raised</enum>
+                   </property>
+                   <layout class="QHBoxLayout" name="horizontalLayout_4">
+                    <item>
+                     <widget class="QCheckBox" name="checkVuelcoFlexion">
+                      <property name="text">
+                       <string>VUELCO POR FLEXIÓN</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QCheckBox" name="checkVuelcoBloques">
+                      <property name="text">
+                       <string>VUELCO DE BLOQUES</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QCheckBox" name="checkVuelcoMixto">
+                      <property name="text">
+                       <string>VUELCO MIXTO</string>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
+                 </item>
+                 <item row="1" column="3">
+                  <widget class="QFrame" name="frameOptionsA">
+                   <property name="frameShape">
+                    <enum>QFrame::Shape::StyledPanel</enum>
+                   </property>
+                   <property name="frameShadow">
+                    <enum>QFrame::Shadow::Raised</enum>
+                   </property>
+                   <layout class="QGridLayout" name="gridLayout_5">
+                    <item row="1" column="2">
+                     <widget class="QCheckBox" name="checkCunaDirecta">
+                      <property name="text">
+                       <string>CUÑA DIRECTA</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item row="1" column="1">
+                     <widget class="QCheckBox" name="checkRoturaBase">
+                      <property name="text">
+                       <string>ROTURA DE BASE</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item row="2" column="0">
+                     <widget class="QCheckBox" name="checkCunaInversa">
+                      <property name="text">
+                       <string>CUÑA INVERSA</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item row="0" column="2">
+                     <widget class="QCheckBox" name="checkRoturaTalud">
+                      <property name="text">
+                       <string>ROTURA DE TALUD</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item row="2" column="2">
+                     <widget class="QCheckBox" name="checkExtensionesLaterales">
+                      <property name="text">
+                       <string>EXTENSIONES LATERALES</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item row="0" column="1">
+                     <widget class="QCheckBox" name="checkTraslacionales">
+                      <property name="text">
+                       <string>TRASLACIONALES</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item row="2" column="1">
+                     <widget class="QCheckBox" name="checkEnBloques">
+                      <property name="text">
+                       <string>EN BLOQUES</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item row="1" column="0">
+                     <widget class="QCheckBox" name="checkRoturaPie">
+                      <property name="text">
+                       <string>ROTURA DE PIE</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item row="0" column="0">
+                     <widget class="QCheckBox" name="checkRotacionales">
+                      <property name="text">
+                       <string>ROTACIONALES</string>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
+                 </item>
+                 <item row="0" column="3">
+                  <widget class="QFrame" name="frameEstbOptions">
+                   <property name="frameShape">
+                    <enum>QFrame::Shape::StyledPanel</enum>
+                   </property>
+                   <property name="frameShadow">
+                    <enum>QFrame::Shadow::Raised</enum>
+                   </property>
+                   <layout class="QHBoxLayout" name="horizontalLayout_3">
+                    <item>
+                     <widget class="QCheckBox" name="checkExcelente">
+                      <property name="text">
+                       <string>EXCELENTE</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QCheckBox" name="checkBuena">
+                      <property name="text">
+                       <string>BUENA</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QCheckBox" name="checkMedia">
+                      <property name="text">
+                       <string>MEDIA</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QCheckBox" name="checkMala">
+                      <property name="text">
+                       <string>MALA</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QCheckBox" name="checkMuyMala">
+                      <property name="text">
+                       <string>MUY MALA</string>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
+                 </item>
+                 <item row="4" column="3">
+                  <widget class="QFrame" name="frameOptionsC">
+                   <property name="frameShape">
+                    <enum>QFrame::Shape::StyledPanel</enum>
+                   </property>
+                   <property name="frameShadow">
+                    <enum>QFrame::Shadow::Raised</enum>
+                   </property>
+                   <layout class="QHBoxLayout" name="horizontalLayout_5">
+                    <item>
+                     <widget class="QCheckBox" name="checkChineos">
+                      <property name="text">
+                       <string>CHINEOS</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QCheckBox" name="checkBloquesMedios">
+                      <property name="text">
+                       <string>BLOQUES MEDIOS</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QCheckBox" name="checkBloquesGrandes">
+                      <property name="text">
+                       <string>BLOQUES GRANDES</string>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
+                 </item>
+                 <item row="5" column="3">
+                  <widget class="QFrame" name="frameOptionsD">
+                   <property name="frameShape">
+                    <enum>QFrame::Shape::StyledPanel</enum>
+                   </property>
+                   <property name="frameShadow">
+                    <enum>QFrame::Shadow::Raised</enum>
+                   </property>
+                   <layout class="QHBoxLayout" name="horizontalLayout_6">
+                    <item>
+                     <widget class="QCheckBox" name="checkReptaciones">
+                      <property name="text">
+                       <string>REPTACIONES</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QCheckBox" name="checkColadaBarro">
+                      <property name="text">
+                       <string>COLADA DE BARRO</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QCheckBox" name="checkDerrubios">
+                      <property name="text">
+                       <string>DERRUBIOS</string>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
+                 </item>
+                 <item row="6" column="3">
+                  <widget class="QFrame" name="frameOptionsE">
+                   <property name="frameShape">
+                    <enum>QFrame::Shape::StyledPanel</enum>
+                   </property>
+                   <property name="frameShadow">
+                    <enum>QFrame::Shadow::Raised</enum>
+                   </property>
+                   <layout class="QHBoxLayout" name="horizontalLayout_7">
+                    <item>
+                     <widget class="QCheckBox" name="checkReguerosCarvavas">
+                      <property name="text">
+                       <string>REGUEROS Y CÁRVAVAS</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QCheckBox" name="checkDerrubiosImportantes">
+                      <property name="text">
+                       <string>DERRUBIOS IMPORTANTES</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QCheckBox" name="checkErosionDiferencial">
+                      <property name="text">
+                       <string>EROSIÓN DIFERENCIAL</string>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
+                 </item>
+                 <item row="7" column="3">
+                  <widget class="QFrame" name="frameOptionsF">
+                   <property name="frameShape">
+                    <enum>QFrame::Shape::StyledPanel</enum>
+                   </property>
+                   <property name="frameShadow">
+                    <enum>QFrame::Shadow::Raised</enum>
+                   </property>
+                   <layout class="QHBoxLayout" name="horizontalLayout_8">
+                    <item>
+                     <widget class="QCheckBox" name="checkAlteracionSuperficial">
+                      <property name="text">
+                       <string>ALTERACIÓN SUPERFICIAL</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QCheckBox" name="checkGrietasTraccion">
+                      <property name="text">
+                       <string>GRIETAS DE TRACCIÓN</string>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
+                 </item>
+                </layout>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <widget class="QFrame" name="framePerfilTransversal">
+             <property name="frameShape">
+              <enum>QFrame::Shape::StyledPanel</enum>
+             </property>
+             <property name="frameShadow">
+              <enum>QFrame::Shadow::Raised</enum>
+             </property>
+             <layout class="QVBoxLayout" name="verticalLayout_4" stretch="1,8">
+              <item>
+               <widget class="QLabel" name="lblPerfilTransversal">
+                <property name="font">
+                 <font>
+                  <pointsize>11</pointsize>
+                  <bold>true</bold>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;PERFIL TRANSVERSAL / LONGITUDINAL DEL TALUD&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QFrame" name="framePaint">
+                <property name="minimumSize">
+                 <size>
+                  <width>0</width>
+                  <height>300</height>
+                 </size>
+                </property>
+                <property name="frameShape">
+                 <enum>QFrame::Shape::StyledPanel</enum>
+                </property>
+                <property name="frameShadow">
+                 <enum>QFrame::Shadow::Raised</enum>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QFrame" name="frameContentRight">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="frameShape">
+           <enum>QFrame::Shape::StyledPanel</enum>
+          </property>
+          <property name="frameShadow">
+           <enum>QFrame::Shadow::Raised</enum>
+          </property>
+          <layout class="QGridLayout" name="gridLayout_10">
+           <item row="2" column="0">
+            <widget class="QLabel" name="lblFotografia">
+             <property name="font">
+              <font>
+               <pointsize>11</pointsize>
+               <bold>true</bold>
+              </font>
+             </property>
+             <property name="text">
+              <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;FOTOGRAFÍA DEL TALUD:&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+             </property>
+             <property name="wordWrap">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item row="2" column="1">
+            <widget class="QToolButton" name="toolFotoPick">
+             <property name="mouseTracking">
+              <bool>true</bool>
+             </property>
+             <property name="icon">
+              <iconset theme="QIcon::ThemeIcon::FolderOpen"/>
+             </property>
+             <property name="autoRaise">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item row="2" column="2">
+            <widget class="QToolButton" name="toolFotoClear">
+             <property name="mouseTracking">
+              <bool>true</bool>
+             </property>
+             <property name="icon">
+              <iconset theme="QIcon::ThemeIcon::EditClear"/>
+             </property>
+             <property name="autoRaise">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item row="4" column="0">
+            <widget class="QLabel" name="lblFotografiaAerea">
+             <property name="font">
+              <font>
+               <pointsize>11</pointsize>
+               <bold>true</bold>
+              </font>
+             </property>
+             <property name="text">
+              <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;FOTOGRAFÍA AÉREA DEL TALUD:&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+             </property>
+             <property name="wordWrap">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item row="4" column="1">
+            <widget class="QToolButton" name="toolFotoAereaPick">
+             <property name="mouseTracking">
+              <bool>true</bool>
+             </property>
+             <property name="icon">
+              <iconset theme="QIcon::ThemeIcon::FolderOpen"/>
+             </property>
+             <property name="autoRaise">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item row="4" column="2">
+            <widget class="QToolButton" name="toolFotoAereaClear">
+             <property name="mouseTracking">
+              <bool>true</bool>
+             </property>
+             <property name="icon">
+              <iconset theme="QIcon::ThemeIcon::EditClear"/>
+             </property>
+             <property name="autoRaise">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item row="0" column="0" colspan="3">
+            <widget class="QFrame" name="frameObservaciones">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="frameShape">
+              <enum>QFrame::Shape::StyledPanel</enum>
+             </property>
+             <property name="frameShadow">
+              <enum>QFrame::Shadow::Raised</enum>
+             </property>
+             <layout class="QGridLayout" name="gridLayout_9">
+              <item row="0" column="0">
+               <widget class="QLabel" name="lblObservaciones">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="font">
+                 <font>
+                  <pointsize>11</pointsize>
+                  <bold>true</bold>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;OBSERVACIONES / DESCRIPCIÓN DE PROBLEMAS DETECTADOS:&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                </property>
+                <property name="wordWrap">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="0">
+               <widget class="QTextEdit" name="textObservaciones">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="minimumSize">
+                 <size>
+                  <width>0</width>
+                  <height>0</height>
+                 </size>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item row="3" column="0" colspan="3">
+            <widget class="QPushButton" name="btnFotografia">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>0</width>
+               <height>0</height>
+              </size>
+             </property>
+             <property name="icon">
+              <iconset resource="resources.qrc">
+               <normaloff>:/icons/images/camera_thin_dark.svg</normaloff>:/icons/images/camera_thin_dark.svg</iconset>
+             </property>
+             <property name="iconSize">
+              <size>
+               <width>180</width>
+               <height>180</height>
+              </size>
+             </property>
+            </widget>
+           </item>
+           <item row="5" column="0" colspan="3">
+            <widget class="QPushButton" name="btnFotografiaAerea">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="icon">
+              <iconset resource="resources.qrc">
+               <normaloff>:/icons/images/camera_thin_dark.svg</normaloff>:/icons/images/camera_thin_dark.svg</iconset>
+             </property>
+             <property name="iconSize">
+              <size>
+               <width>180</width>
+               <height>180</height>
+              </size>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>1233</width>
+     <height>25</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>NoWheelComboBox</class>
+   <extends>QComboBox</extends>
+   <header location="global">nowheelcombobox.h</header>
+  </customwidget>
+  <customwidget>
+   <class>VerticalLabel</class>
+   <extends>QLabel</extends>
+   <header location="global">verticallabel.h</header>
+  </customwidget>
+ </customwidgets>
+ <resources>
+  <include location="resources.qrc"/>
+ </resources>
+ <connections/>
+</ui>

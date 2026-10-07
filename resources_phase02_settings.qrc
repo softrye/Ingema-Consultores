@@ -1,0 +1,17 @@
+<RCC>
+  <qresource prefix="/ui/v2/settings">
+    <file alias="icon_about.svg">qml/Mobile/assets_ui_v2/settings/icon_about.svg</file>
+    <file alias="icon_backup.svg">qml/Mobile/assets_ui_v2/settings/icon_backup.svg</file>
+    <file alias="icon_diagnostics.svg">qml/Mobile/assets_ui_v2/settings/icon_diagnostics.svg</file>
+    <file alias="icon_language.svg">qml/Mobile/assets_ui_v2/settings/icon_language.svg</file>
+    <file alias="icon_permissions.svg">qml/Mobile/assets_ui_v2/settings/icon_permissions.svg</file>
+    <file alias="icon_privacy.svg">qml/Mobile/assets_ui_v2/settings/icon_privacy.svg</file>
+    <file alias="icon_settings_nav.svg">qml/Mobile/assets_ui_v2/settings/icon_settings_nav.svg</file>
+    <file alias="icon_speed_test.svg">qml/Mobile/assets_ui_v2/settings/icon_speed_test.svg</file>
+    <file alias="icon_storage.svg">qml/Mobile/assets_ui_v2/settings/icon_storage.svg</file>
+    <file alias="icon_support_soon.svg">qml/Mobile/assets_ui_v2/settings/icon_support_soon.svg</file>
+    <file alias="icon_sync_status.svg">qml/Mobile/assets_ui_v2/settings/icon_sync_status.svg</file>
+    <file alias="icon_theme_dark.svg">qml/Mobile/assets_ui_v2/settings/icon_theme_dark.svg</file>
+    <file alias="icon_theme_light.svg">qml/Mobile/assets_ui_v2/settings/icon_theme_light.svg</file>
+  </qresource>
+</RCC>
