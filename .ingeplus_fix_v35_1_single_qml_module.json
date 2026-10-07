@@ -1,0 +1,8 @@
+﻿{
+    "version":  "V35.1.1",
+    "base":  "V34 + V34.1 + V35",
+    "fix":  "single_qml_module_startup",
+    "installer":  "safe_build_cleanup",
+    "backup":  "C:\\Users\\Javier\\Documents\\InGePlus\\AppCalicatasDemo\\.ingeplus_backups\\V35_1_1_20260716_092327",
+    "appliedAt":  "2026-07-16T09:23:27"
+}

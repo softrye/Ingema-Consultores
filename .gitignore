@@ -1,0 +1,124 @@
+# InGe+ / Qt Creator / CMake
+build/
+build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+Testing/
+
+# Qt Creator local configuration
+.qtcreator/
+*.user
+*.user.*
+*.autosave
+*.creator.user
+
+# Generated Qt files
+*_autogen/
+*.qmlc
+*.jsc
+qmlcache_loader.cpp
+qrc_*.cpp
+moc_*.cpp
+ui_*.h
+
+# Android generated output
+android-build*/
+.gradle/
+gradle/.gradle/
+local.properties
+*.apk
+*.aab
+*.apks
+*.idsig
+
+# Signing keys and credentials
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key
+.env
+.env.*
+secrets.*
+credentials.*
+
+# Backups / historical generated files
+*.bak
+*.bak_*
+*.backup
+*_backup.qml
+*no_borrar*
+VALIDACION_*.json
+MANIFEST_*.json
+REPORTE_*.md
+SACAR_LOG_*.bat
+VERIFICAR_*.ps1
+00_LIMPIAR_*.bat
+00_BASE_*.bat
+
+# Archives and office files not required as source
+*.zip
+*.rar
+*.7z
+*.docx
+*.pdf
+
+# OS / IDE noise
+.DS_Store
+Thumbs.db
+.vs/
+.vscode/
+.idea/
+
+# Generated from vendored Gemini Live sources during the Android build.
+/android/assets/inge-ai/
+
+# ---- Respaldo GitHub 2026-10-07: locales, pesados o sensibles (se conservan en disco) ----
+# Copias de respaldo / cierres / contexto de agentes
+/_cierres/
+/repair_ai/
+/repair_backups/
+/_qwen_context/
+/_server_handoff/
+/tools/v38_backup/
+/tools/v38_installer_backup_*/
+*.backup_*
+*.backup.json
+# Builds y artefactos generados
+/thirdparty/maplibre-build/
+/thirdparty/maplibre-install/
+/thirdparty/maplibre-native-qt-src/
+/thirdparty/*.log
+/outputs/
+/tmp/
+/artifacts/*.log
+/appcalicatasdemo
+*.ab
+__pycache__/
+*.pyc
+.cxx/
+.qt/
+node_modules/
+# Logs y capturas locales de sesiones de reparación
+/*.log
+/.codex_*
+/inge_mapv2_*.png
+/arning*
+/.ingeplus_*.json
+/.ingeplus_*.replaced
+# Configuración local de herramientas/agentes (puede contener claves)
+/.qwen/settings.json
+/opencode.json
+/opencode.*.json
+/supabase/.temp/
+.mcp.json
+signing.properties
+*.p8
+google-services.json
+service-account*.json
+/_fix_v38_12_3_logs/
+/docs/PRE_NOTHING_PORT_20260905.patch

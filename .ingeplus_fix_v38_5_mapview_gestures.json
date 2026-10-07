@@ -1,0 +1,12 @@
+{
+  "version": "V38.5",
+  "module": "Mapa MapLibre - gestos táctiles nativos",
+  "changes": [
+    "Qt Location MapView oficial para pinch-to-zoom, paneo e inercia",
+    "InGeCoreFlow bloqueado mientras la página Mapa está activa",
+    "marcador rojo compacto",
+    "punto azul GPS permanente con pulso suave",
+    "zoom animado en botones",
+    "pulsación prolongada pasiva para fijar punto"
+  ]
+}

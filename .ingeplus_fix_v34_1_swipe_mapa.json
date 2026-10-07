@@ -1,0 +1,25 @@
+{
+  "package": "InGePlus_FIX_V34_1_SWIPE_MAPA_INSTALLER_FINAL",
+  "version": "34.1",
+  "base_required": "InGeCoreFlow V34",
+  "change": "Corrige el orden del swipe para que desde Inicio abra Mapa y no la ficha de Calicatas.",
+  "navigation_order": [
+    0,
+    2,
+    1,
+    3,
+    4
+  ],
+  "navigation_labels": [
+    "Inicio",
+    "Mapa",
+    "Crear/Calicata",
+    "Documentos",
+    "Configuracion"
+  ],
+  "modified_files": [
+    "qml/Mobile/flowcore/InGeCoreFlow.qml"
+  ],
+  "old_sha256": "20c44f62fc8f35d01900e360166682bb9d6b370f955a60b41150bf1cdbce8635",
+  "new_sha256": "21d9e9fc0de1819ae1c0f7803df257860096f907fbea76b7508f4dd6c7f32725"
+}

@@ -1,0 +1,23 @@
+﻿{
+    "version":  "28.0-final",
+    "project":  "C:\\Users\\Javier\\Documents\\InGePlus\\AppCalicatasDemo",
+    "appliedAt":  "2026-07-13T15:25:29.7525223-05:00",
+    "newFiles":  [
+                     "qml/Mobile/lib/IconCatalog.js",
+                     "qml/Mobile/components/FlowIcon.qml",
+                     "qml/Mobile/components/FlowIconButton.qml",
+                     "qml/Mobile/assets_ui_v2/icons/system/ic_system_back.svg",
+                     "qml/Mobile/assets_ui_v2/icons/system/ic_system_up.svg",
+                     "qml/Mobile/assets_ui_v2/icons/system/ic_system_refresh.svg",
+                     "qml/Mobile/assets_ui_v2/icons/system/ic_system_close.svg",
+                     "qml/Mobile/assets_ui_v2/icons/system/ic_system_more.svg",
+                     "qml/Mobile/assets_ui_v2/icons/system/ic_system_check.svg",
+                     "qml/Mobile/assets_ui_v2/icons/system/ic_system_search.svg",
+                     "qml/Mobile/assets_ui_v2/icons/system/ic_system_menu.svg",
+                     "qml/Mobile/assets_ui_v2/icons/system/ic_system_copy.svg",
+                     "qml/Mobile/assets_ui_v2/icons/system/ic_system_paste.svg",
+                     "qml/Mobile/assets_ui_v2/icons/system/ic_system_chevron_right.svg"
+                 ],
+    "module":  "04",
+    "backup":  "C:\\Users\\Javier\\Documents\\InGePlus\\_RESPALDOS_INGEPLUS\\MODULO_04_ICONOS_V28_FINAL_20260713_152528"
+}

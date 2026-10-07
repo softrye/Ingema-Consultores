@@ -1,0 +1,11 @@
+﻿{
+    "modifiedFiles":  5,
+    "backup":  "C:\\Users\\Javier\\Documents\\InGePlus\\_RESPALDOS_INGEPLUS\\MODULO_01_LIMPIEZA_PERFIL_V25_20260713_113907",
+    "version":  "25.2",
+    "project":  "C:\\Users\\Javier\\Documents\\InGePlus\\AppCalicatasDemo",
+    "installedAt":  "2026-07-13T12:04:04.6726843-05:00",
+    "name":  "Limpieza quirurgica de Perfil",
+    "module":  "01",
+    "installerFix":  "PowerShell UTF-8 + eliminación completa de settingsDrawer",
+    "deletedResources":  24
+}

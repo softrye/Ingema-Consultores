@@ -1,0 +1,19 @@
+{
+  "version": "34.0",
+  "module": "InGeCoreFlow",
+  "appliedAt": "2026-07-15",
+  "features": [
+    "quick-settings-bubble-on-tap-and-deep-press",
+    "stable-horizontal-swipe-qt-6.9",
+    "text-entry-and-map-gesture-protection",
+    "complete-qml-cmake-registration"
+  ],
+  "modifiedFiles": [
+    "qml/Mobile/Main.qml",
+    "qml/Mobile/flowcore/InGeCoreFlow.qml",
+    "qml/Mobile/flowcore/FlowQuickBubble.qml",
+    "qml/Mobile/flowcore/FlowSwipeNavigator.qml",
+    "CMakeLists.txt"
+  ],
+  "iconsRedesigned": false
+}

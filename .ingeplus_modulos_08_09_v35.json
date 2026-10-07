@@ -1,0 +1,15 @@
+{
+  "version": "35.0",
+  "base": "V34.1",
+  "modules": [
+    "M08 Map/GPS",
+    "M09 Calicatas"
+  ],
+  "files": [
+    "qml/Mobile/Main.qml",
+    "qml/Mobile/pages/MapPageContent.qml",
+    "qml/Mobile/pages/CalicatasEditorPage.qml",
+    "qml/Mobile/pages/CalicataFormPage.qml",
+    "qml/Mobile/lib/GpsBus.js"
+  ]
+}

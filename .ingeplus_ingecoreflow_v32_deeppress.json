@@ -1,0 +1,10 @@
+﻿{
+    "backup":  "C:\\Users\\Javier\\Documents\\InGePlus\\_RESPALDOS_INGEPLUS\\INGECOREFLOW_V32_DEEPPRESS_20260714_114132",
+    "project":  "C:\\Users\\Javier\\Documents\\InGePlus\\AppCalicatasDemo",
+    "version":  "32.1-installer-fix",
+    "newFiles":  [
+                     "qml/Mobile/flowcore/FlowDeepPressArea.qml",
+                     "qml/Mobile/flowcore/FlowQuickBubble.qml"
+                 ],
+    "appliedAt":  "2026-07-14T11:55:45.7349858-05:00"
+}

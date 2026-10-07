@@ -1,0 +1,9 @@
+{
+  "version": "38.2",
+  "fix": "Windows PowerShell 5.1 native stderr handling and resilient MapLibre source recovery",
+  "mapEngine": "MapLibre Native Qt",
+  "abi": "arm64-v8a",
+  "manualEntry": "00_SOLUCIONAR_ERROR_MAPLIBRE.cmd",
+  "log": "thirdparty/maplibre-bootstrap.log",
+  "rootCause": "Git writes normal progress to stderr; PowerShell 5.1 converted it to NativeCommandError because ErrorActionPreference was Stop"
+}

@@ -1,0 +1,683 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>CorteRowWidget</class>
+ <widget class="QWidget" name="CorteRowWidget">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1080</width>
+    <height>240</height>
+   </rect>
+  </property>
+  <property name="sizePolicy">
+   <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+    <horstretch>0</horstretch>
+    <verstretch>0</verstretch>
+   </sizepolicy>
+  </property>
+  <property name="minimumSize">
+   <size>
+    <width>0</width>
+    <height>0</height>
+   </size>
+  </property>
+  <property name="maximumSize">
+   <size>
+    <width>16777215</width>
+    <height>16777215</height>
+   </size>
+  </property>
+  <property name="windowTitle">
+   <string>Form</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">/* =========================================================
+   InGe+ — CorteRowWidget (match CalicataWindow palette)
+   Primary/Teal  #0087AE
+   Navy          #005282
+   Accent        #FDAC11
+   Success       #6FC04A
+   ========================================================= */
+
+QWidget#CorteRowWidget {
+    background: transparent;
+    border-radius: 12px;
+}
+
+/* Card principal */
+QWidget#CorteWidgetCont {
+    background-color: #D9EDF3;
+    border: 1px solid rgba(0,135,174,65);
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
+}
+
+/* Limpia fondos “oscuros” heredados de Designer dentro del card */
+QWidget#CorteWidgetCont QFrame{
+    background: transparent;
+    border-radius: 12px;
+    border: none;
+}
+
+/* Barra superior del corte */
+QWidget#headerBar {
+    background-color: #005282;
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+    border-bottom: 1px solid rgba(255,255,255,18);
+    padding: 4px 8px;
+}
+
+/* Título del corte en header */
+QWidget#headerBar QLabel,
+QLabel#lblCorteTitulo {
+    color: #FFFFFF;
+    border: 1px solid rgba(255,255,255,26);
+    border-top-left-radius: 12px;
+}
+
+/* Botón eliminar (QToolButton) */
+QToolButton#btnEliminarCorte{
+    background-color: rgba(255,255,255,10);
+    color: #FFFFFF;
+    border: 1px solid rgba(255,255,255,35);
+    border-radius: 9px;
+    padding: 0px;
+}
+
+QToolButton#btnEliminarCorte:hover{
+    /* más oscuro, no gris */
+    background-color: rgba(0,0,0,14);
+    border: 1px solid rgba(255,255,255,45);
+}
+QToolButton#btnEliminarCorte:pressed{
+    background-color: rgba(0,0,0,22);
+}
+
+/* Labels del cuerpo (fuera del header) */
+QWidget#CorteWidgetCont QLabel {
+    color: #005282;
+    font-weight: bold;
+}
+
+/* Inputs dentro del corte (compatibles con tu estilo general) */
+QWidget#CorteWidgetCont QLineEdit,
+QWidget#CorteWidgetCont QTextEdit,
+QWidget#CorteWidgetCont QPlainTextEdit,
+QWidget#CorteWidgetCont QComboBox {
+    background-color: #FFFFFF;
+    color: #0F1F2A;
+    border: 1px solid rgba(0,135,174,70);
+    border-radius: 10px;
+    padding: 5px 8px;
+}
+
+QWidget#CorteWidgetCont QLineEdit:focus,
+QWidget#CorteWidgetCont QTextEdit:focus,
+QWidget#CorteWidgetCont QPlainTextEdit:focus,
+QWidget#CorteWidgetCont QComboBox:focus {
+    border: 2px solid rgba(0,135,174,180);
+}
+
+
+QWidget#CorteWidgetCont QComboBox::drop-down {
+    border-left: 1px solid rgba(0,135,174,70);
+    width: 24px;
+}
+
+
+
+
+/* =========================================================
+   COMBOBOX POPUP (GLOBAL)
+   - Fondo navy (#005282)
+   - Items blanco
+   - Hover invertido (fondo blanco + texto oscuro)
+   - Bordes redondeados reales (QComboBoxPrivateContainer)
+   - Evita '...' en combos angostos (min-width + padding moderado)
+   ========================================================= */
+
+/* ===========================
+   POPUP ComboBox (dentro del corte)
+   =========================== */
+
+QWidget#CorteWidgetCont QComboBoxPrivateContainer {
+    background-color: #005282;
+    border: 1px solid rgba(255,255,255,28);
+    border-radius: 12px;
+    padding: 4px;
+}
+
+QWidget#CorteWidgetCont QComboBoxPrivateContainer QAbstractItemView {
+    background-color: #005282;
+    border: none;
+    outline: 0;
+    color: #FFFFFF;
+    border-radius: 10px;
+}
+
+QWidget#CorteWidgetCont QComboBoxPrivateContainer QAbstractItemView::viewport {
+    background-color: #005282;
+    border-radius: 10px;
+}
+
+
+
+QWidget#CorteWidgetCont QComboBoxPrivateContainer QAbstractItemView::item {
+    padding: 6px 10px;
+    color: #FFFFFF;
+    background: transparent;
+}
+
+QWidget#CorteWidgetCont QComboBoxPrivateContainer QAbstractItemView::item:hover {
+    background-color: #FFFFFF;
+    color: #0F1F2A;
+}
+
+QWidget#CorteWidgetCont QComboBoxPrivateContainer QAbstractItemView::item:selected {
+    background-color: rgba(255,255,255,220);
+    color: #0F1F2A;
+}
+
+
+/* (Opcional) Scrollbar dentro del popup para que no se vea “default” */
+QComboBoxPrivateContainer QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 2px;
+}
+QComboBoxPrivateContainer QScrollBar::handle:vertical {
+    background: rgba(255,255,255,35);
+    border-radius: 5px;
+    min-height: 18px;
+}
+QComboBoxPrivateContainer QScrollBar::handle:vertical:hover {
+    background: rgba(255,255,255,55);
+}
+QComboBoxPrivateContainer QScrollBar::add-line:vertical,
+QComboBoxPrivateContainer QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+QWidget#CorteWidgetCont QComboBox { combobox-popup: 0; border-radius: 12px; }
+
+QMenu {
+    background-color: #005282;
+    border: 1px solid rgba(255,255,255,28);
+    border-radius: 12px;
+    padding: 4px;
+}
+
+QMenu::item {
+    color: #FFFFFF;
+    padding: 6px 10px;
+    border-radius: 8px;
+}
+
+QMenu::item:selected {
+    background: #FFFFFF;
+    color: #0F1F2A;
+}
+
+
+</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <property name="spacing">
+    <number>0</number>
+   </property>
+   <property name="leftMargin">
+    <number>2</number>
+   </property>
+   <property name="topMargin">
+    <number>2</number>
+   </property>
+   <property name="rightMargin">
+    <number>2</number>
+   </property>
+   <property name="bottomMargin">
+    <number>2</number>
+   </property>
+   <item>
+    <widget class="QWidget" name="headerBar" native="true">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="minimumSize">
+      <size>
+       <width>0</width>
+       <height>26</height>
+      </size>
+     </property>
+     <property name="maximumSize">
+      <size>
+       <width>16777215</width>
+       <height>26</height>
+      </size>
+     </property>
+     <layout class="QHBoxLayout" name="horizontalLayout" stretch="4,15,2">
+      <property name="spacing">
+       <number>0</number>
+      </property>
+      <property name="leftMargin">
+       <number>0</number>
+      </property>
+      <property name="topMargin">
+       <number>0</number>
+      </property>
+      <property name="rightMargin">
+       <number>2</number>
+      </property>
+      <property name="bottomMargin">
+       <number>0</number>
+      </property>
+      <item>
+       <widget class="QLabel" name="lblCorteTitulo">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>205</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>205</width>
+          <height>16777215</height>
+         </size>
+        </property>
+        <property name="font">
+         <font>
+          <pointsize>10</pointsize>
+          <bold>true</bold>
+         </font>
+        </property>
+        <property name="text">
+         <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;Corte 1&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignmentFlag::AlignCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="horizontalSpacer">
+        <property name="orientation">
+         <enum>Qt::Orientation::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>40</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QToolButton" name="btnEliminarCorte">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>25</width>
+          <height>25</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>25</width>
+          <height>25</height>
+         </size>
+        </property>
+        <property name="focusPolicy">
+         <enum>Qt::FocusPolicy::NoFocus</enum>
+        </property>
+        <property name="toolTip">
+         <string>Eliminar este corte</string>
+        </property>
+        <property name="text">
+         <string>✕</string>
+        </property>
+        <property name="iconSize">
+         <size>
+          <width>25</width>
+          <height>25</height>
+         </size>
+        </property>
+        <property name="autoRaise">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QWidget" name="CorteWidgetCont" native="true">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
+     <layout class="QHBoxLayout" name="horizontalLayout_2">
+      <property name="spacing">
+       <number>2</number>
+      </property>
+      <property name="leftMargin">
+       <number>6</number>
+      </property>
+      <property name="topMargin">
+       <number>4</number>
+      </property>
+      <property name="rightMargin">
+       <number>4</number>
+      </property>
+      <property name="bottomMargin">
+       <number>6</number>
+      </property>
+      <item>
+       <widget class="QTextEdit" name="txtDescripcion">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>200</width>
+          <height>200</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>200</width>
+          <height>200</height>
+         </size>
+        </property>
+        <property name="autoFillBackground">
+         <bool>false</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="NoWheelComboBox" name="cbHumedad">
+        <property name="minimumSize">
+         <size>
+          <width>66</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>66</width>
+          <height>16777215</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="NoWheelComboBox" name="cbExcavabilidad">
+        <property name="minimumSize">
+         <size>
+          <width>66</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>66</width>
+          <height>16777215</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="NoWheelComboBox" name="cbEstabilidad">
+        <property name="minimumSize">
+         <size>
+          <width>66</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>66</width>
+          <height>16777215</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="txtTipo">
+        <property name="minimumSize">
+         <size>
+          <width>40</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>40</width>
+          <height>16777215</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="NoWheelComboBox" name="txtDE">
+        <property name="minimumSize">
+         <size>
+          <width>65</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>65</width>
+          <height>16777215</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="NoWheelComboBox" name="txtA">
+        <property name="minimumSize">
+         <size>
+          <width>70</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>70</width>
+          <height>16777215</height>
+         </size>
+        </property>
+        <property name="focusPolicy">
+         <enum>Qt::FocusPolicy::StrongFocus</enum>
+        </property>
+        <property name="editable">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="txtAASHTO">
+        <property name="minimumSize">
+         <size>
+          <width>61</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>61</width>
+          <height>16777215</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="txtSUCS">
+        <property name="minimumSize">
+         <size>
+          <width>61</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>61</width>
+          <height>16777215</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="txtGranuloMax">
+        <property name="minimumSize">
+         <size>
+          <width>51</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>51</width>
+          <height>16777215</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="txtGranulo2mm">
+        <property name="minimumSize">
+         <size>
+          <width>54</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>54</width>
+          <height>16777215</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="txtGranulo0_4mm">
+        <property name="minimumSize">
+         <size>
+          <width>54</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>54</width>
+          <height>16777215</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="txtGranulo0_08mm">
+        <property name="minimumSize">
+         <size>
+          <width>60</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>60</width>
+          <height>16777215</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="txtWL">
+        <property name="minimumSize">
+         <size>
+          <width>38</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>38</width>
+          <height>16777215</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="txtLP">
+        <property name="minimumSize">
+         <size>
+          <width>38</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>38</width>
+          <height>16777215</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="txtHumedad">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>16777215</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>NoWheelComboBox</class>
+   <extends>QComboBox</extends>
+   <header location="global">nowheelcombobox.h</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>
