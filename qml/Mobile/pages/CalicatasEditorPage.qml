@@ -4859,7 +4859,7 @@ Page {
                 Layout.fillWidth: true
                 Layout.margins: 12
                 visible: coordinateMap.status === Loader.Error
-                text: "No se pudo cargar el selector 2D de MapLibre. Comprueba la integración local de MapLibre/QtLocation."
+                text: "No se pudo cargar el selector de ubicación. Comprueba el módulo de GPS."
                 wrapMode: Text.WordWrap
             }
             // Hoja de la ubicación GPS: estado real de la lectura y confirmación.

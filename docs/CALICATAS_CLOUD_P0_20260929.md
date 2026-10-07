@@ -44,7 +44,7 @@ ROLLBACK dejó revisión 1134 y los datos originales. No se cambió RLS.
 - Timer: los timers de Calicatas son constantes positivas y el retry de presencia
   usa una tabla acotada. Se revisaron intervalos QML, Core, autosave, etapas y las
   llamadas nativas de timer. No hay evidencia suficiente para atribuir el aviso a
-  un timer concreto. No se añadió un clamp ni se tocó Main/focus/GPS/MapLibre.
+  un timer concreto. No se añadió un clamp ni se tocó Main/focus/GPS/motor cartográfico anterior.
 
 ## Implementación
 
@@ -115,11 +115,11 @@ en CONFLICT se conserva; no se pisa automáticamente con datos de Web.
 - Cuenta: `refreshProjects` ignora en silencio las respuestas `ACCOUNT_CHANGED`
   (la lista vieja ya se descartaba por época en el transporte).
 - Timer negativo: `QTimer` guarda el intervalo como int (ms). El Timer de la
-  plataforma Qt de MapLibre convertía `Duration::max()` (modo offline) y
+  plataforma Qt de motor cartográfico anterior convertía `Duration::max()` (modo offline) y
   expiraciones de caché de semanas/meses sin acotar: más de ~24,8 días
   desborda a negativo. Corregido en
-  `thirdparty/maplibre-native-qt-src/vendor/maplibre-native/platform/qt/src/mbgl/timer.cpp`
+  `thirdparty/legacy-map-provider-src/vendor/legacy-map-core/platform/qt/src/mbgl/timer.cpp`
   (satura a INT_MAX; plazo vencido = ahora). La app enlaza el paquete
-  precompilado `thirdparty/maplibre-install`: el aviso desaparece al
-  recompilar QMapLibre con esta fuente.
+  precompilado `thirdparty/legacy-map-provider-install`: el aviso desaparece al
+  recompilar Qmotor cartográfico anterior con esta fuente.
 - Artefacto temporal `tests/calicatas/qmllint-p0.json` eliminado.

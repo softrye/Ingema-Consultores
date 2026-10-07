@@ -213,164 +213,7 @@ if(INGE_BUILD_MOBILE)
         add_subdirectory(thirdparty/QXlsx)
     endif()
 
-    # ---------------------------------------------------------
-    # MAPLIBRE NATIVE QT â€” deteccion determinista
-    #
-    # CMake NO ejecuta BAT, PowerShell ni compilaciones automaticas.
-    # Se reutiliza un paquete QMapLibre ya compilado.
-    # ---------------------------------------------------------
-    # Calicatas uses the installed MapLibre provider, loaded only by its picker.
-    if(ANDROID)
-        set(INGE_ENABLE_MAPLIBRE ON CACHE BOOL "MapLibre para ubicación de Calicatas" FORCE)
-    else()
-        # The supplied package contains Android arm64 binaries, not Windows DLLs.
-        set(INGE_ENABLE_MAPLIBRE OFF)
-        message(STATUS "Desktop: MapLibre Android disabled; coordinates remain editable")
-    endif()
-
-    if(INGE_ENABLE_MAPLIBRE)
-        set(_INGE_QMAPLIBRE_CANDIDATES "")
-
-        # 1. Ruta definida manualmente por Qt Creator/CMake.
-        if(DEFINED QMapLibre_DIR AND NOT QMapLibre_DIR STREQUAL "")
-            list(APPEND _INGE_QMAPLIBRE_CANDIDATES
-                "${QMapLibre_DIR}")
-        endif()
-
-        # 2. Variable de entorno opcional.
-        if(DEFINED ENV{QMapLibre_DIR}
-           AND NOT "$ENV{QMapLibre_DIR}" STREQUAL "")
-            file(TO_CMAKE_PATH "$ENV{QMapLibre_DIR}"
-                 _INGE_QMAPLIBRE_ENV_DIR)
-            list(APPEND _INGE_QMAPLIBRE_CANDIDATES
-                "${_INGE_QMAPLIBRE_ENV_DIR}")
-        endif()
-
-        # 3. Proyecto actual.
-        list(APPEND _INGE_QMAPLIBRE_CANDIDATES
-            "${INGE_PROJECT_ROOT}/thirdparty/maplibre-install/arm64-v8a/lib/cmake/QMapLibre"
-            "${INGE_PROJECT_ROOT}/thirdparty/maplibre-build/arm64-v8a/src"
-        )
-
-        # 4. Proyecto anterior de InGe+, donde MapLibre ya pudo quedar compilado.
-        set(_INGE_DOCUMENTS_DIR
-            "C:/Users/PC-02/OneDrive/001_INFO_REVISAR/00_ORDENAR/Documentos")
-        list(APPEND _INGE_QMAPLIBRE_CANDIDATES
-            "${_INGE_DOCUMENTS_DIR}/InGePlus/AppCalicatasDemo/thirdparty/maplibre-install/arm64-v8a/lib/cmake/QMapLibre"
-            "${_INGE_DOCUMENTS_DIR}/InGePlus/AppCalicatasDemo/thirdparty/maplibre-build/arm64-v8a/src"
-            "${_INGE_DOCUMENTS_DIR}/AppCalicatasDemo/thirdparty/maplibre-install/arm64-v8a/lib/cmake/QMapLibre"
-            "${_INGE_DOCUMENTS_DIR}/AppCalicatasDemo/thirdparty/maplibre-build/arm64-v8a/src"
-        )
-
-        list(REMOVE_DUPLICATES _INGE_QMAPLIBRE_CANDIDATES)
-
-        set(_INGE_QMAPLIBRE_FOUND_DIR "")
-        foreach(_INGE_QMAPLIBRE_CANDIDATE
-                IN LISTS _INGE_QMAPLIBRE_CANDIDATES)
-            if(EXISTS
-               "${_INGE_QMAPLIBRE_CANDIDATE}/QMapLibreConfig.cmake")
-                set(_INGE_QMAPLIBRE_FOUND_DIR
-                    "${_INGE_QMAPLIBRE_CANDIDATE}")
-                break()
-            endif()
-        endforeach()
-
-        if(NOT _INGE_QMAPLIBRE_FOUND_DIR)
-            string(JOIN "\n  " _INGE_QMAPLIBRE_PATH_LIST
-                ${_INGE_QMAPLIBRE_CANDIDATES})
-            message(FATAL_ERROR
-                "No se encontro QMapLibreConfig.cmake.\n"
-                "CMake reviso estas rutas:\n"
-                "  ${_INGE_QMAPLIBRE_PATH_LIST}\n\n"
-                "La configuracion Android no puede continuar hasta que "
-                "exista un paquete MapLibre arm64-v8a ya compilado."
-            )
-        endif()
-
-        set(QMapLibre_DIR
-            "${_INGE_QMAPLIBRE_FOUND_DIR}"
-            CACHE PATH "Directorio QMapLibre seleccionado" FORCE)
-
-        # Location debe solicitarse expresamente para que el paquete
-        # cargue tambiÃ©n los targets y macros de su plugin geoservices.
-        find_package(QMapLibre CONFIG REQUIRED
-            COMPONENTS Core Location
-            PATHS "${QMapLibre_DIR}"
-            NO_DEFAULT_PATH
-        )
-
-        # QMapLibre_DIR termina en:
-        # .../arm64-v8a/lib/cmake/QMapLibre
-        get_filename_component(_INGE_MAPLIBRE_INSTALL_PREFIX
-            "${QMapLibre_DIR}/../../.." ABSOLUTE)
-
-        if(EXISTS "${QMapLibre_DIR}/QMapLibreLocationMacros.cmake")
-            include("${QMapLibre_DIR}/QMapLibreLocationMacros.cmake")
-        endif()
-
-        # Algunas instalaciones Android de MapLibre contienen el plugin
-        # geoservices, pero QMapLibreConfig.cmake no importa automÃ¡ticamente
-        # su target QMapLibre::PluginGeoServices. Primero intentamos cargar
-        # cualquier archivo de targets GeoServices instalado con el paquete.
-        if(NOT TARGET QMapLibre::PluginGeoServices)
-            file(GLOB _INGE_MAPLIBRE_GEOSERVICES_TARGET_FILES
-                "${QMapLibre_DIR}/*GeoServices*Targets.cmake"
-                "${QMapLibre_DIR}/*Geoservices*Targets.cmake"
-                "${QMapLibre_DIR}/*geoservices*Targets.cmake"
-            )
-
-            foreach(_INGE_MAPLIBRE_TARGET_FILE
-                    IN LISTS _INGE_MAPLIBRE_GEOSERVICES_TARGET_FILES)
-                include("${_INGE_MAPLIBRE_TARGET_FILE}")
-                if(TARGET QMapLibre::PluginGeoServices)
-                    break()
-                endif()
-            endforeach()
-        endif()
-
-        # Fallback para paquetes Android cuyo archivo de exportaciÃ³n del
-        # target no fue instalado, pero cuya librerÃ­a .so sÃ­ estÃ¡ presente.
-        # Creamos Ãºnicamente el target IMPORTED que la macro oficial espera.
-        if(NOT TARGET QMapLibre::PluginGeoServices)
-            file(GLOB_RECURSE _INGE_MAPLIBRE_GEOSERVICES_PLUGINS
-                LIST_DIRECTORIES FALSE
-                "${_INGE_MAPLIBRE_INSTALL_PREFIX}/plugins/geoservices/*maplibre*.so"
-                "${_INGE_MAPLIBRE_INSTALL_PREFIX}/plugins/geoservices/*MapLibre*.so"
-            )
-            list(REMOVE_DUPLICATES _INGE_MAPLIBRE_GEOSERVICES_PLUGINS)
-            list(LENGTH _INGE_MAPLIBRE_GEOSERVICES_PLUGINS
-                 _INGE_MAPLIBRE_GEOSERVICES_PLUGIN_COUNT)
-
-            if(_INGE_MAPLIBRE_GEOSERVICES_PLUGIN_COUNT GREATER 0)
-                list(GET _INGE_MAPLIBRE_GEOSERVICES_PLUGINS 0
-                     _INGE_MAPLIBRE_GEOSERVICES_PLUGIN)
-
-                add_library(QMapLibre::PluginGeoServices
-                    MODULE IMPORTED GLOBAL)
-
-                set_target_properties(QMapLibre::PluginGeoServices PROPERTIES
-                    IMPORTED_LOCATION
-                        "${_INGE_MAPLIBRE_GEOSERVICES_PLUGIN}"
-                )
-
-                message(STATUS
-                    "InGe+ MapLibre: target PluginGeoServices reconstruido desde "
-                    "${_INGE_MAPLIBRE_GEOSERVICES_PLUGIN}")
-            endif()
-        endif()
-
-        if(NOT TARGET QMapLibre::PluginGeoServices)
-            message(FATAL_ERROR
-                "MapLibre Location fue encontrado, pero falta el target "
-                "QMapLibre::PluginGeoServices y tampoco se encontro una "
-                "libreria maplibre en "
-                "${_INGE_MAPLIBRE_INSTALL_PREFIX}/plugins/geoservices. "
-                "La instalacion Android de MapLibre esta incompleta.")
-        endif()
-
-        message(STATUS
-            "InGe+ MapLibre seleccionado: ${QMapLibre_DIR}")
-    endif()
+    # Cartography is provided by InGe Earth/Cesium; no native map provider dependency.
 
     set(MOBILE_SOURCES
         "${INGE_PROJECT_ROOT}/main_mobile.cpp"
@@ -673,15 +516,8 @@ if(INGE_BUILD_MOBILE)
             target_link_libraries(AppCalicatasMobile PRIVATE vulkan)
         endif()
 
-        if(INGE_ENABLE_MAPLIBRE)
-            target_link_libraries(AppCalicatasMobile PRIVATE
-                QMapLibre::Core
-                QMapLibre::Location
-            )
-            target_compile_definitions(AppCalicatasMobile PRIVATE INGE_USE_MAPLIBRE=1)
-            set_property(TARGET AppCalicatasMobile PROPERTY CXX_STANDARD 20)
-            set_property(TARGET AppCalicatasMobile PROPERTY CXX_STANDARD_REQUIRED ON)
-        endif()
+        set_property(TARGET AppCalicatasMobile PROPERTY CXX_STANDARD 20)
+        set_property(TARGET AppCalicatasMobile PROPERTY CXX_STANDARD_REQUIRED ON)
 
         if(TARGET QXlsx::QXlsx)
             target_link_libraries(AppCalicatasMobile PRIVATE QXlsx::QXlsx)
@@ -1155,64 +991,7 @@ if(INGE_BUILD_MOBILE)
                 COMMENT "Copying AppCalicatasMobile .so for androiddeployqt"
             )
         endif()
-        if(INGE_ENABLE_MAPLIBRE)
-            # Los documentos y ejemplos de MapLibre permanecen intactos.
-            # QT_QML_ROOT_PATH limita el escaneo a qml/Mobile, por lo que no
-            # es necesario renombrar ni eliminar archivos del submodulo.
-
-            # Carga el target del plugin QML Quick que el paquete Location no
-            # importa por defecto. Esto elimina la advertencia
-            # QMapLibre::PluginQml inexistente durante qt_import_qml_plugins().
-            set(_INGE_MAPLIBRE_QUICK_PLUGIN_TARGETS
-                "${QMapLibre_DIR}/QMapLibreQuickPluginQmlTargets.cmake")
-            if(NOT TARGET QMapLibre::PluginQml
-               AND EXISTS "${_INGE_MAPLIBRE_QUICK_PLUGIN_TARGETS}")
-                include("${_INGE_MAPLIBRE_QUICK_PLUGIN_TARGETS}")
-            endif()
-
-            if(NOT COMMAND qmaplibre_location_setup_plugins)
-                message(FATAL_ERROR
-                    "MapLibre fue encontrado, pero falta qmaplibre_location_setup_plugins(). "
-                    "Revisa ${QMapLibre_DIR}/QMapLibreLocationMacros.cmake")
-            endif()
-
-            # Copia al APK el plugin geoservices/maplibre y MapLibre.Location.
-            # En este punto el target ya fue importado por el paquete o
-            # reconstruido desde la librerÃ­a instalada.
-            qmaplibre_location_setup_plugins(AppCalicatasMobile)
-        endif()
-
-        # En builds compartidos de Android el plugin se despliega dinamicamente.
-        # Si el paquete exporta PluginQml, Qt puede importarlo normalmente; si no,
-        # evitamos una advertencia falsa que no aporta al empaquetado dinamico.
-        if(NOT INGE_ENABLE_MAPLIBRE OR TARGET QMapLibre::PluginQml)
-            qt_import_qml_plugins(AppCalicatasMobile)
-        else()
-            message(STATUS
-                "InGe+ MapLibre: PluginQml es dinamico; se omite qt_import_qml_plugins para este plugin.")
-        endif()
-
-        if(INGE_ENABLE_MAPLIBRE)
-            # V38.8: filtrar DESPUÃ‰S de qt_import_qml_plugins(), porque esa
-            # funciÃ³n puede completar las rutas de importaciÃ³n del despliegue.
-            # androiddeployqt debe analizar Ãºnicamente el mÃ³dulo QML instalado
-            # de MapLibre, no docs/examples/snippets_*.qml del repositorio fuente.
-            get_property(_INGE_QML_IMPORT_PATHS TARGET AppCalicatasMobile
-                         PROPERTY QT_QML_IMPORT_PATH)
-            set(_INGE_QML_IMPORT_PATHS_CLEAN "")
-            foreach(_INGE_QML_PATH IN LISTS _INGE_QML_IMPORT_PATHS)
-                if(NOT _INGE_QML_PATH MATCHES "maplibre-native-qt-src")
-                    list(APPEND _INGE_QML_IMPORT_PATHS_CLEAN "${_INGE_QML_PATH}")
-                endif()
-            endforeach()
-            if(EXISTS "${_INGE_MAPLIBRE_INSTALL_PREFIX}/qml")
-                list(APPEND _INGE_QML_IMPORT_PATHS_CLEAN
-                     "${_INGE_MAPLIBRE_INSTALL_PREFIX}/qml")
-            endif()
-            list(REMOVE_DUPLICATES _INGE_QML_IMPORT_PATHS_CLEAN)
-            set_property(TARGET AppCalicatasMobile PROPERTY QT_QML_IMPORT_PATH
-                         "${_INGE_QML_IMPORT_PATHS_CLEAN}")
-        endif()
+        qt_import_qml_plugins(AppCalicatasMobile)
 
 
 
@@ -1238,17 +1017,11 @@ if(INGE_BUILD_MOBILE)
                     message(STATUS "InGe+ QML scanner: repository root removed from import paths")
                 elseif(_INGE_QML_PATH_NORMALIZED MATCHES "/_backup[^/]*/?$")
                     message(STATUS "InGe+ QML scanner: backup path removed: ${_INGE_QML_PATH}")
-                elseif(_INGE_QML_PATH_NORMALIZED MATCHES "maplibre-native-qt-src")
-                    message(STATUS "InGe+ QML scanner: MapLibre source tree removed: ${_INGE_QML_PATH}")
                 else()
                     list(APPEND _INGE_FINAL_QML_IMPORT_PATHS_CLEAN "${_INGE_QML_PATH}")
                 endif()
             endforeach()
 
-            if(EXISTS "${_INGE_MAPLIBRE_INSTALL_PREFIX}/qml")
-                list(APPEND _INGE_FINAL_QML_IMPORT_PATHS_CLEAN
-                     "${_INGE_MAPLIBRE_INSTALL_PREFIX}/qml")
-            endif()
             list(REMOVE_DUPLICATES _INGE_FINAL_QML_IMPORT_PATHS_CLEAN)
             set_property(TARGET AppCalicatasMobile PROPERTY
                 QT_QML_IMPORT_PATH "${_INGE_FINAL_QML_IMPORT_PATHS_CLEAN}")

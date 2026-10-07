@@ -824,7 +824,7 @@ Item {
     // la columna y re-capturaría el vidrio); siguen animando los cambios del usuario.
     readonly property bool _stageSettling: stageRevealAnimation.running || stageSettleAnimation.running
                                           || stagePeekFade.running || _swipeNavigating
-    // El mapa de Ubicación (MapLibre) se crea en la primera visita y se conserva oculto
+    // El panel de Ubicación se crea en la primera visita y se conserva oculto
     // (no se dibuja fuera de su etapa): antes se destruía y recreaba en cada entrada,
     // dentro del mismo toque (instancia Map + estilo + contexto de render, y los avisos
     // "Timers cannot have negative intervals" que emite QtLocation al crear cada Map).
@@ -10761,7 +10761,7 @@ Item {
                         TapHandler { onTapped: if (root.openMapAction) root.openMapAction() }
                     }
 
-                    // Esquinas redondeadas sin capa/máscara sobre MapLibre: un
+                    // Esquinas redondeadas sin capa/máscara sobre el panel de ubicación: un
                     // anillo del color de página recorta visualmente el mapa.
                     Rectangle {
                         anchors.fill: parent
@@ -10930,7 +10930,7 @@ Item {
                         }
                     }
                 }
-                Label { Layout.fillWidth: true; visible: locationPreview.status === Loader.Error; text: "No se pudo cargar MapLibre. Revisa el despliegue del módulo de mapas."; color: root.cMuted; wrapMode: Text.WordWrap }
+                Label { Layout.fillWidth: true; visible: locationPreview.status === Loader.Error; text: "No se pudo cargar el panel de ubicación. Revisa el módulo de GPS."; color: root.cMuted; wrapMode: Text.WordWrap }
                 Label { Layout.fillWidth: true; visible: Qt.platform.os !== "android"; text: "Mapa disponible en Android. En Desktop puedes editar las coordenadas UTM."; color: root.cMuted; wrapMode: Text.WordWrap }
 
                 Rectangle {

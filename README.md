@@ -1,68 +1,39 @@
-# InGe+ / AppCalicatasDemo
+# InGe+ Android
 
-Repositorio limpio preparado para continuar el desarrollo de **InGe+** en **Qt Creator / Qt 6 / QML / Android**.
+Fuentes actuales del host Android Qt 6.9.3, C++, QML y Flutter. El target principal es `AppCalicatasMobile`, para `arm64-v8a`.
 
-Esta base fue generada desde `AppCalicatasDemo.zip` y está lista para subir a GitHub sin arrastrar builds, APKs, respaldos antiguos ni archivos temporales.
+## Arquitectura y dependencias
 
-## Qué incluye
+- `CMakeLists.txt` y `main_mobile.cpp`: host, servicios, JNI y registro QML.
+- `qml/Mobile/Main.qml`: entrada QML; módulo `InGe.Mobile` y un único InGeCoreFlow.
+- `android/src/`: actividades, puentes Flutter, Google Drive y WebView de IA.
+- `flutter/inge_earth/`: Home, autenticación, InGe Earth y Rendiciones. CMake genera su AAR desde las fuentes y el lockfile.
+- `android/web/inge-ai/`: integración real de Gemini Live, adaptada para Android. Entrada: `src/inge/main.tsx`. Conserva cliente, audio, worklets y licencias; los módulos del demo que no se importaban fueron retirados.
+- `src/`, fuentes C++ raíz, `Templates/` y `SUCS/`: documentos, sincronización, Calicatas y exportación.
+- `supabase/`: funciones, contratos SQL, migraciones y rollback. No ejecutar SQL de pruebas contra producción.
+- `thirdparty/QXlsx/`: dependencia compilada desde fuente.
+- `flutter/inge_earth/` y `android/assets/cesium/`: cartografía y experiencia InGe Earth sobre Cesium.
 
-- Código C++/Qt y QML.
-- Interfaz móvil QML.
-- Login / registro con Supabase.
-- Organizador de documentos.
-- Mapa / GPS.
-- Editor de calicatas.
-- Exportación de calicatas a Excel.
-- Conversión de ficha editable a Excel.
-- QXlsx para manejo de Excel.
-- Recursos UI reales de Fase 5.4.
-- Recursos Android necesarios para empaquetado.
-- Plantilla `Templates/Calicata_Formato.xlsx`.
+## Compilación
 
-## Estructura principal
+Abrir `CMakeLists.txt` en Qt Creator con Qt 6.9.3 Android arm64-v8a. El kit local actual utiliza NDK `27.2.12479018`, SDK Android y el JBR de Android Studio. También requiere Flutter 3.44.9 y Node.js >=22.12 con npm.
 
-```text
-android/                         Configuración Android y recursos launcher
-images/                          Imágenes usadas por resources.qrc
-qml/Mobile/                      Interfaz móvil QML
-resources/ui/                    Recursos UI Fase 5.4
-Templates/                       Plantilla Excel de calicatas
-thirdparty/QXlsx/                Librería C++ para Excel
-scripts/                         Scripts Git + scripts técnicos usados por resources.qrc
-CMakeLists.txt                   Configuración principal Qt/CMake
-resources.qrc                    Recursos Qt generales
-resources_mobile_raw.qrc         Fallback raw para QML móvil
-```
+Usar un directorio de compilación **fuera** del repositorio, por ejemplo `C:/InGeBuild/A37`. CMake usa las bibliotecas OpenSSL externas del SDK Android y la cartografía se concentra en InGe Earth/Cesium.
 
-## Qué se excluyó
+El CMake actual genera el AAR en `flutter/inge_earth/build/` y los recursos web en `android/assets/inge-ai/`, aunque el directorio CMake sea externo. Son salidas regenerables. Para validar sin generar nada dentro del árbol original, compilar una copia temporal de las fuentes actuales fuera del proyecto, con los mismos archivos y lockfiles. No usar APK extraídas ni fuentes de un build anterior.
 
-- `build/`
-- `.qtcreator/`
-- APK/AAB
-- RAR/ZIP internos
-- scripts viejos de limpieza/log
-- backups `.bak`
-- QML de respaldo `backup/no_borrar`
-- reportes y validaciones generadas
-- Word/PDF
+No borrar `.qtcreator/`, `android/local.properties` ni archivos `.env` locales por su nombre: contienen configuración del kit o del producto. No registrar ni publicar sus valores. Las claves de firma permanecen fuera del repositorio.
 
-## Primer uso en Qt Creator
+## Documentación y comprobaciones
 
-1. Abrir `CMakeLists.txt` desde Qt Creator.
-2. Seleccionar kit Android o Desktop.
-3. Ejecutar CMake Configure.
-4. Revisar `docs/CHECKLIST_COMPILACION.md`.
+- [Contrato actual de Calicatas Web ↔ Android](docs/CALICATAS_CONVERGENCIA_WEB_ANDROID_20261007.md).
+- [Exportación híbrida](docs/CALICATAS_EXPORTACION_HIBRIDA_20261006.md).
+- [Media y sincronización](docs/CALICATAS_MEDIA_BACKEND_P0_20261002.md).
+- [Integración Gemini Live](docs/INGE_GEMINI_LIVE_INTEGRATION_20261005.md).
+- [Diseño INGEMA](docs/INGEMA_DESIGN_SYSTEM_APP_20261006.md).
+- [Material Liquid Glass](docs/LIQUID_GLASS_GLOBAL_20261001.md).
+- [Arnés de Calicatas](tests/calicatas/README.md).
 
-## Subir a GitHub
+`tests/` conserva pruebas estáticas Node, contratos SQL, fixtures y arneses CMake del código real. Flutter mantiene sus pruebas en `flutter/inge_earth/test/`; la consola web expone `npm test` y `npm run check`. Los resultados históricos de documentos no certifican una revisión nueva.
 
-1. Crear un repositorio vacío en GitHub, recomendado como **privado**.
-2. Ejecutar `scripts/00_iniciar_git_local.bat`.
-3. Ejecutar `scripts/01_conectar_y_subir_a_github.bat` y pegar la URL del repo.
-
-## Seguridad
-
-El archivo `appcontext.cpp` conserva configuración de Supabase del proyecto. Para repo público, mover esa configuración antes de subir. Ver `docs/SEGURIDAD_CONFIG.md`.
-
-## Fix V38.6 — mapa y GPS
-
-La V38.6 filtra lecturas de ubicación imprecisas, evita mostrar como GPS una posición de red de ±2000 m, reconstruye el pellizco sobre una sola instancia `Map` y reduce la carga de renderizado del mapa. Véase `docs/FIX_V38_6_GPS_PRECISION_PINCH.md`.
+`resources.qrc`, `resources_mobile_ui_v2.qrc` y el QRC de Propuesta A contienen recursos activos. `resources_mobile_raw.qrc` no se enlaza al APK: se conserva por una prueba estática vigente. No borrar recursos registrados, fuentes, shaders ni licencias por ser antiguos o idénticos a otro archivo.

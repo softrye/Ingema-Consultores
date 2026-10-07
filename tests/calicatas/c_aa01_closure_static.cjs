@@ -69,11 +69,11 @@ test('B · Z manual 718: abrir/explorar/cancelar el mapa no la toca', () => {
     // Cancelar = cerrar (cero persistencia).
     const sheet = block(editor, 'text: "Cancelar"\n                            onClicked: coordinatePicker.close()', '}');
     assert.ok(sheet.includes('coordinatePicker.close()'));
-    // Explorar/tocar el mapa no llama a la ficha; solo mueve el candidato (sin altitud).
-    const tap = block(picker, 'TapHandler {', 'readonly property color controlSurface');
-    assert.ok(tap.includes('root.selectCoordinate(point.latitude, point.longitude, NaN, NaN, "Punto fijado en mapa")'));
-    assert.ok(!/acceptMapPoint|header/.test(tap));
-    // Abrir el mapa no pide GPS.
+    // El selector ya no mantiene un motor cartográfico propio: conserva
+    // el punto técnico y la captura GPS, mientras la cartografía vive en InGe Earth.
+    assert.ok(!/TapHandler\s*\{/.test(picker), 'sin selección cartográfica duplicada dentro de Calicatas');
+    assert.ok(picker.includes('function centerOn(lat, lon)'), 'el host puede restaurar el punto de la ficha');
+    // Abrir el selector no pide GPS.
     const opened = block(picker, 'Component.onCompleted: {', 'Component.onDestruction');
     assert.ok(!/centerGps|requestGpsEnabled|requestFreshFix/.test(opened));
 });
@@ -101,7 +101,7 @@ test('GPS explícito con altitud válida + confirmar => Z actualizada', () => {
     const commit = block(editor, 'function _commitCoordinateCandidate()', '\n    }\n');
     assert.ok(commit.includes('formLoader.item.acceptMapPoint(map.selectedLat, map.selectedLon, map.selectedAlt,'));
     // "Mi ubicación" pasa la altitud del fix (NaN si el dispositivo no la entrega).
-    assert.ok(picker.includes('selectCoordinate(gpsLat, gpsLon, gpsAlt, gpsAccuracy, gpsSourceLabel, false)'));
+    assert.ok(picker.includes('selectCoordinate(gpsLat, gpsLon, gpsAlt, gpsAccuracy,'));
     assert.ok(!/[Gg]emini|elevation\s*api/i.test(accept + apply), 'la cota nunca se estima');
 });
 
@@ -153,18 +153,14 @@ test('E · tramas 0–2 m y 2–3 m: misma escala, más/menos repeticiones, sin 
 });
 
 // ------------------------------------------------------------------ P0-5 / P0-6
-test('Mapa: ningún Timer QML del flujo con intervalo negativo; MapLibre satura a [0, INT_MAX]', () => {
+test('Ubicación: ningún Timer QML del flujo usa intervalo negativo', () => {
     for (const source of [picker, block(editor, 'CalPopup {\n        id: coordinatePicker', 'component CalPopup')]) {
         for (const m of source.matchAll(/interval:\s*([^\n]+)/g))
             assert.ok(/^\d+$/.test(m[1].trim()) && Number(m[1]) > 0, 'intervalo fijo positivo: ' + m[1]);
     }
-    const timer = read('thirdparty/maplibre-native-qt-src/vendor/maplibre-native/platform/qt/src/mbgl/timer.cpp');
-    assert.ok(timer.includes('std::clamp<int64_t>(ms, 0, maxMs)'));
-    assert.ok(!/timer\.start\(static_cast<int>/.test(timer), 'sin estrechamiento a int');
 });
 test('Punto distante: solo al confirmar, con fix real reciente, diálogo Calicatas Cancelar/Confirmar', () => {
-    const tap = block(picker, 'TapHandler {', 'readonly property color controlSurface');
-    assert.ok(!/distantPoint|5000/.test(tap), 'tocar/explorar no advierte');
+    assert.ok(!/TapHandler\s*\{/.test(picker), 'Calicatas ya no selecciona coordenadas por toque');
     assert.ok(!/standardButtons|Dialog \{/.test(picker), 'sin diálogo Qt plano');
     assert.ok(/function distanceToRecentFix\(lat, lon\)/.test(picker));
     const confirm = block(editor, 'id: distantPointConfirm', 'Connections {');

@@ -1097,7 +1097,7 @@ bool PermissionHelper::ensurePositionSource()
 
     // Una sola fuente persistente. El filtro de distancia se implementa en
     // acceptPosition(), porque QGeoPositionInfoSource no expone un distanceFilter
-    // portable. El intervalo evita saturar QML/MapLibre con eventos de 1 Hz.
+    // portable. El intervalo evita saturar QML/mapa con eventos de 1 Hz.
     const int minimum = m_positionSource->minimumUpdateInterval();
     m_positionSource->setUpdateInterval(qMax(kContinuousIntervalMs, minimum));
 
@@ -1312,7 +1312,7 @@ bool PermissionHelper::acceptPosition(const QGeoPositionInfo &info)
 
         // Si el dispositivo esta quieto, Android suele variar centimetros o
         // pocos metros dentro del propio error horizontal. No se publica ese
-        // ruido a QML/MapLibre, por lo que el punto azul deja de parpadear.
+        // ruido a QML/mapa, por lo que el punto azul deja de parpadear.
         if (qIsFinite(distance) && distance < deadband && !accuracyImproved) {
             ++m_suppressedNoiseFixes;
             if (m_suppressedNoiseFixes == 1 || m_suppressedNoiseFixes % 20 == 0) {

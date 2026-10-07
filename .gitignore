@@ -89,9 +89,6 @@ Thumbs.db
 *.backup_*
 *.backup.json
 # Builds y artefactos generados
-/thirdparty/maplibre-build/
-/thirdparty/maplibre-install/
-/thirdparty/maplibre-native-qt-src/
 /thirdparty/*.log
 /outputs/
 /tmp/
@@ -103,14 +100,14 @@ __pycache__/
 .cxx/
 .qt/
 node_modules/
-# Logs y capturas locales de sesiones de reparación
+# Logs y capturas locales de sesiones de reparaciÃ³n
 /*.log
 /.codex_*
 /inge_mapv2_*.png
 /arning*
 /.ingeplus_*.json
 /.ingeplus_*.replaced
-# Configuración local de herramientas/agentes (puede contener claves)
+# ConfiguraciÃ³n local de herramientas/agentes (puede contener claves)
 /.qwen/settings.json
 /opencode.json
 /opencode.*.json

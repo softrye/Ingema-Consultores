@@ -20,33 +20,30 @@ const photoEditor = read('qml/Mobile/pages/CalicataPhotoEditor.qml');
 // ---------------------------------------------------------------- GPS
 {
   const completed = between(picker, 'Component.onCompleted: {', 'Component.onDestruction');
-  assert.ok(!completed.includes('centerGps'), 'abrir el mapa no pide GPS');
-  assert.ok(!/gpsLat|gpsHasFix/.test(completed), 'abrir el mapa no mueve la cámara a la posición del teléfono');
-  assert.ok(completed.includes('INGE_LOCATION_MAP_OPEN'));
+  assert.ok(!completed.includes('centerGps'), 'abrir el selector no pide GPS');
+  assert.ok(!/gpsLat|gpsHasFix/.test(completed), 'abrir el selector no reemplaza el punto de la ficha');
+  assert.ok(completed.includes('INGE_LOCATION_PICKER_OPEN'));
   const apply = between(picker, 'function applyGpsFix()', 'function gpsDiagnostic');
-  assert.ok(apply.includes('if (!awaitingGps) return'), 'un fix solo se acepta tras "Mi ubicación"');
+  assert.ok(apply.includes('if (!awaitingGps || !gpsFixIsFresh())'), 'un fix solo se acepta tras solicitud explícita');
   assert.ok(!apply.includes('var live'), 'sin seguimiento continuo del punto');
   assert.ok(apply.includes('requestGpsEnabled(false)') && apply.includes('_startedTracking'), 'one-shot: apaga el tracking que encendió');
-  assert.ok(between(picker, 'function centerGps()', 'Timer {').includes('INGE_LOCATION_DEVICE_REQUEST'));
-  assert.ok(picker.includes('"Mi ubicación"'));
+  const center = between(picker, 'function centerGps()', 'Timer {');
+  assert.ok(center.includes('requestGpsEnabled(true)') && center.includes('requestFreshFix()'), 'la captura GPS se solicita explícitamente');
+  assert.ok(picker.includes('"Actualizar ubicación GPS"'));
+  assert.ok(!/TapHandler\s*\{/.test(picker), 'sin selección cartográfica duplicada dentro de Calicatas');
   const loaded = between(editor, 'onLoaded: {\n                    var map = item', 'Label {');
   assert.ok(loaded.includes('map.selectCoordinate(') && loaded.includes('"Punto de la ficha"') && !loaded.includes('centerGps'),
-            'el host centra el punto manual de la ficha como candidato');
+            'el host conserva el punto técnico de la ficha como candidato');
   const commit = between(editor, 'text: "Usar esta ubicación"', 'Connections {');
-  // "Usar esta ubicación" = commit del candidato vigente (GPS o punto tocado en el mapa);
-  // solo el punto original de la ficha sin cambios se acepta sin reescribir.
   assert.ok(commit.includes('if (map.selectedSource === "Punto de la ficha") { coordinatePicker.close(); return }')
-            && !commit.includes('fromDevice) {'), 'commit del candidato manual o GPS');
-  assert.ok(/enabled: root\.interactive\s*\n/.test(between(picker, '// El candidato también puede elegirse', 'onTapped')),
-            'el candidato puede moverse tocando el mapa');
-  // El commit vive en _commitCoordinateCandidate (también lo usa "Confirmar" del aviso de distancia).
+            && !commit.includes('fromDevice) {'), 'commit del candidato de ficha o GPS');
   const commitFn = between(editor, 'function _commitCoordinateCandidate()', '\n    }\n');
   assert.ok(commit.includes('root._commitCoordinateCandidate()') && commitFn.includes('INGE_LOCATION_COMMIT')
             && commitFn.includes('acceptMapPoint('), 'solo "Usar esta ubicación" persiste');
   const sheet = editor.slice(editor.indexOf('id: coordinateSheet'));
   const cancel = between(sheet, 'text: "Cancelar"', 'CalButton {');
   assert.ok(cancel.includes('coordinatePicker.close()') && !cancel.includes('acceptMapPoint'), 'cancelar no toca la ficha');
-  pass('GPS: abrir mapa ≠ GPS; "Mi ubicación" explícito y one-shot; confirmar/cancelar correctos');
+  pass('GPS: abrir selector ≠ captura GPS; solicitud one-shot y confirmar/cancelar correctos');
 }
 
 // ---------------------------------------------------------------- Nivel freático
