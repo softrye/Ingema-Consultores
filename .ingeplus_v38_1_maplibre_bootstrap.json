@@ -1,9 +1,0 @@
-{
-  "version": "38.1",
-  "fix": "MapLibre dependency bootstrap for Qt Creator Android kits",
-  "mapEngine": "MapLibre Native Qt",
-  "abi": "arm64-v8a",
-  "autoPrepare": true,
-  "manualEntry": "00_SOLUCIONAR_ERROR_MAPLIBRE.cmd",
-  "log": "thirdparty/maplibre-bootstrap.log"
-}
