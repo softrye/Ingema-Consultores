@@ -1,0 +1,1205 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>InGe Earth</title>
+  <script>window.CESIUM_BASE_URL = './';</script>
+  <link rel="stylesheet" href="Widgets/widgets.css">
+  <link rel="stylesheet" href="ui/inge-earth-ui.css">
+  <style>
+    html, body, #cesiumContainer {
+      width: 100vw;
+      height: 100vh;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #000;
+      touch-action: none;
+    }
+    .cesium-viewer, .cesium-viewer-cesiumWidgetContainer,
+    .cesium-widget, .cesium-widget canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+    }
+    /* ===== Pantalla de carga InGe Earth (solo transform/opacity) ===== */
+    html { background: #07111C; }
+    .earth-boot {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      background: #07111C;
+      color: #F4F8FC;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      opacity: 1;
+      transition: opacity 280ms cubic-bezier(0.22, 1, 0.36, 1);
+      pointer-events: auto;
+    }
+    .earth-boot.done { opacity: 0; pointer-events: none; }
+    /* Anillo: port de FluentUI · FluProgressRing (MIT, (c) 2023 zhuzichu),
+       calicatas/FluentUI-main.zip → src/Qt6/imports/FluentUI/Controls/
+       FluProgressRing.qml. Mismas secuencias lineales de 2000 ms:
+       startAngle 0→450→1080 (rotación) y sweepAngle 0→180→0 (dash),
+       arco desde −90°, lineCap round, radio = size/2 − stroke/2. */
+    .earth-boot-ring {
+      width: 48px;
+      height: 48px;
+      margin-bottom: 6px;
+      animation: earthRingStart 2s linear infinite;
+      will-change: transform;
+    }
+    .earth-boot-ring circle {
+      fill: none;
+      stroke-width: 3;
+    }
+    .earth-boot-ring .track { stroke: rgba(255, 255, 255, 0.12); }
+    .earth-boot-ring .arc {
+      stroke: #CFE3F5;
+      stroke-linecap: round;
+      transform: rotate(-90deg);
+      transform-origin: 24px 24px;
+      stroke-dasharray: 0 141.372;
+      animation: earthRingSweep 2s linear infinite;
+    }
+    @keyframes earthRingStart {
+      0% { transform: rotate(0deg); }
+      50% { transform: rotate(450deg); }
+      100% { transform: rotate(1080deg); }
+    }
+    @keyframes earthRingSweep {
+      0% { stroke-dasharray: 0 141.372; }
+      50% { stroke-dasharray: 70.686 141.372; }
+      100% { stroke-dasharray: 0 141.372; }
+    }
+    .earth-boot-title { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: 0.2px; }
+    .earth-boot-phase { margin: 0; min-height: 18px; font-size: 13px; color: #8FA3B8; }
+    .earth-boot-steps { display: flex; gap: 6px; margin-top: 4px; }
+    .earth-boot-steps i {
+      display: block;
+      width: 18px;
+      height: 3px;
+      border-radius: 2px;
+      background: rgba(159, 179, 200, 0.25);
+      transition: background-color 220ms ease;
+    }
+    .earth-boot-steps i.on { background: #7CC4FF; }
+    @keyframes earthBootSpin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      .earth-boot-ring, .earth-boot-ring .arc { animation: none; }
+    }
+    .earth-hd-chip {
+      position: fixed;
+      left: 50%;
+      top: calc(max(12px, env(safe-area-inset-top)) + 64px);
+      z-index: 40;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: rgba(6, 14, 24, 0.55);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: rgba(232, 240, 248, 0.85);
+      font: 500 11px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      opacity: 0;
+      transform: translate(-50%, -6px);
+      transition: opacity 200ms ease, transform 200ms ease;
+      pointer-events: none;
+    }
+    .earth-hd-chip.show { opacity: 1; transform: translate(-50%, 0); }
+    .earth-hd-chip b {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      border: 1.5px solid rgba(124, 196, 255, 0.3);
+      border-top-color: #7CC4FF;
+      animation: earthBootSpin 900ms linear infinite;
+    }
+    .earth-hd-chip:not(.show) b { animation: none; }
+    #streetViewContainer {
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      display: none;
+      background: #000;
+    }
+    #streetViewPanorama {
+      position: absolute;
+      inset: 0;
+    }
+    #streetViewExit {
+      position: absolute;
+      top: max(12px, env(safe-area-inset-top));
+      right: 12px;
+      z-index: 2;
+      min-height: 40px;
+      padding: 8px 14px;
+      border: 1px solid rgba(255, 255, 255, 0.55);
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.72);
+      color: #fff;
+      font: 600 14px sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <div id="earthBoot" class="earth-boot" role="status" aria-live="polite">
+    <svg class="earth-boot-ring" viewBox="0 0 48 48" aria-hidden="true">
+      <circle class="track" cx="24" cy="24" r="22.5"></circle>
+      <circle class="arc" cx="24" cy="24" r="22.5"></circle>
+    </svg>
+    <p class="earth-boot-title">Preparando InGe Earth</p>
+    <p id="earthBootPhase" class="earth-boot-phase">Preparando interfaz…</p>
+  </div>
+  <div id="earthHdChip" class="earth-hd-chip" role="status" aria-live="polite"><b></b><span>Cargando imágenes en alta definición…</span></div>
+  <script>
+    // Contrato de carga de Earth: fases reales, sin porcentajes inventados.
+    (() => {
+      'use strict';
+      const boot = document.getElementById('earthBoot');
+      const phaseText = document.getElementById('earthBootPhase');
+      const steps = boot.querySelectorAll('.earth-boot-steps i');
+      const chip = document.getElementById('earthHdChip');
+      let dismissed = false;
+      let hdPending = 0;
+      const api = {
+        phase(index, text) {
+          if (dismissed) return;
+          phaseText.textContent = text;
+          steps.forEach((step, i) => step.classList.toggle('on', i < index));
+        },
+        ready() {
+          if (dismissed) return;
+          dismissed = true;
+          clearTimeout(safetyTimer);
+          requestAnimationFrame(() => {
+            boot.classList.add('done');
+            setTimeout(() => { boot.hidden = true; }, 320);
+            chip.classList.toggle('show', hdPending > 0);
+          });
+        },
+        hdLoading(active) {
+          hdPending = Math.max(0, hdPending + (active ? 1 : -1));
+          if (dismissed) chip.classList.toggle('show', hdPending > 0);
+        }
+      };
+      // Seguridad: nunca retener la pantalla si WebGL no produce frame.
+      const safetyTimer = setTimeout(() => api.ready(), 15000);
+      window.InGeEarthBoot = api;
+    })();
+  </script>
+  <div id="cesiumContainer"></div>
+  <main id="earthUi" class="earth-ui minimal-shell" aria-label="Controles de InGe Earth">
+    <form id="earthSearch" class="search-bar glass" role="search">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/>
+      </svg>
+      <input id="earthSearchInput" type="search" inputmode="search"
+        autocomplete="off" enterkeyhint="search"
+        placeholder="Buscar"
+        aria-label="Buscar lugares o coordenadas">
+      <span id="searchProgress" class="search-progress" aria-hidden="true"></span>
+    </form>
+    <aside id="earthQuickActions" class="earth-quick-actions"
+      aria-label="Acciones rápidas de InGe Earth">
+      <button type="button" data-earth-action="global"
+        aria-label="Restablecer orientación" title="Orientación">
+        <img id="earthCompassIcon" src="ui/icons/explore.svg" alt="">
+      </button>
+      <button type="button" data-earth-action="location"
+        aria-label="Ir a mi ubicación" title="Mi ubicación">
+        <img src="ui/icons/my_location.svg" alt="">
+      </button>
+      <button type="button" data-earth-action="layers"
+        aria-label="Abrir capas y relieve" title="Capas y relieve">
+        <img src="ui/icons/layers.svg" alt="">
+      </button>
+      <button type="button" data-earth-action="measure"
+        aria-label="Medir distancia" title="Medir">
+        <img src="ui/icons/straighten.svg" alt="">
+      </button>
+    </aside>
+
+    <section id="layersSheet" class="floating-sheet glass" aria-labelledby="layersTitle" hidden>
+      <div class="sheet-title-row">
+        <h2 id="layersTitle">Detalles del mapa</h2>
+        <button class="icon-button sheet-close" type="button" aria-label="Cerrar capas">
+          <img src="ui/icons/close.svg" alt="">
+        </button>
+      </div>
+      <p class="map-section-label">DETALLES DEL MAPA</p>
+      <label class="toggle-row map-detail-row" for="reliefToggle">
+        <span><strong>Relieve</strong><small>Topografía y elevación</small></span>
+        <input id="reliefToggle" type="checkbox"><i aria-hidden="true"></i>
+      </label>
+      <p id="reliefStatus" class="map-runtime-status" hidden></p>
+      <p class="map-section-label">HERRAMIENTAS DEL MAPA</p>
+      <button id="routeDurationButton" class="map-action-row" type="button">
+        <span><strong>Duración del trayecto</strong><small>Automóvil · acceso vial</small></span><b aria-hidden="true">›</b>
+      </button>
+      <p class="map-section-label">TIPO DE MAPA</p>
+      <div class="map-type-grid" role="group" aria-label="Tipo de mapa">
+        <button id="defaultMapButton" class="map-type-card" type="button" data-map-type="DEFAULT" aria-pressed="false">Predeterminado</button>
+        <button id="satelliteMapButton" class="map-type-card selected" type="button" data-map-type="SATELLITE" aria-pressed="true">Satélite</button>
+      </div>
+      <p class="map-section-label">CAPAS DEL PROYECTO</p>
+      <div id="projectLayers" class="project-layers"><p class="empty-state">Abre un proyecto para administrar sus capas.</p></div>
+    </section>
+
+    <section id="measurePanel" class="measure-panel glass" aria-live="polite" hidden>
+      <div><strong id="measureKind">Distancia</strong><span id="measureDistance">0 m</span><small id="measureHint">Toca puntos para medir</small></div>
+      <button id="finishMeasure" type="button">Terminar</button>
+      <button id="measureModeToggle" type="button">Área</button>
+      <button id="saveMeasure" type="button" hidden>Guardar</button>
+      <button id="clearMeasure" type="button" aria-label="Limpiar medición" title="Limpiar medición">↶</button>
+    </section>
+
+    <section id="contextSheet" class="context-sheet glass closed" aria-live="polite" aria-labelledby="contextTitle">
+      <button id="sheetHandle" class="sheet-handle" type="button" aria-label="Expandir o contraer ficha"><span></span></button>
+      <div class="context-heading">
+        <img id="contextIcon" src="ui/icons/place.svg" alt="">
+        <div><h2 id="contextTitle">Punto seleccionado</h2><p id="contextSubtitle">InGe Earth</p></div>
+      </div>
+      <dl id="coordinateDetails">
+        <div><dt>Latitud</dt><dd id="contextLatitude">—</dd></div>
+        <div><dt>Longitud</dt><dd id="contextLongitude">—</dd></div>
+        <div><dt>Altitud</dt><dd id="contextAltitude">—</dd></div>
+        <div class="utm-value"><dt>UTM</dt><dd id="contextUtm">—</dd></div>
+      </dl>
+      <p id="aboutDetails" hidden>InGe Earth<br>Herramientas geoespaciales para ingeniería</p>
+      <div id="contextActions" class="context-actions">
+        <button id="copyCoordinates" type="button"><img src="ui/icons/content_copy.svg" alt="">Copiar WGS84</button>
+        <button id="copyUtm" type="button"><img src="ui/icons/content_copy.svg" alt="">Copiar UTM</button>
+        <button id="useInCalicata" type="button">Usar en Calicata</button>
+        <button id="closeContext" type="button"><img src="ui/icons/close.svg" alt="">Cerrar</button>
+      </div>
+    </section>
+    <section id="workspaceSheet" class="workspace-sheet glass" hidden>
+      <header><div><h2 id="workspaceTitle">Proyectos</h2><small id="workspaceSubtitle">Guardados en este dispositivo</small></div><button class="icon-button" data-close="workspace" type="button" aria-label="Cerrar"><img src="ui/icons/close.svg" alt=""></button></header>
+      <div id="workspaceContent"></div>
+    </section>
+    <section id="interactionBar" class="interaction-bar glass" hidden>
+      <div><strong id="interactionTitle">Crear</strong><small id="interactionHint">Toca el mapa</small></div>
+      <button id="interactionUndo" type="button">Deshacer</button>
+      <button id="interactionGps" type="button" hidden>Usar GPS</button>
+      <button id="interactionFinish" type="button">Terminar</button>
+      <button id="interactionCancel" type="button">Cancelar</button>
+    </section>
+    <section id="routeSheet" class="route-sheet glass" aria-labelledby="routeTitle" hidden>
+      <div class="sheet-title-row">
+        <h2 id="routeTitle">Duración del trayecto</h2>
+        <button id="routeClose" class="icon-button" type="button" aria-label="Cerrar trayecto"><img src="ui/icons/close.svg" alt=""></button>
+      </div>
+      <p id="routePrompt" class="route-prompt">Selecciona el origen en el mapa</p>
+      <div id="routeResult" class="route-result" hidden>
+        <div><small>Distancia</small><strong id="routeDistance">—</strong></div>
+        <div><small>Tiempo estimado</small><strong id="routeTime">—</strong></div>
+      </div>
+      <div class="route-actions">
+        <button type="button" data-route-action="origin">Origen</button>
+        <button type="button" data-route-action="destination">Destino</button>
+        <button type="button" data-route-action="recalculate">Recalcular</button>
+        <button type="button" data-route-action="close">Cerrar</button>
+      </div>
+    </section>
+    <div id="modalScrim" class="modal-scrim" hidden>
+      <form id="earthDialog" class="earth-dialog glass">
+        <h2 id="dialogTitle"></h2><p id="dialogMessage" hidden></p><div id="dialogFields"></div>
+        <div class="dialog-actions"><button id="dialogCancel" type="button">Cancelar</button><button id="dialogAccept" type="submit">Aceptar</button></div>
+      </form>
+    </div>
+    <div id="earthToast" class="earth-toast glass" role="status" aria-live="polite"></div>
+  </main>
+  <div id="streetViewContainer">
+    <div id="streetViewPanorama"></div>
+    <button id="streetViewExit" type="button">× Volver</button>
+  </div>
+  <script src="Cesium.js"></script>
+  <script>
+    (() => {
+      'use strict';
+      const bootStartedAt = performance.now();
+      const earthBoot = window.InGeEarthBoot
+        || { phase() {}, ready() {}, hdLoading() {} };
+      earthBoot.phase(2, 'Inicializando mapa…');
+      const nativeLog = (message) => {
+        if (window.InGeEarthTelemetry
+            && typeof window.InGeEarthTelemetry.post === 'function') {
+          window.InGeEarthTelemetry.post(message);
+          return;
+        }
+        console.info(message);
+      };
+      const configuredIonToken = window.InGeEarthConfig
+        && typeof window.InGeEarthConfig.getCesiumIonToken === 'function'
+        ? String(window.InGeEarthConfig.getCesiumIonToken() || '').trim()
+        : '';
+      const ionConfigured = configuredIonToken.length > 0;
+      if (ionConfigured) {
+        Cesium.Ion.defaultAccessToken = configuredIonToken;
+        nativeLog('INGE_EARTH_ION_TOKEN=CONFIGURED');
+      } else {
+        nativeLog('INGE_EARTH_ION_TOKEN=MISSING');
+      }
+      const configuredGoogleMapsApiKey = window.InGeEarthConfig
+        && typeof window.InGeEarthConfig.getGoogleMapsApiKey === 'function'
+        ? String(window.InGeEarthConfig.getGoogleMapsApiKey() || '').trim()
+        : '';
+      const streetViewKeyConfigured = configuredGoogleMapsApiKey.length > 0;
+      nativeLog(`INGE_EARTH_STREETVIEW_KEY=${streetViewKeyConfigured
+        ? 'CONFIGURED' : 'NOT_CONFIGURED'}`);
+      nativeLog('INGE_EARTH_PHOTOREALISTIC_API=createGooglePhotorealistic3DTileset');
+      const configuredTier = window.InGeEarthConfig
+        && typeof window.InGeEarthConfig.getEarthPerformanceTier === 'function'
+        ? String(window.InGeEarthConfig.getEarthPerformanceTier() || '').toUpperCase()
+        : 'MID';
+      const qualityTier = configuredTier === 'LOW' || configuredTier === 'HIGH'
+        ? configuredTier : 'MID';
+      window.InGeEarthPerformanceTier = qualityTier;
+      const devicePixelRatio = Math.max(1, window.devicePixelRatio || 1);
+      const targetEffectivePixelRatio = qualityTier === 'LOW'
+        ? 1.55 : qualityTier === 'MID'
+          ? 1.75 : Math.min(devicePixelRatio, 2.0);
+      // LOW tier (e.g. Mali-G52 / <4 GB): photorealistic tiles at 0.8 / SSE 8
+      // kept the GPU saturated (2-5 fps refined, 1 s Davey frames), so this
+      // tier refines to a lighter target instead of the MID/HIGH floor of 0.8.
+      const refinedResolutionScale = qualityTier === 'LOW' ? 0.62
+        : Math.max(0.8, Math.min(1.0, targetEffectivePixelRatio / devicePixelRatio));
+      const movingResolutionScale = qualityTier === 'LOW'
+        ? 0.42 : refinedResolutionScale * (qualityTier === 'MID' ? 0.80 : 0.88);
+      const settlingResolutionScale = qualityTier === 'LOW'
+        ? 0.52 : refinedResolutionScale * (qualityTier === 'MID' ? 0.92 : 0.95);
+      const refinedGoogleSse = qualityTier === 'LOW'
+        ? 16 : qualityTier === 'MID' ? 6 : 4;
+      const movingGoogleSse = qualityTier === 'LOW'
+        ? 32 : qualityTier === 'MID' ? 16 : 12;
+      const settlingGoogleSse = qualityTier === 'LOW'
+        ? 24 : qualityTier === 'MID' ? 10 : 8;
+      // Sticky guard: after two slow windows while moving, REFINED stays at
+      // the SETTLING budget for the rest of the Earth session (no oscillation).
+      let refinedCapped = false;
+      let slowMovingWindows = 0;
+      const movingFoveatedDelay = qualityTier === 'LOW' ? 0.35 : 0.20;
+      const settlingFoveatedDelay = qualityTier === 'LOW' ? 0.15 : 0.10;
+      const refinedFoveatedDelay = 0.05;
+      const msaaSamples = qualityTier === 'LOW' ? 1 : qualityTier === 'MID' ? 2 : 4;
+      const cullRequestsMultiplier = qualityTier === 'LOW' ? 80 : 60;
+      const progressiveResolutionFraction = qualityTier === 'LOW'
+        ? 0.20 : qualityTier === 'MID' ? 0.25 : 0.30;
+      const cacheBytes = (qualityTier === 'LOW' ? 96
+        : qualityTier === 'MID' ? 256 : 384) * 1024 * 1024;
+      const maximumCacheOverflowBytes = (qualityTier === 'LOW' ? 32
+        : qualityTier === 'MID' ? 128 : 192) * 1024 * 1024;
+      const naturalEarth = new Cesium.UrlTemplateImageryProvider({
+        url: Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII/{z}/{x}/{reverseY}.jpg'),
+        tilingScheme: new Cesium.GeographicTilingScheme(),
+        maximumLevel: 2
+      });
+      const ellipsoidTerrain = new Cesium.EllipsoidTerrainProvider();
+
+      const viewer = new Cesium.Viewer('cesiumContainer', {
+        scene3DOnly: true,
+        sceneMode: Cesium.SceneMode.SCENE3D,
+        baseLayer: false,
+        terrainProvider: ellipsoidTerrain,
+        msaaSamples,
+        requestRenderMode: true,
+        maximumRenderTimeChange: Infinity,
+        animation: false,
+        baseLayerPicker: false,
+        fullscreenButton: false,
+        geocoder: Cesium.IonGeocodeProviderType.GOOGLE,
+        homeButton: false,
+        infoBox: false,
+        navigationHelpButton: false,
+        sceneModePicker: false,
+        selectionIndicator: false,
+        timeline: false,
+        vrButton: false
+      });
+      viewer.useBrowserRecommendedResolution = false;
+      viewer.resolutionScale = refinedResolutionScale;
+      let earthRenderRequested = false;
+      window.requestEarthRender = () => {
+        if (window.InGeEarthPageVisible === false || earthRenderRequested)
+          return false;
+        earthRenderRequested = true;
+        viewer.scene.requestRender();
+        return true;
+      };
+      const naturalEarthLayer = viewer.imageryLayers.addImageryProvider(naturalEarth, 0);
+      nativeLog('INGE_EARTH_LOCAL_READY');
+      earthBoot.phase(3, 'Preparando terreno…');
+      nativeLog([
+        `INGE_EARTH_MSAA=${msaaSamples}`,
+        `INGE_EARTH_REQUEST_RENDER_MODE=${viewer.scene.requestRenderMode}`,
+        `INGE_EARTH_CACHE_MB=${cacheBytes / (1024 * 1024)}`,
+        `INGE_EARTH_CULL_MULTIPLIER=${cullRequestsMultiplier}`
+      ].join('\n'));
+
+      const controls = viewer.scene.screenSpaceCameraController;
+      controls.enableInputs = true;
+      controls.enableRotate = true;
+      controls.enableZoom = true;
+      controls.enableTilt = true;
+      controls.enableLook = true;
+
+      viewer.camera.setView({
+        destination: Cesium.Cartesian3.fromDegrees(-74.5, -9.2, 24000000),
+        orientation: {
+          heading: 0,
+          pitch: -Cesium.Math.PI_OVER_TWO,
+          roll: 0
+        }
+      });
+
+      const failureType = (error) => {
+        let type = error && error.name;
+        if (!type && error && error.constructor)
+          type = error.constructor.name;
+        if (!type)
+          type = typeof error;
+        return String(type || 'UNKNOWN')
+          .replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 48);
+      };
+
+      let worldFallbackStarted = false;
+      const activateWorldFallback = () => {
+        viewer.scene.globe.show = true;
+        nativeLog('INGE_EARTH_BASE_MODE=WORLD_FALLBACK');
+        nativeLog('INGE_EARTH_GLOBE_VISIBLE=YES');
+        if (worldFallbackStarted || !ionConfigured)
+          return;
+        worldFallbackStarted = true;
+
+        let remoteImageryActivated = false;
+        let remoteImageryFailureLogged = false;
+        nativeLog('INGE_EARTH_REMOTE_IMAGERY_REQUESTED');
+        earthBoot.hdLoading(true);
+        const worldImageryLayer = Cesium.ImageryLayer.fromWorldImagery({
+          style: Cesium.IonWorldImageryStyle.AERIAL
+        });
+        worldImageryLayer.readyEvent.addEventListener(() => {
+          if (remoteImageryActivated)
+            return;
+          remoteImageryActivated = true;
+          viewer.imageryLayers.add(worldImageryLayer);
+          earthBoot.hdLoading(false);
+          nativeLog('INGE_EARTH_REMOTE_IMAGERY_READY');
+          nativeLog('INGE_EARTH_PROVIDER=CESIUM_WORLD_IMAGERY');
+        });
+        worldImageryLayer.errorEvent.addEventListener((error) => {
+          if (remoteImageryFailureLogged)
+            return;
+          remoteImageryFailureLogged = true;
+          if (!remoteImageryActivated) earthBoot.hdLoading(false);
+          nativeLog(`INGE_EARTH_REMOTE_IMAGERY_FAIL=${failureType(error)}`);
+        });
+
+      };
+
+      let photorealisticTileset = null;
+      window.InGeEarthBaseRuntime = {
+        mapType: 'SATELLITE',
+        reliefEnabled: false,
+        ionConfigured,
+        ellipsoidTerrain,
+        naturalEarthLayer,
+        getPhotorealisticTileset: () => photorealisticTileset
+      };
+      const SETTLING_DELAY_MS = 220;
+      const REFINED_INPUT_QUIET_MS = 650;
+      const CAMERA_QUIET_MS = 250;
+      const CAMERA_RECHECK_MS = 150;
+      let settlingTimer = 0;
+      let refinementTimer = 0;
+      let userInteracting = false;
+      let lastUserInputAt = performance.now();
+      let lastCameraChangeAt = performance.now();
+      let qualityGeneration = 0;
+      let lastQualityState = '';
+      const clearQualityTimers = () => {
+        if (settlingTimer) {
+          clearTimeout(settlingTimer);
+          settlingTimer = 0;
+        }
+        if (refinementTimer) {
+          clearTimeout(refinementTimer);
+          refinementTimer = 0;
+        }
+      };
+      const applyGoogleQualityState = (
+          state, resolutionScale, screenSpaceError, foveatedDelay, trigger) => {
+        if (!photorealisticTileset || lastQualityState === state)
+          return false;
+        lastQualityState = state;
+        viewer.resolutionScale = Math.min(refinedResolutionScale, resolutionScale);
+        photorealisticTileset.maximumScreenSpaceError = screenSpaceError;
+        photorealisticTileset.foveatedTimeDelay = foveatedDelay;
+        const qualityLog = [
+          `INGE_EARTH_QUALITY_STATE=${state}`,
+          `INGE_EARTH_RESOLUTION_SCALE=${viewer.resolutionScale.toFixed(3)}`,
+          `INGE_EARTH_GOOGLE_MAX_SSE=${screenSpaceError}`
+        ];
+        if (trigger)
+          qualityLog.push(`INGE_EARTH_QUALITY_TRIGGER=${trigger}`);
+        nativeLog(qualityLog.join('\n'));
+        window.requestEarthRender();
+        return true;
+      };
+      const startUserQualityMovement = () => {
+        qualityGeneration += 1;
+        clearQualityTimers();
+        applyGoogleQualityState('MOVING', movingResolutionScale,
+          movingGoogleSse, movingFoveatedDelay, 'USER_INPUT');
+      };
+      const scheduleQualityRecovery = (settlingTrigger) => {
+        if (!photorealisticTileset || userInteracting)
+          return;
+        const generation = qualityGeneration;
+        clearQualityTimers();
+        const now = performance.now();
+        const settlingDelay = Math.max(0,
+          SETTLING_DELAY_MS - (now - lastUserInputAt));
+        settlingTimer = setTimeout(() => {
+          settlingTimer = 0;
+          if (generation !== qualityGeneration || userInteracting)
+            return;
+          applyGoogleQualityState('SETTLING', settlingResolutionScale,
+            settlingGoogleSse, settlingFoveatedDelay, settlingTrigger);
+        }, settlingDelay);
+        const tryRefined = () => {
+          refinementTimer = 0;
+          if (generation !== qualityGeneration || userInteracting)
+            return;
+          const checkAt = performance.now();
+          const inputQuietMs = checkAt - lastUserInputAt;
+          const cameraQuietMs = checkAt - lastCameraChangeAt;
+          if (inputQuietMs < REFINED_INPUT_QUIET_MS
+              || cameraQuietMs < CAMERA_QUIET_MS) {
+            if (inputQuietMs >= SETTLING_DELAY_MS)
+              applyGoogleQualityState('SETTLING', settlingResolutionScale,
+                settlingGoogleSse, settlingFoveatedDelay, settlingTrigger);
+            refinementTimer = setTimeout(tryRefined, CAMERA_RECHECK_MS);
+            return;
+          }
+          if (refinedCapped)
+            applyGoogleQualityState('REFINED', settlingResolutionScale,
+              settlingGoogleSse, refinedFoveatedDelay, 'CAMERA_QUIET_CAPPED');
+          else
+            applyGoogleQualityState('REFINED', refinedResolutionScale,
+              refinedGoogleSse, refinedFoveatedDelay, 'CAMERA_QUIET');
+        };
+        refinementTimer = setTimeout(tryRefined, Math.max(0,
+          REFINED_INPUT_QUIET_MS - (now - lastUserInputAt)));
+      };
+
+      viewer.camera.changed.addEventListener(() => {
+        if (window.InGeEarthPageVisible === false)
+          return;
+        lastCameraChangeAt = performance.now();
+      });
+      viewer.camera.moveEnd.addEventListener(() => {
+        if (window.InGeEarthPageVisible === false)
+          return;
+        scheduleQualityRecovery('CAMERA_QUIET');
+      });
+
+      const googleTilesetOptions = {
+        maximumScreenSpaceError: refinedGoogleSse,
+        dynamicScreenSpaceError: false,
+        foveatedScreenSpaceError: true,
+        foveatedTimeDelay: refinedFoveatedDelay,
+        cullRequestsWhileMoving: true,
+        cullRequestsWhileMovingMultiplier: cullRequestsMultiplier,
+        preloadWhenHidden: false,
+        preloadFlightDestinations: qualityTier === 'HIGH',
+        progressiveResolutionHeightFraction: progressiveResolutionFraction,
+        cacheBytes,
+        maximumCacheOverflowBytes
+      };
+      if (qualityTier !== 'HIGH') {
+        googleTilesetOptions.shadows = Cesium.ShadowMode.DISABLED;
+        googleTilesetOptions.showOutline = false;
+      }
+
+      if (ionConfigured) {
+        nativeLog('INGE_EARTH_PHOTOREALISTIC_REQUESTED');
+        earthBoot.hdLoading(true);
+        Cesium.createGooglePhotorealistic3DTileset({
+          onlyUsingWithGoogleGeocoder: true
+        }, googleTilesetOptions)
+          .then((tileset) => {
+            if (photorealisticTileset)
+              return;
+            earthBoot.hdLoading(false);
+            photorealisticTileset = viewer.scene.primitives.add(tileset);
+            photorealisticTileset.maximumScreenSpaceError = refinedGoogleSse;
+            photorealisticTileset.dynamicScreenSpaceError = false;
+            photorealisticTileset.foveatedScreenSpaceError = true;
+            photorealisticTileset.foveatedTimeDelay = refinedFoveatedDelay;
+            const satelliteActive = window.InGeEarthBaseRuntime.mapType === 'SATELLITE';
+            photorealisticTileset.show = satelliteActive;
+            viewer.scene.globe.show = !satelliteActive
+              || window.InGeEarthBaseRuntime.reliefEnabled;
+            nativeLog('INGE_EARTH_PHOTOREALISTIC_READY');
+            nativeLog(`INGE_EARTH_BASE_MODE=${satelliteActive
+              ? 'GOOGLE_PHOTOREALISTIC_ONLY' : 'DEFAULT_CARTOGRAPHIC'}`);
+            nativeLog(`INGE_EARTH_GLOBE_VISIBLE=${viewer.scene.globe.show ? 'YES' : 'NO'}`);
+            nativeLog('INGE_EARTH_GOOGLE_DYNAMIC_SSE=false');
+            nativeLog('INGE_EARTH_GOOGLE_FOVEATED=true');
+            nativeLog('INGE_EARTH_GOOGLE_FOVEATED_DELAY=0.05');
+            applyGoogleQualityState('REFINED', refinedResolutionScale,
+              refinedGoogleSse, refinedFoveatedDelay);
+          }).catch((error) => {
+            nativeLog(`INGE_EARTH_PHOTOREALISTIC_FAIL=${failureType(error)}`);
+            earthBoot.hdLoading(false);
+            activateWorldFallback();
+          });
+      } else {
+        activateWorldFallback();
+      }
+
+      let lastFrameAt = 0;
+      let renderWindowStartedAt = performance.now();
+      let renderWindowLastFrameAt = 0;
+      const RENDER_SAMPLE_LIMIT = 240;
+      const renderFrameIntervals = new Float32Array(RENDER_SAMPLE_LIMIT);
+      let renderSampleCount = 0;
+      let renderSampleCursor = 0;
+      let renderIntervalTotal = 0;
+      let renderStall100 = 0;
+      let renderStall250 = 0;
+      let renderStall500 = 0;
+      window.InGeEarthPageVisible = true;
+      let resolutionLogged = false;
+      const canvas = viewer.scene.canvas;
+      const cesiumContainer = document.getElementById('cesiumContainer');
+      const streetViewContainer = document.getElementById('streetViewContainer');
+      const streetViewPanoramaElement = document.getElementById('streetViewPanorama');
+      const streetViewExit = document.getElementById('streetViewExit');
+      const streetViewRuntimeEnabled = false;
+      const AUTO_ENTER_HEIGHT_METERS = 35;
+      const STREETVIEW_PRIMARY_RADIUS_METERS = 60;
+      const STREETVIEW_FALLBACK_RADIUS_METERS = 80;
+      const STREETVIEW_IDLE_MS = 700;
+      const STREETVIEW_COOLDOWN_MS = 20000;
+      const STREETVIEW_COOLDOWN_DISTANCE_METERS = 50;
+      const STREETVIEW_REARM_HEIGHT_METERS = 80;
+      const STREETVIEW_REARM_DISTANCE_METERS = 100;
+      let mapsApiState = 'UNLOADED';
+      let mapsApiPromise = null;
+      let streetViewService = null;
+      let streetViewPanorama = null;
+      let streetViewCheckTimer = 0;
+      let streetViewCheckInFlight = false;
+      let streetViewActive = false;
+      let lastRealInputAt = performance.now();
+      let lastStreetViewCheckAt = 0;
+      let lastStreetViewCheckPosition = null;
+      let streetViewAutoEntryBlocked = false;
+      let streetViewExitPosition = null;
+      let activeStreetViewLocation = null;
+      let savedCesiumState = null;
+
+      const distanceMeters = (first, second) => {
+        if (!first || !second)
+          return Infinity;
+        const latitude1 = Cesium.Math.toRadians(first.lat);
+        const latitude2 = Cesium.Math.toRadians(second.lat);
+        const deltaLatitude = latitude2 - latitude1;
+        const deltaLongitude = Cesium.Math.toRadians(second.lng - first.lng);
+        const sinLatitude = Math.sin(deltaLatitude / 2);
+        const sinLongitude = Math.sin(deltaLongitude / 2);
+        const haversine = sinLatitude * sinLatitude
+          + Math.cos(latitude1) * Math.cos(latitude2)
+          * sinLongitude * sinLongitude;
+        return 6371008.8 * 2 * Math.atan2(
+          Math.sqrt(haversine), Math.sqrt(Math.max(0, 1 - haversine)));
+      };
+
+      const pickStreetViewLocation = () => {
+        const center = new Cesium.Cartesian2(
+          canvas.clientWidth / 2, canvas.clientHeight / 2);
+        let position;
+        if (viewer.scene.pickPositionSupported) {
+          try {
+            position = viewer.scene.pickPosition(center);
+          } catch (ignored) {
+            position = undefined;
+          }
+        }
+        if (!Cesium.defined(position)) {
+          try {
+            position = viewer.camera.pickEllipsoid(
+              center, viewer.scene.globe.ellipsoid);
+          } catch (ignored) {
+            position = undefined;
+          }
+        }
+        if (!Cesium.defined(position))
+          return null;
+        const cartographic = Cesium.Cartographic.fromCartesian(position);
+        if (!cartographic)
+          return null;
+        const location = {
+          lat: Cesium.Math.toDegrees(cartographic.latitude),
+          lng: Cesium.Math.toDegrees(cartographic.longitude)
+        };
+        return Number.isFinite(location.lat) && Number.isFinite(location.lng)
+          ? location : null;
+      };
+
+      const loadGoogleMapsApi = () => {
+        if (!streetViewKeyConfigured)
+          return Promise.reject(new Error('KEY_NOT_CONFIGURED'));
+        if (mapsApiState === 'READY')
+          return Promise.resolve();
+        if (mapsApiState === 'LOADING')
+          return mapsApiPromise;
+        if (mapsApiState === 'FAILED')
+          return Promise.reject(new Error('MAPS_JS_LOAD'));
+        mapsApiState = 'LOADING';
+        mapsApiPromise = new Promise((resolve, reject) => {
+          const callbackName = '__ingeEarthStreetViewApiReady';
+          window[callbackName] = () => {
+            delete window[callbackName];
+            mapsApiState = 'READY';
+            nativeLog('INGE_EARTH_STREETVIEW_API=READY');
+            resolve();
+          };
+          const script = document.createElement('script');
+          script.id = 'ingeEarthStreetViewApi';
+          script.async = true;
+          script.defer = true;
+          script.referrerPolicy = 'origin';
+          script.src = 'https://maps.googleapis.com/maps/api/js?key='
+            + encodeURIComponent(configuredGoogleMapsApiKey)
+            + '&callback=' + callbackName + '&v=weekly';
+          script.onerror = () => {
+            delete window[callbackName];
+            mapsApiState = 'FAILED';
+            nativeLog('INGE_EARTH_STREETVIEW_ERROR=MAPS_JS_LOAD');
+            reject(new Error('MAPS_JS_LOAD'));
+          };
+          document.head.appendChild(script);
+        });
+        return mapsApiPromise;
+      };
+
+      const panoramaLocation = (data, fallback) => {
+        const latLng = data && data.location && data.location.latLng;
+        if (latLng && typeof latLng.lat === 'function'
+            && typeof latLng.lng === 'function') {
+          return { lat: latLng.lat(), lng: latLng.lng() };
+        }
+        return fallback;
+      };
+
+      const restoreCesiumAfterStreetView = (logExit) => {
+        if (streetViewPanorama)
+          streetViewPanorama.setVisible(false);
+        streetViewContainer.style.display = 'none';
+        cesiumContainer.style.display = 'block';
+        if (savedCesiumState) {
+          viewer.scene.requestRenderMode = savedCesiumState.requestRenderMode;
+          controls.enableInputs = savedCesiumState.inputsEnabled;
+          if (photorealisticTileset)
+            photorealisticTileset.show = savedCesiumState.tilesetVisible;
+          viewer.resize();
+          viewer.camera.setView({
+            destination: savedCesiumState.position,
+            orientation: {
+              heading: savedCesiumState.heading,
+              pitch: savedCesiumState.pitch,
+              roll: savedCesiumState.roll
+            }
+          });
+        }
+        savedCesiumState = null;
+        streetViewActive = false;
+        viewer.scene.requestRender();
+        if (logExit)
+          nativeLog('INGE_EARTH_STREETVIEW_EXIT');
+      };
+
+      const enterStreetView = (data, checkedLocation) => {
+        if (streetViewActive || !data || !data.location)
+          return;
+        if (lastQualityState === 'MOVING'
+            || performance.now() - lastRealInputAt < STREETVIEW_IDLE_MS)
+          return;
+        savedCesiumState = {
+          position: Cesium.Cartesian3.clone(viewer.camera.positionWC),
+          heading: viewer.camera.heading,
+          pitch: viewer.camera.pitch,
+          roll: viewer.camera.roll,
+          requestRenderMode: viewer.scene.requestRenderMode,
+          inputsEnabled: controls.enableInputs,
+          tilesetVisible: photorealisticTileset
+            ? photorealisticTileset.show : true
+        };
+        activeStreetViewLocation = panoramaLocation(data, checkedLocation);
+        controls.enableInputs = false;
+        viewer.scene.requestRenderMode = true;
+        if (photorealisticTileset)
+          photorealisticTileset.show = false;
+        cesiumContainer.style.display = 'none';
+        streetViewContainer.style.display = 'block';
+        try {
+          const panoramaOptions = {
+            visible: true,
+            addressControl: true,
+            fullscreenControl: false,
+            motionTracking: false,
+            motionTrackingControl: false
+          };
+          if (data.location.pano)
+            panoramaOptions.pano = data.location.pano;
+          else
+            panoramaOptions.position = data.location.latLng;
+          if (!streetViewPanorama) {
+            streetViewPanorama = new google.maps.StreetViewPanorama(
+              streetViewPanoramaElement, panoramaOptions);
+          } else {
+            if (panoramaOptions.pano)
+              streetViewPanorama.setPano(panoramaOptions.pano);
+            else
+              streetViewPanorama.setPosition(panoramaOptions.position);
+            streetViewPanorama.setVisible(true);
+          }
+          streetViewActive = true;
+          nativeLog('INGE_EARTH_STREETVIEW_ENTER');
+        } catch (error) {
+          restoreCesiumAfterStreetView(false);
+          nativeLog('INGE_EARTH_STREETVIEW_ERROR=PANORAMA_CREATE');
+        }
+      };
+
+      const requestPanorama = (request) => new Promise((resolve) => {
+        streetViewService.getPanorama(request, (data, status) => {
+          resolve({ data, status });
+        });
+      });
+
+      const checkStreetViewAvailability = async (location) => {
+        streetViewCheckInFlight = true;
+        lastStreetViewCheckAt = performance.now();
+        lastStreetViewCheckPosition = location;
+        nativeLog(`INGE_EARTH_STREETVIEW_CHECK lat=${location.lat.toFixed(3)} lng=${location.lng.toFixed(3)} radius=60`);
+        try {
+          await loadGoogleMapsApi();
+          if (!streetViewService)
+            streetViewService = new google.maps.StreetViewService();
+          const commonRequest = {
+            location,
+            preference: google.maps.StreetViewPreference.NEAREST
+          };
+          let result = await requestPanorama(Object.assign({}, commonRequest, {
+            radius: STREETVIEW_PRIMARY_RADIUS_METERS,
+            source: google.maps.StreetViewSource.OUTDOOR
+          }));
+          if (result.status !== google.maps.StreetViewStatus.OK) {
+            result = await requestPanorama(Object.assign({}, commonRequest, {
+              radius: STREETVIEW_FALLBACK_RADIUS_METERS,
+              source: google.maps.StreetViewSource.DEFAULT
+            }));
+          }
+          if (result.status === google.maps.StreetViewStatus.OK
+              && result.data && result.data.location) {
+            nativeLog('INGE_EARTH_STREETVIEW_AVAILABLE');
+            enterStreetView(result.data, location);
+          } else if (result.status === google.maps.StreetViewStatus.ZERO_RESULTS) {
+            nativeLog('INGE_EARTH_STREETVIEW_NOT_AVAILABLE');
+          } else {
+            nativeLog('INGE_EARTH_STREETVIEW_ERROR=SERVICE_STATUS');
+          }
+        } catch (error) {
+          if (String(error && error.message) !== 'MAPS_JS_LOAD')
+            nativeLog('INGE_EARTH_STREETVIEW_ERROR=SERVICE');
+        } finally {
+          streetViewCheckInFlight = false;
+        }
+      };
+
+      const maybeCheckStreetView = () => {
+        streetViewCheckTimer = 0;
+        if (!streetViewKeyConfigured || streetViewActive
+            || streetViewCheckInFlight || !photorealisticTileset)
+          return;
+        const now = performance.now();
+        if (now - lastRealInputAt < STREETVIEW_IDLE_MS
+            || lastQualityState === 'MOVING')
+          return;
+        const cameraHeight = viewer.camera.positionCartographic.height;
+        if (!Number.isFinite(cameraHeight))
+          return;
+        if (streetViewAutoEntryBlocked
+            && cameraHeight >= STREETVIEW_REARM_HEIGHT_METERS) {
+          streetViewAutoEntryBlocked = false;
+          streetViewExitPosition = null;
+        }
+        if (cameraHeight > AUTO_ENTER_HEIGHT_METERS)
+          return;
+        const location = pickStreetViewLocation();
+        if (!location)
+          return;
+        if (streetViewAutoEntryBlocked) {
+          if (distanceMeters(location, streetViewExitPosition)
+              <= STREETVIEW_REARM_DISTANCE_METERS)
+            return;
+          streetViewAutoEntryBlocked = false;
+          streetViewExitPosition = null;
+        }
+        if (distanceMeters(location, lastStreetViewCheckPosition)
+              < STREETVIEW_COOLDOWN_DISTANCE_METERS
+            && now - lastStreetViewCheckAt < STREETVIEW_COOLDOWN_MS)
+          return;
+        checkStreetViewAvailability(location);
+      };
+
+      const scheduleStreetViewAutoCheck = () => {
+        if (!streetViewRuntimeEnabled || !streetViewKeyConfigured
+            || streetViewActive || window.InGeEarthPageVisible === false)
+          return;
+        if (streetViewCheckTimer)
+          clearTimeout(streetViewCheckTimer);
+        const idleRemaining = Math.max(0,
+          STREETVIEW_IDLE_MS - (performance.now() - lastRealInputAt));
+        streetViewCheckTimer = setTimeout(
+          maybeCheckStreetView, Math.max(STREETVIEW_IDLE_MS, idleRemaining));
+      };
+
+      const noteRealInput = (inputAt) => {
+        lastRealInputAt = inputAt;
+        if (streetViewCheckTimer) {
+          clearTimeout(streetViewCheckTimer);
+          streetViewCheckTimer = 0;
+        }
+      };
+      const recordUserInput = () => {
+        const inputAt = performance.now();
+        lastUserInputAt = inputAt;
+        window.requestEarthRender();
+        if (streetViewRuntimeEnabled)
+          noteRealInput(inputAt);
+      };
+      const beginPointerInteraction = () => {
+        if (window.InGeEarthPageVisible === false)
+          return;
+        userInteracting = true;
+        recordUserInput();
+        startUserQualityMovement();
+      };
+      const endPointerInteraction = () => {
+        if (window.InGeEarthPageVisible === false)
+          return;
+        userInteracting = false;
+        recordUserInput();
+        scheduleQualityRecovery('INPUT_END');
+      };
+      const handleWheelInteraction = () => {
+        if (window.InGeEarthPageVisible === false)
+          return;
+        userInteracting = false;
+        recordUserInput();
+        startUserQualityMovement();
+        scheduleQualityRecovery('INPUT_END');
+      };
+      if (window.PointerEvent) {
+        canvas.addEventListener('pointerdown', beginPointerInteraction,
+          { passive: true });
+        canvas.addEventListener('pointerup', endPointerInteraction,
+          { passive: true });
+        canvas.addEventListener('pointercancel', endPointerInteraction,
+          { passive: true });
+      } else {
+        canvas.addEventListener('touchstart', beginPointerInteraction,
+          { passive: true });
+        canvas.addEventListener('touchend', endPointerInteraction,
+          { passive: true });
+        canvas.addEventListener('touchcancel', endPointerInteraction,
+          { passive: true });
+      }
+      canvas.addEventListener('wheel', handleWheelInteraction,
+        { passive: true });
+
+      streetViewExit.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!streetViewActive)
+          return;
+        streetViewAutoEntryBlocked = true;
+        streetViewExitPosition = activeStreetViewLocation
+          || lastStreetViewCheckPosition;
+        activeStreetViewLocation = null;
+        restoreCesiumAfterStreetView(true);
+      });
+
+      const percentile95 = (sampleCount) => {
+        const sorted = Array.from(
+          renderFrameIntervals.subarray(0, sampleCount)).sort((a, b) => a - b);
+        return sorted[Math.min(sorted.length - 1,
+          Math.ceil(sorted.length * 0.95) - 1)];
+      };
+
+      const finishRenderMeasurement = (now) => {
+        if (window.InGeEarthPageVisible === false) {
+          renderWindowStartedAt = now;
+          renderWindowLastFrameAt = 0;
+          renderSampleCount = 0;
+          renderSampleCursor = 0;
+          renderIntervalTotal = 0;
+          renderStall100 = 0;
+          renderStall250 = 0;
+          renderStall500 = 0;
+          return;
+        }
+        const elapsed = Math.max(1, now - renderWindowStartedAt);
+        const sampleCount = renderSampleCount;
+        const average = sampleCount ? renderIntervalTotal / sampleCount : 0;
+        const fps = sampleCount * 1000 / elapsed;
+        const statistics = photorealisticTileset
+          && photorealisticTileset.statistics;
+        const pendingRequests = statistics
+          && Number.isFinite(statistics.numberOfPendingRequests)
+          ? statistics.numberOfPendingRequests : 'NA';
+        const tilesProcessing = statistics
+          && Number.isFinite(statistics.numberOfTilesProcessing)
+          ? statistics.numberOfTilesProcessing : 'NA';
+        const currentSse = photorealisticTileset
+          ? photorealisticTileset.maximumScreenSpaceError : 'NA';
+        const inputInWindow = userInteracting || lastUserInputAt >= renderWindowStartedAt;
+        const idle = !renderWindowLastFrameAt && viewer.scene.requestRenderMode
+          && !earthRenderRequested && !inputInWindow
+          && pendingRequests === 0 && tilesProcessing === 0;
+        if (idle) {
+          nativeLog('INGE_EARTH_PERF_WINDOW state=IDLE requestRenderMode=true renderRequested=false');
+        } else {
+          const state = !renderWindowLastFrameAt && inputInWindow
+            ? 'VISIBLE_BUT_NOT_RENDERING' : (lastQualityState || 'NOT_READY');
+          // Only MOVING windows measure throughput; in requestRenderMode the
+          // other windows count on-demand frames, not render speed.
+          if (state === 'MOVING' && sampleCount >= 5 && !refinedCapped) {
+            slowMovingWindows = fps < 10 ? slowMovingWindows + 1 : 0;
+            if (slowMovingWindows >= 2) {
+              refinedCapped = true;
+              nativeLog('INGE_EARTH_QUALITY_CAP=REFINED_AT_SETTLING reason=moving_fps_below_10');
+            }
+          }
+          nativeLog(`INGE_EARTH_PERF_WINDOW state=${state} renderRequested=${earthRenderRequested} fps=${fps.toFixed(1)} avgMs=${average.toFixed(1)} p95Ms=${sampleCount ? percentile95(sampleCount).toFixed(1) : '0.0'} stall100=${renderStall100} stall250=${renderStall250} stall500=${renderStall500} resolutionScale=${viewer.resolutionScale.toFixed(3)} sse=${currentSse} pendingRequests=${pendingRequests} tilesProcessing=${tilesProcessing}`);
+        }
+        renderWindowStartedAt = now;
+        renderWindowLastFrameAt = 0;
+        renderSampleCount = 0;
+        renderSampleCursor = 0;
+        renderIntervalTotal = 0;
+        renderStall100 = 0;
+        renderStall250 = 0;
+        renderStall500 = 0;
+      };
+
+      viewer.scene.postRender.addEventListener(() => {
+        earthRenderRequested = false;
+        if (window.InGeEarthPageVisible === false) return;
+        const now = performance.now();
+        if (!resolutionLogged) {
+          resolutionLogged = true;
+          nativeLog(`INGE_EARTH_CSS_SIZE=${canvas.clientWidth}x${canvas.clientHeight}`);
+          nativeLog(`INGE_EARTH_DRAWING_BUFFER=${viewer.scene.drawingBufferWidth}x${viewer.scene.drawingBufferHeight}`);
+          nativeLog(`INGE_EARTH_DEVICE_PIXEL_RATIO=${devicePixelRatio.toFixed(3)}`);
+          nativeLog(`INGE_EARTH_BROWSER_RECOMMENDED_RESOLUTION=${viewer.useBrowserRecommendedResolution}`);
+          nativeLog(`INGE_EARTH_RESOLUTION_SCALE=${viewer.resolutionScale.toFixed(3)}`);
+          nativeLog(`INGE_EARTH_EFFECTIVE_PIXEL_RATIO=${(devicePixelRatio * viewer.resolutionScale).toFixed(3)}`);
+        }
+        if (!lastFrameAt) {
+          nativeLog(`INGE_EARTH_FIRST_FRAME_MS=${(now - bootStartedAt).toFixed(1)}`);
+          nativeLog('INGE_EARTH_DIRECT_READY');
+          if (document.readyState === 'loading')
+            document.addEventListener('DOMContentLoaded', () => earthBoot.ready(), { once: true });
+          else
+            earthBoot.ready();
+          lastFrameAt = now;
+        }
+        if (renderWindowLastFrameAt) {
+          const interval = now - renderWindowLastFrameAt;
+          if (renderSampleCount < RENDER_SAMPLE_LIMIT) {
+            renderFrameIntervals[renderSampleCount] = interval;
+            renderSampleCount += 1;
+            renderIntervalTotal += interval;
+            if (interval >= 100) renderStall100 += 1;
+            if (interval >= 250) renderStall250 += 1;
+            if (interval >= 500) renderStall500 += 1;
+          } else {
+            const previous = renderFrameIntervals[renderSampleCursor];
+            renderIntervalTotal += interval - previous;
+            if (previous >= 100) renderStall100 -= 1;
+            if (previous >= 250) renderStall250 -= 1;
+            if (previous >= 500) renderStall500 -= 1;
+            if (interval >= 100) renderStall100 += 1;
+            if (interval >= 250) renderStall250 += 1;
+            if (interval >= 500) renderStall500 += 1;
+            renderFrameIntervals[renderSampleCursor] = interval;
+            renderSampleCursor = (renderSampleCursor + 1) % RENDER_SAMPLE_LIMIT;
+          }
+        }
+        renderWindowLastFrameAt = now;
+      });
+
+      let renderMeasurementTimer = 0;
+      const startRenderMeasurement = () => {
+        if (!renderMeasurementTimer)
+          renderMeasurementTimer = setInterval(
+            () => finishRenderMeasurement(performance.now()), 5000);
+      };
+      const stopRenderMeasurement = () => {
+        if (renderMeasurementTimer) {
+          clearInterval(renderMeasurementTimer);
+          renderMeasurementTimer = 0;
+        }
+      };
+      window.InGeEarthEngineSetVisible = (visible) => {
+        if (!visible) {
+          userInteracting = false;
+          earthRenderRequested = false;
+          clearQualityTimers();
+          if (streetViewCheckTimer) {
+            clearTimeout(streetViewCheckTimer);
+            streetViewCheckTimer = 0;
+          }
+          stopRenderMeasurement();
+          finishRenderMeasurement(performance.now());
+          return;
+        }
+        renderWindowStartedAt = performance.now();
+        renderWindowLastFrameAt = 0;
+        earthRenderRequested = false;
+        viewer.resize();
+        window.requestEarthRender();
+        startRenderMeasurement();
+      };
+      startRenderMeasurement();
+
+      window.viewer = viewer;
+      nativeLog('INGE_EARTH_ENGINE=CESIUMJS_WEB');
+      nativeLog('INGE_EARTH_SCENE=SCENE3D');
+      nativeLog('INGE_EARTH_IMAGERY=NATURALEARTHII_LOCAL');
+      earthBoot.phase(4, 'Cargando mapa…');
+    })();
+  </script>
+  <script src="ui/inge-earth-storage.js"></script>
+  <script src="ui/inge-earth-coordinates.js"></script>
+  <script src="ui/inge-earth-ui.js"></script>
+  <script src="ui/inge-earth-projects.js"></script>
+  <script src="ui/inge-earth-map-details.js"></script>
+</body>
+</html>

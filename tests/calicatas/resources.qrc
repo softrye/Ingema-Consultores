@@ -1,0 +1,20 @@
+<RCC><qresource prefix="/templates"><file alias="Calicata_Formato.xlsx">../../Templates/Calicata_Formato.xlsx</file></qresource><qresource prefix="/SUCS">
+<file alias="CH.svg">../../SUCS/CH.svg</file>
+<file alias="CL.png">../../SUCS/CL.png</file>
+<file alias="GC.png">../../SUCS/GC.png</file>
+<file alias="GM.png">../../SUCS/GM.png</file>
+<file alias="GP.png">../../SUCS/GP.png</file>
+<file alias="GW.png">../../SUCS/GW.png</file>
+<file alias="MH.png">../../SUCS/MH.png</file>
+<file alias="ML.png">../../SUCS/ML.png</file>
+<file alias="OH.svg">../../SUCS/OH.svg</file>
+<file alias="OL.png">../../SUCS/OL.png</file>
+<file alias="Pt.svg">../../SUCS/Pt.svg</file>
+<file alias="SC.png">../../SUCS/SC.png</file>
+<file alias="SM.png">../../SUCS/SM.png</file>
+<file alias="SP.png">../../SUCS/SP.png</file>
+<file alias="SW.png">../../SUCS/SW.png</file>
+</qresource><qresource prefix="/images">
+<file alias="ICONO_LOGO_MTC.jpeg">../../images/ICONO_LOGO_MTC.jpeg</file>
+<file alias="app_logo_company.png">../../images/app_logo_company.png</file>
+</qresource></RCC>

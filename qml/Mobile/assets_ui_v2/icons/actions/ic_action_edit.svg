@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none">
+
+<defs>
+  <linearGradient id="navy" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#3A5675"/>
+    <stop offset="0.52" stop-color="#1A314B"/>
+    <stop offset="1" stop-color="#091B2D"/>
+  </linearGradient>
+  <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#66C8FF"/>
+    <stop offset="0.50" stop-color="#1989EA"/>
+    <stop offset="1" stop-color="#0754A2"/>
+  </linearGradient>
+  <linearGradient id="silver" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#FFFFFF"/>
+    <stop offset="0.48" stop-color="#DDE7F2"/>
+    <stop offset="1" stop-color="#8DA0B5"/>
+  </linearGradient>
+  <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#FFFFFF"/>
+    <stop offset="0.76" stop-color="#EDF3F9"/>
+    <stop offset="1" stop-color="#C7D4E2"/>
+  </linearGradient>
+  <linearGradient id="soilTop" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#9E6C36"/>
+    <stop offset="1" stop-color="#53331B"/>
+  </linearGradient>
+  <linearGradient id="soilMid" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#D8A359"/>
+    <stop offset="1" stop-color="#9A632A"/>
+  </linearGradient>
+  <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+    <feDropShadow dx="0" dy="2.1" stdDeviation="2.2" flood-color="#05111F" flood-opacity="0.34"/>
+  </filter>
+</defs>
+
+
+<g filter="url(#shadow)" stroke-linecap="round" stroke-linejoin="round">
+  <rect x="6" y="7" width="29" height="34" rx="4" fill="url(#paper)" stroke="#17334F" stroke-width="1.8"/>
+  <path d="M12 16h12M12 22h10M12 28h8" stroke="#8B9BAE" stroke-width="2"/>
+  <g transform="translate(29 28) rotate(-38)">
+    <rect x="-3" y="-15" width="6" height="24" rx="2" fill="url(#blue)" stroke="#073D78" stroke-width="1.3"/>
+    <rect x="-3" y="-18.5" width="6" height="5.5" rx="1.5" fill="url(#silver)" stroke="#536579" stroke-width="1"/>
+    <path d="M-3 9h6L0 15Z" fill="#F3D6A1" stroke="#8B5B28" stroke-width="1"/>
+    <path d="m-1 13 1 2 1-2" fill="#1B2633"/>
+  </g>
+  <path d="M27.5 39.5h10.5" stroke="#1A6CBD" stroke-width="1.6"/>
+</g>
+
+</svg>

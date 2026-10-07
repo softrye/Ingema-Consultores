@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none">
+
+<defs>
+  <linearGradient id="blueFlat" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#3AA0FF"/>
+    <stop offset="1" stop-color="#0B61C9"/>
+  </linearGradient>
+  <linearGradient id="blueSoft" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#6BC0FF"/>
+    <stop offset="1" stop-color="#1B76D8"/>
+  </linearGradient>
+</defs>
+
+
+<path d="M24 6.5c-6.5 0-11.5 4.8-11.5 10.9 0 8.4 11.5 19.1 11.5 19.1S35.5 25.8 35.5 17.4C35.5 11.3 30.5 6.5 24 6.5Z"
+      fill="url(#blueFlat)"/>
+<circle cx="24" cy="17.5" r="4.8" fill="white" fill-opacity="0.92"/>
+<circle cx="24" cy="17.5" r="2.2" fill="url(#blueSoft)"/>
+
+</svg>

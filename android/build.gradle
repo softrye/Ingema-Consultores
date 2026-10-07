@@ -1,0 +1,981 @@
+buildscript {
+
+
+
+
+
+
+
+
+    repositories {
+
+
+
+
+
+
+
+
+        google()
+
+
+
+
+
+
+
+
+        mavenCentral()
+
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    dependencies {
+
+
+
+
+
+
+
+
+        //noinspection AndroidGradlePluginVersion
+
+
+
+
+
+
+
+
+        // AGP 8.10 is the first stable line with official API 36 support.
+
+
+
+
+
+
+
+
+        classpath 'com.android.tools.build:gradle:8.10.1'
+
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+repositories {
+
+
+
+
+
+
+
+
+    google()
+
+
+
+
+
+
+
+
+    mavenCentral()
+
+
+
+
+
+
+
+
+    String storageUrl = System.env.FLUTTER_STORAGE_BASE_URL ?: 'https://storage.googleapis.com'
+
+
+
+
+
+
+
+
+    File workspaceCursor = projectDir
+    File workspaceFlutterModule = null
+    for (int level = 0; level < 6 && workspaceCursor != null; ++level) {
+        File candidate = new File(workspaceCursor, 'flutter/inge_earth')
+        if (candidate.isDirectory()) {
+            workspaceFlutterModule = candidate
+            break
+        }
+        workspaceCursor = workspaceCursor.parentFile
+    }
+
+    // Los builds normales de Qt viven fuera del repositorio. Recupera la
+    // fuente Android declarada por CMake para resolver el AAR del mismo
+    // workspace, en vez del caché antiguo de INGE_FLUTTER_AAR_REPO.
+    if (workspaceFlutterModule == null && projectDir.parentFile != null) {
+        File deploymentSettings = projectDir.parentFile.listFiles()?.find {
+            it.isFile()
+                    && it.name.startsWith('android-')
+                    && it.name.endsWith('-deployment-settings.json')
+        }
+        if (deploymentSettings != null) {
+            try {
+                def deploymentConfig = new groovy.json.JsonSlurper().parse(deploymentSettings)
+                String androidSourcePath = deploymentConfig['android-package-source-directory']
+                if (androidSourcePath != null && !androidSourcePath.trim().isEmpty()) {
+                    File androidSourceDir = new File(androidSourcePath)
+                    File candidate = new File(androidSourceDir.parentFile, 'flutter/inge_earth')
+                    if (candidate.isDirectory())
+                        workspaceFlutterModule = candidate
+                }
+            } catch (Exception ignored) {
+                // El error determinista de repositorio/AAR se emite abajo.
+            }
+        }
+    }
+
+    File workspaceFlutterAarRepo = workspaceFlutterModule == null ? null
+            : new File(workspaceFlutterModule, 'build/host/outputs/repo')
+    String flutterAarRepo = workspaceFlutterAarRepo != null
+            && workspaceFlutterAarRepo.isDirectory()
+            ? workspaceFlutterAarRepo.absolutePath
+            : System.env.INGE_FLUTTER_AAR_REPO
+
+
+
+
+
+
+
+
+    if (flutterAarRepo == null || flutterAarRepo.trim().isEmpty()) {
+
+
+
+
+
+
+
+
+        throw new GradleException('INGE_FLUTTER_AAR_REPO debe apuntar al repositorio AAR de InGe Earth.')
+
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+    rootProject.ext.ingeFlutterAarRepo = flutterAarRepo
+    maven { url = uri(flutterAarRepo) }
+
+
+
+
+
+
+
+
+    maven { url = uri("${storageUrl}/download.flutter.io") }
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+apply plugin: qtGradlePluginType
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+dependencies {
+
+
+
+
+
+
+
+
+    implementation fileTree(dir: 'libs', include: ['*.jar', '*.aar'])
+
+
+
+
+
+
+
+
+    //noinspection GradleDependency
+
+
+
+
+
+
+
+
+    implementation 'androidx.core:core:1.16.0'
+    implementation 'com.google.android.gms:play-services-auth:22.0.0'
+    // Same bundled on-device recognizer as flutter_receipt_scanner donor.
+    implementation 'com.google.mlkit:text-recognition-korean:16.0.1'
+
+    implementation 'androidx.core:core-performance:1.0.0'
+    implementation 'androidx.metrics:metrics-performance:1.0.0'
+    implementation 'androidx.profileinstaller:profileinstaller:1.4.1'
+    implementation 'androidx.webkit:webkit:1.12.0'
+
+
+
+
+
+
+
+
+    // Módulo Flutter compartido por Home, Auth y Rendiciones.
+
+
+
+
+
+
+
+
+    debugImplementation 'com.ingema.inge_earth:flutter_debug:1.0'
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def cesiumIonLocalProperties = new Properties()
+def cesiumIonLocalPropertiesFile = rootProject.file('local.properties')
+if (cesiumIonLocalPropertiesFile.exists()) {
+    cesiumIonLocalPropertiesFile.withInputStream {
+        cesiumIonLocalProperties.load(it)
+    }
+}
+def cesiumIonTokenValue = (
+        cesiumIonLocalProperties.getProperty('CESIUM_ION_TOKEN')
+        ?: System.getenv('CESIUM_ION_TOKEN')
+        ?: '').trim()
+def cesiumIonTokenLiteral = '"' + cesiumIonTokenValue
+        .replace('\\', '\\\\')
+        .replace('"', '\\"') + '"'
+def googleMapsApiKeyValue = (
+        cesiumIonLocalProperties.getProperty('GOOGLE_MAPS_API_KEY')
+        ?: System.getenv('GOOGLE_MAPS_API_KEY')
+        ?: '').trim()
+def googleMapsApiKeyLiteral = '"' + googleMapsApiKeyValue
+        .replace('\\', '\\\\')
+        .replace('"', '\\"') + '"'
+def earthStringLiteral = { String value ->
+    '"' + (value ?: '').replace('\\', '\\\\').replace('"', '\\"') + '"'
+}
+def defaultMapUrlValue = (
+        cesiumIonLocalProperties.getProperty('DEFAULT_MAP_URL')
+        ?: System.getenv('DEFAULT_MAP_URL')
+        ?: 'https://tile.openstreetmap.org/').trim()
+def terrainUrlValue = (
+        cesiumIonLocalProperties.getProperty('TERRAIN_URL')
+        ?: System.getenv('TERRAIN_URL')
+        ?: '').trim()
+def valhallaBaseUrlValue = (
+        cesiumIonLocalProperties.getProperty('VALHALLA_BASE_URL')
+        ?: System.getenv('VALHALLA_BASE_URL')
+        ?: '').trim()
+
+android {
+
+
+
+
+
+
+
+
+    namespace = androidPackageName
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+
+
+
+
+
+
+
+    compileSdkVersion androidCompileSdkVersion
+
+
+
+
+
+
+
+
+    buildToolsVersion androidBuildToolsVersion
+
+
+
+
+
+
+
+
+    ndkVersion = androidNdkVersion
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    sourceSets {
+
+
+
+
+
+
+
+
+        main {
+
+
+
+
+
+
+
+
+            manifest.srcFile 'AndroidManifest.xml'
+
+
+
+
+
+
+
+
+            java.srcDirs = [qtAndroidDir + '/src', 'src', 'java']
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            aidl.srcDirs = [qtAndroidDir + '/src', 'src', 'aidl']
+
+
+
+
+
+
+
+
+            res.srcDirs = [qtAndroidDir + '/res', 'res']
+
+
+
+
+
+
+
+
+            resources.srcDirs = ['resources']
+
+
+
+
+
+
+
+
+            renderscript.srcDirs = ['src']
+
+
+
+
+
+
+
+
+            assets.srcDirs = ['assets']
+
+
+
+
+
+
+
+
+            jniLibs.srcDirs = ['libs']
+
+
+
+
+
+
+
+
+        }
+
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    tasks.withType(JavaCompile) {
+
+
+
+
+
+
+
+
+        options.incremental = true
+
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    compileOptions {
+
+
+
+
+
+
+
+
+        sourceCompatibility JavaVersion.VERSION_17
+
+
+
+
+
+
+
+
+        targetCompatibility JavaVersion.VERSION_17
+
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    lintOptions { abortOnError = false }
+
+
+
+
+
+
+
+
+    aaptOptions { noCompress 'rcc' }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    defaultConfig {
+
+
+
+
+
+
+
+
+        resConfig 'en'
+
+
+
+
+
+
+
+
+        minSdkVersion qtMinSdkVersion
+
+
+
+
+
+
+
+
+        targetSdkVersion qtTargetSdkVersion
+
+
+
+
+
+
+
+
+        ndk.abiFilters = qtTargetAbiList.split(',')
+
+        buildConfigField 'String', 'CESIUM_ION_TOKEN', cesiumIonTokenLiteral
+        buildConfigField 'String', 'GOOGLE_MAPS_API_KEY', googleMapsApiKeyLiteral
+        buildConfigField 'String', 'DEFAULT_MAP_URL', earthStringLiteral(defaultMapUrlValue)
+        buildConfigField 'String', 'TERRAIN_URL', earthStringLiteral(terrainUrlValue)
+        buildConfigField 'String', 'VALHALLA_BASE_URL', earthStringLiteral(valhallaBaseUrlValue)
+
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// BEGIN_INGE_FLUTTER_AAR_OFFICIAL_V2
+
+
+
+
+
+
+
+
+repositories {
+
+
+
+
+
+
+
+
+    maven {
+
+
+
+
+
+
+
+
+        url uri(rootProject.ext.ingeFlutterAarRepo)
+
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+    maven {
+
+
+
+
+
+
+
+
+        url "https://storage.googleapis.com/download.flutter.io"
+
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+dependencies {
+
+
+
+
+
+
+
+
+    releaseImplementation("com.ingema.inge_earth:flutter_release:1.0") {
+
+
+
+
+
+
+
+
+        changing = true
+
+
+
+
+
+
+
+
+    }
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
+
+
+
+// END_INGE_FLUTTER_AAR_OFFICIAL_V2
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// BEGIN_INGE_FLUTTER_AAR_FRESH
+
+
+
+
+
+
+
+
+configurations.configureEach {
+
+
+
+
+
+
+
+
+    resolutionStrategy.cacheChangingModulesFor 0, "seconds"
+
+
+
+
+
+
+
+
+    resolutionStrategy.cacheDynamicVersionsFor 0, "seconds"
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
+
+
+
+// END_INGE_FLUTTER_AAR_FRESH
+
+// BEGIN_INGE_KOTLIN_METADATA_FIX
+configurations.configureEach {
+    resolutionStrategy.eachDependency { details ->
+        if (details.requested.group == "org.jetbrains.kotlin" &&
+                details.requested.name.startsWith("kotlin-stdlib")) {
+            details.useVersion("2.1.0")
+            details.because("InGe+: align runtime stdlib with the AGP 8.10.1 Kotlin classpath")
+        }
+    }
+}
+// END_INGE_KOTLIN_METADATA_FIX
