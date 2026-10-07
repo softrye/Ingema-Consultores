@@ -1,0 +1,73 @@
+name: lucide_icons_flutter
+description: A Lucide icon library package for Flutter applications. Fork of Feather Icons, open for anyone to contribute icons.
+version: 3.1.17
+homepage: https://lucide.dev
+repository: https://github.com/vqh2602/lucide-flutter-main
+
+environment:
+  sdk: ^3.0.0
+  # flutter: ">=1.17.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  golden_test: ^1.1.1
+  recase: ^4.1.0
+  lint: ^2.8.0
+
+flutter:
+  fonts:
+    - family: Lucide
+      fonts:
+        - asset: assets/lucide.ttf
+    - family: Lucide100
+      fonts:
+        - asset: assets/build_font/LucideVariable-w100.ttf
+          weight: 100
+    - family: Lucide200
+      fonts:
+        - asset: assets/build_font/LucideVariable-w200.ttf
+          weight: 200
+    - family: Lucide300
+      fonts:
+        - asset: assets/build_font/LucideVariable-w300.ttf
+          weight: 300
+    - family: Lucide400
+      fonts:
+        - asset: assets/build_font/LucideVariable-w400.ttf
+          weight: 400
+    - family: Lucide500
+      fonts:
+        - asset: assets/build_font/LucideVariable-w500.ttf
+          weight: 500
+    - family: Lucide600
+      fonts:
+        - asset: assets/build_font/LucideVariable-w600.ttf
+          weight: 600
+    # - family: Lucide700
+    #   fonts:
+    #     - asset: assets/build_font/LucideVariable-w700.ttf
+    #       weight: 700
+# This package supports all platforms listed below.
+platforms:
+  android:
+  ios:
+  linux:
+  macos:
+  web:
+  windows:
+
+screenshots:
+  - description: Lucide Logo
+    path: screenshots/logo.png
+
+topics:
+  - lucide
+  - lucide-icons
+  - feather
+  - feather-icons
+  - icons
