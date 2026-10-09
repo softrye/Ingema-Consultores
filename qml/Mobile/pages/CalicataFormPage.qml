@@ -696,6 +696,10 @@ Item {
                                     ? Math.max(0.82, Math.min(1.00, Math.min(root.width, root.height) / 430.0))
                                     : Math.max(0.92, Math.min(1.12, Math.min(root.width, root.height) / 760.0))
     function dp(v) { return Math.round(v * root.uiScale) }
+    // Texto: misma regla que __sp() de CalicatasEditorPage. En telefonos de
+    // 360 dp uiScale baja a 0.84 y dp(11) quedaba en 9 px; ninguna fuente de
+    // la ficha baja de 12 px. La geometria sigue escalando con dp().
+    function sp(v) { return Math.max(12, root.dp(v)) }
 
     property double _lastTapMs: 0
     readonly property int tapGuardMs: 280
@@ -1815,7 +1819,8 @@ Item {
     readonly property int fsLabel: Math.max(12, root.dp(root.isPhone ? 12 : 14))
     readonly property int fsField: Math.max(14, root.dp(root.isPhone ? 14 : 16))
     readonly property int hField: Math.max(44, root.dp(root.isPhone ? 44 : 50))
-    readonly property int hBtn: root.dp(root.isPhone ? 46 : 52)
+    // Objetivo tactil minimo de Android (48 dp), tambien con uiScale < 1.
+    readonly property int hBtn: Math.max(48, root.dp(root.isPhone ? 46 : 52))
     readonly property int hBtnCompact: root.dp(root.isPhone ? 42 : 48)
     readonly property int fsBtn: root.dp(root.isPhone ? 13 : 15)
     readonly property int rField: root.dp(10)
@@ -1841,7 +1846,7 @@ Item {
     // Se deja activo también en Windows porque Qt Creator puede probar el target móvil con kit desktop.
     readonly property bool touchOptimized: true
     readonly property int touchPressDelay: 140
-    readonly property int touchMinTarget: root.dp(root.isPhone ? 48 : 54)
+    readonly property int touchMinTarget: Math.max(48, root.dp(root.isPhone ? 48 : 54))
     readonly property real touchMaxVelocity: root.isPhone ? 1600 : 2200
 
     readonly property string dateFmt: "dd/MM/yyyy"
@@ -3232,7 +3237,7 @@ Item {
                 text: sectionCard.sectionTitle
                 color: root.cText
                 font.bold: true
-                font.pixelSize: root.dp(18)
+                font.pixelSize: root.sp(18)
                 wrapMode: Text.WordWrap
             }
             Text {
@@ -3420,7 +3425,7 @@ Item {
                         width: parent.width
                         text: logoVersionRow.modelData.detail
                         color: logoVersionRow.modelData.inUse ? root.cGenBlue : root.cMuted
-                        font.pixelSize: root.dp(11)
+                        font.pixelSize: root.sp(11)
                         elide: Text.ElideRight
                     }
                 }
@@ -3439,7 +3444,7 @@ Item {
                             anchors.centerIn: parent
                             text: "En uso"
                             color: root.cGenGreen
-                            font.pixelSize: root.dp(11)
+                            font.pixelSize: root.sp(11)
                             font.weight: Font.DemiBold
                         }
                     }
@@ -3764,7 +3769,7 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: tile.label
                 color: tile.ink
-                font.pixelSize: root.dp(tile.compact ? 10.5 : 11.5)
+                font.pixelSize: root.sp(tile.compact ? 10.5 : 11.5)
                 font.weight: Font.DemiBold
             }
         }
@@ -3783,7 +3788,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 text: tile.label
                 color: tile.ink
-                font.pixelSize: root.dp(tile.width < root.dp(150) ? 13 : 15)
+                font.pixelSize: root.sp(tile.width < root.dp(150) ? 13 : 15)
                 font.weight: Font.Bold
             }
         }
@@ -3873,7 +3878,7 @@ Item {
                 visible: glassCheck.checked
                 text: "✓"
                 color: root.darkMode ? root.brand.ingemaDeep : "#FFFFFF"
-                font.pixelSize: root.dp(13)
+                font.pixelSize: root.sp(13)
                 font.bold: true
             }
         }
@@ -3915,7 +3920,7 @@ Item {
                     pressed: labStepButton.down
                     enabledLook: labStepButton.enabled
                 }
-                font.pixelSize: root.dp(18)
+                font.pixelSize: root.sp(18)
                 focusPolicy: Qt.NoFocus
                 autoRepeat: true
                 autoRepeatDelay: 350
@@ -3991,7 +3996,7 @@ Item {
         Text {
             text: genGroup.title
             color: root.cText
-            font.pixelSize: root.dp(12)
+            font.pixelSize: root.sp(12)
             font.weight: Font.DemiBold
             font.letterSpacing: 1.4
         }
@@ -4033,7 +4038,7 @@ Item {
             visible: genShell.label.length > 0
             text: genShell.labelCaps ? genShell.label.toUpperCase() : genShell.label
             color: genShell.focused ? genShell.accent : root.cMuted
-            font.pixelSize: genShell.labelCaps ? root.dp(11) : root.dp(12)
+            font.pixelSize: genShell.labelCaps ? root.sp(11) : root.sp(12)
             font.letterSpacing: genShell.labelCaps ? 1.6 : 0.2
             font.weight: Font.DemiBold
             wrapMode: Text.WordWrap
@@ -4125,7 +4130,7 @@ Item {
             visible: genShell.caption.length > 0
             text: genShell.caption
             color: root.cMuted
-            font.pixelSize: root.dp(11)
+            font.pixelSize: root.sp(11)
             wrapMode: Text.WordWrap
         }
     }
@@ -4225,7 +4230,7 @@ Item {
                 Layout.fillWidth: true
                 text: genDialogHeader.title
                 color: root.cText
-                font.pixelSize: root.dp(18)
+                font.pixelSize: root.sp(18)
                 font.bold: true
                 elide: Text.ElideRight
             }
@@ -4627,7 +4632,7 @@ Item {
         padding: root.dp(18)
         bottomPadding: root.dp(6)
         color: root.cText
-        font.pixelSize: root.dp(18)
+        font.pixelSize: root.sp(18)
         font.bold: true
         elide: Label.ElideRight
         visible: text.length > 0
@@ -4658,7 +4663,7 @@ Item {
             width: parent.width
             text: genHeader.codeText || "NUEVA CALICATA"
             color: root.cMuted
-            font.pixelSize: root.dp(11)
+            font.pixelSize: root.sp(11)
             font.letterSpacing: 2.4
             font.weight: Font.DemiBold
             elide: Text.ElideRight
@@ -4677,7 +4682,7 @@ Item {
                 width: parent.width - root.dp(16)
                 text: genHeader.projectText
                 color: root.cText
-                font.pixelSize: root.dp(17)
+                font.pixelSize: root.sp(17)
                 maximumLineCount: 2
                 wrapMode: Text.WordWrap
                 elide: Text.ElideRight
@@ -4700,7 +4705,7 @@ Item {
                 Text {
                     text: "FICHA DE CALICATA"
                     color: root.cMuted
-                    font.pixelSize: root.dp(11)
+                    font.pixelSize: root.sp(11)
                     font.letterSpacing: 3
                     font.weight: Font.DemiBold
                 }
@@ -4708,7 +4713,7 @@ Item {
                     width: parent.width
                     text: genHeader.stageText
                     color: root.cText
-                    font.pixelSize: root.dp(34)
+                    font.pixelSize: root.sp(34)
                     font.bold: true
                     wrapMode: Text.WordWrap
                 }
@@ -4752,7 +4757,7 @@ Item {
                     Layout.fillWidth: true
                     text: prfCard.title
                     color: root.cText
-                    font.pixelSize: root.dp(17)
+                    font.pixelSize: root.sp(17)
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
                 }
@@ -4811,7 +4816,7 @@ Item {
                     Layout.fillWidth: true
                     text: prfSub.title
                     color: root.cText
-                    font.pixelSize: root.dp(14)
+                    font.pixelSize: root.sp(14)
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
                 }
@@ -5111,7 +5116,7 @@ Item {
                 visible: prfCheck.isOn
                 text: "✓"
                 color: "#FFFFFF"
-                font.pixelSize: root.dp(12)
+                font.pixelSize: root.sp(12)
                 font.bold: true
             }
         }
@@ -5278,7 +5283,7 @@ Item {
             anchors.margins: root.dp(8)
             text: prfAreaEdit.length + " / " + prfArea.maxLength
             color: root.cMuted
-            font.pixelSize: root.dp(11)
+            font.pixelSize: root.sp(11)
         }
     }
 
@@ -5327,7 +5332,7 @@ Item {
             anchors.centerIn: parent
             text: prfBadge.number
             color: root.prfInkOn(prfBadge.tone)
-            font.pixelSize: root.dp(13)
+            font.pixelSize: root.sp(13)
             font.bold: true
         }
     }
@@ -5365,7 +5370,7 @@ Item {
             visible: prfSymbol.files.length === 0
             text: "?"
             color: root.cMuted
-            font.pixelSize: root.dp(13)
+            font.pixelSize: root.sp(13)
         }
     }
 
@@ -8262,7 +8267,7 @@ Item {
                     Layout.alignment: Qt.AlignVCenter
                     text: infoDlg.title
                     color: root.cText
-                    font.pixelSize: root.dp(17)
+                    font.pixelSize: root.sp(17)
                     font.bold: true
                     wrapMode: Text.WordWrap
                 }
@@ -8464,7 +8469,7 @@ Item {
                 Layout.fillWidth: true
                 text: "¿Rellenar datos en la foto?"
                 color: root.cText
-                font.pixelSize: root.dp(17)
+                font.pixelSize: root.sp(17)
                 font.bold: true
                 wrapMode: Text.WordWrap
             }
@@ -8473,7 +8478,7 @@ Item {
                 Layout.bottomMargin: root.dp(4)
                 text: "Los datos de la ficha (coordenadas, código, proyecto, fecha) se imprimen en la derivada; la original se conserva."
                 color: root.cMuted
-                font.pixelSize: root.dp(12)
+                font.pixelSize: root.sp(12)
                 wrapMode: Text.WordWrap
             }
             PhotoPill { primary: true; text: "Guardar con datos"; onClicked: tsDlg.resolve(true) }
@@ -8706,7 +8711,7 @@ Item {
                         anchors.centerIn: parent
                         text: genLogoSlot.logoState
                         color: genLogoSlot.hasLogo ? root.cGenGreen : root.cGenOrange
-                        font.pixelSize: root.dp(11)
+                        font.pixelSize: root.sp(11)
                         font.weight: Font.DemiBold
                     }
                 }
@@ -9024,8 +9029,8 @@ Item {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 0
-                    Text { text: root.photoSlotTitles[root.activePhotoCategory - 1] || ""; color: "white"; font.bold: true; font.pixelSize: root.dp(16) }
-                    Text { text: photoViewer.info.label + (photoViewer.info.date.length ? " · " + photoViewer.info.date : ""); color: "#B8C0CC"; font.pixelSize: root.dp(11) }
+                    Text { text: root.photoSlotTitles[root.activePhotoCategory - 1] || ""; color: "white"; font.bold: true; font.pixelSize: root.sp(16) }
+                    Text { text: photoViewer.info.label + (photoViewer.info.date.length ? " · " + photoViewer.info.date : ""); color: "#B8C0CC"; font.pixelSize: root.sp(11) }
                 }
             }
             // Acciones del visor sobre la misma barra Liquid Glass de Fotos (variante oscura).
@@ -9282,7 +9287,7 @@ Item {
                                + (root.prfSel ? String(root.prfSel.de || "—") + " – " + String(root.prfSel.a || "—") + " m" : "")
                              : "Estrato " + (root.selectedStratum + 1))
                     color: root.cText
-                    font.pixelSize: root.labSheetActive ? root.dp(18) : 20
+                    font.pixelSize: root.labSheetActive ? root.sp(18) : 20
                     font.bold: root.labSheetActive
                     elide: Text.ElideRight
                 }
@@ -9292,7 +9297,7 @@ Item {
                     Layout.preferredHeight: root.dp(24)
                     radius: height / 2
                     color: root.cGenTealSoft
-                    Text { id: sheetKindText; anchors.centerIn: parent; text: root.labKindChip(root.labInfo(root.selectedStratum)); color: root.cGenTeal; font.bold: true; font.pixelSize: root.dp(11) }
+                    Text { id: sheetKindText; anchors.centerIn: parent; text: root.labKindChip(root.labInfo(root.selectedStratum)); color: root.cGenTeal; font.bold: true; font.pixelSize: root.sp(11) }
                 }
                 GenDialogButton { visible: !root.labSheetActive; Layout.fillWidth: false; primary: true; text: "Listo"; onClicked: root.finishStratum(true) }
             }
@@ -9519,7 +9524,7 @@ Item {
                                         text: "Estrato " + (mobileSampleCard.corteIdx + 1)
                                         color: root.cText
                                         font.bold: true
-                                        font.pixelSize: root.dp(root.isPhone ? 14 : 16)
+                                        font.pixelSize: root.sp(root.isPhone ? 14 : 16)
                                     }
                                     Text {
                                         Layout.fillWidth: true
@@ -9589,7 +9594,7 @@ Item {
                                     Layout.fillWidth: true
                                     text: "Solo lectura: estos datos se editan en Perfil."
                                     color: root.cMuted
-                                    font.pixelSize: root.dp(11)
+                                    font.pixelSize: root.sp(11)
                                     wrapMode: Text.WordWrap
                                 }
                             }
@@ -9629,7 +9634,7 @@ Item {
                                             + ". El valor local se conserva."
                                           : "Sin historial sincronizado desde el servidor."
                                     color: root.cMuted
-                                    font.pixelSize: root.dp(11)
+                                    font.pixelSize: root.sp(11)
                                     wrapMode: Text.WordWrap
                                 }
                             }
@@ -9663,7 +9668,7 @@ Item {
                                     ColumnLayout {
                                         Layout.fillWidth: true
                                         spacing: root.dp(2)
-                                        Text { text: "Muestra"; color: root.cMuted; font.pixelSize: root.dp(11); font.bold: true }
+                                        Text { text: "Muestra"; color: root.cMuted; font.pixelSize: root.sp(11); font.bold: true }
                                         Text {
                                             Layout.fillWidth: true
                                             elide: Text.ElideRight
@@ -9678,7 +9683,7 @@ Item {
                                             Layout.fillWidth: true
                                             wrapMode: Text.WordWrap
                                             color: root.cMuted
-                                            font.pixelSize: root.dp(11)
+                                            font.pixelSize: root.sp(11)
                                             text: !sampleSummaryCard.s ? ""
                                                   : (sampleSummaryCard.s.interval.length ? sampleSummaryCard.s.interval
                                                                                          : "Intervalo del estrato: " + sampleSummaryCard.s.stratumInterval)
@@ -9792,7 +9797,7 @@ Item {
                                             radius: height / 2
                                             color: "transparent"
                                             CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: "tinted" }
-                                            Text { id: autoTag; anchors.centerIn: parent; text: "Auto"; color: root.cGenBlue; font.pixelSize: root.dp(10); font.bold: true }
+                                            Text { id: autoTag; anchors.centerIn: parent; text: "Auto"; color: root.cGenBlue; font.pixelSize: root.sp(10); font.bold: true }
                                         }
                                     }
                                 }
@@ -9845,7 +9850,7 @@ Item {
                                         RowLayout {
                                             Layout.fillWidth: true
                                             spacing: root.dp(6)
-                                            Text { Layout.preferredWidth: root.dp(56); text: "AASHTO"; color: root.cMuted; font.pixelSize: root.dp(11); font.bold: true }
+                                            Text { Layout.preferredWidth: root.dp(56); text: "AASHTO"; color: root.cMuted; font.pixelSize: root.sp(11); font.bold: true }
                                             LabSuggestionChip {
                                                 visible: !!(labReviewPanel.suggestion && labReviewPanel.suggestion.aashto)
                                                 code: labReviewPanel.suggestion && labReviewPanel.suggestion.aashto ? labReviewPanel.suggestion.aashto.code : ""
@@ -9854,14 +9859,14 @@ Item {
                                             }
                                             Text {
                                                 visible: !(labReviewPanel.suggestion && labReviewPanel.suggestion.aashto)
-                                                text: "Datos insuficientes"; color: root.cMuted; font.pixelSize: root.dp(11)
+                                                text: "Datos insuficientes"; color: root.cMuted; font.pixelSize: root.sp(11)
                                             }
                                             Item { Layout.fillWidth: true }
                                         }
                                         RowLayout {
                                             Layout.fillWidth: true
                                             spacing: root.dp(6)
-                                            Text { Layout.preferredWidth: root.dp(56); text: "SUCS"; color: root.cMuted; font.pixelSize: root.dp(11); font.bold: true }
+                                            Text { Layout.preferredWidth: root.dp(56); text: "SUCS"; color: root.cMuted; font.pixelSize: root.sp(11); font.bold: true }
                                             Repeater {
                                                 model: labReviewPanel.suggestion ? labReviewPanel.suggestion.sucs : []
                                                 delegate: LabSuggestionChip {
@@ -9874,11 +9879,11 @@ Item {
                                             Text {
                                                 visible: !!labReviewPanel.suggestion && labReviewPanel.suggestion.hidden > 0
                                                 text: labReviewPanel.suggestion ? "+" + labReviewPanel.suggestion.hidden : ""
-                                                color: root.cMuted; font.pixelSize: root.dp(11)
+                                                color: root.cMuted; font.pixelSize: root.sp(11)
                                             }
                                             Text {
                                                 visible: !!labReviewPanel.suggestion && labReviewPanel.suggestion.sucs.length === 0
-                                                text: "Datos insuficientes"; color: root.cMuted; font.pixelSize: root.dp(11)
+                                                text: "Datos insuficientes"; color: root.cMuted; font.pixelSize: root.sp(11)
                                             }
                                             Item { Layout.fillWidth: true }
                                         }
@@ -9886,13 +9891,13 @@ Item {
                                             Layout.fillWidth: true
                                             visible: text.length > 0
                                             text: labReviewPanel.suggestion ? labReviewPanel.suggestion.note : ""
-                                            color: root.cMuted; font.pixelSize: root.dp(11)
+                                            color: root.cMuted; font.pixelSize: root.sp(11)
                                         }
                                         Text {
                                             Layout.fillWidth: true
                                             visible: text.length > 0
                                             text: labReviewPanel.suggestion ? labReviewPanel.suggestion.reason : ""
-                                            wrapMode: Text.WordWrap; color: root.cMuted; font.pixelSize: root.dp(11)
+                                            wrapMode: Text.WordWrap; color: root.cMuted; font.pixelSize: root.sp(11)
                                         }
                                         Repeater {
                                             model: labReviewPanel.info ? labReviewPanel.info.review.observations : []
@@ -9941,7 +9946,7 @@ Item {
                                                     text: (parent.stage === "confirmed" ? "✓ " : "") + (labClassPanel.info ? labClassPanel.info.stageLabel : "")
                                                     color: root.labStageColor(parent.stage, false)
                                                     font.bold: true
-                                                    font.pixelSize: root.dp(11)
+                                                    font.pixelSize: root.sp(11)
                                                     Behavior on color { ColorAnimation { duration: root.flow ? root.flow.duration(220) : 220 } }
                                                 }
                                             }
@@ -9996,7 +10001,7 @@ Item {
                                                 visible: text.length > 0
                                                 text: String(labClassPanel.fieldErrors[modelData] || "")
                                                 color: root.flow ? root.flow.theme.error : "#B4232E"
-                                                font.pixelSize: root.dp(11)
+                                                font.pixelSize: root.sp(11)
                                                 wrapMode: Text.WordWrap
                                             }
                                         }
@@ -10004,7 +10009,7 @@ Item {
                                             Layout.fillWidth: true
                                             wrapMode: Text.WordWrap
                                             color: root.cMuted
-                                            font.pixelSize: root.dp(11)
+                                            font.pixelSize: root.sp(11)
                                             text: "Estrato muestra: SUCS " + (labClassPanel.info && labClassPanel.info.projection.sucs.length ? labClassPanel.info.projection.sucs : "Pendiente de laboratorio")
                                                   + " · AASHTO " + (labClassPanel.info && labClassPanel.info.projection.aashto.length ? labClassPanel.info.projection.aashto : "Pendiente de laboratorio")
                                         }
@@ -10381,7 +10386,7 @@ Item {
                                 width: root.dp(22); height: width; radius: width / 2
                                 color: "transparent"
                                 CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: modelData.mode === "EDITING" ? "primary" : "glass" }
-                                Text { anchors.centerIn: parent; text: modelData.initial; color: root.cText; font.pixelSize: root.dp(11); font.bold: true }
+                                Text { anchors.centerIn: parent; text: modelData.initial; color: root.cText; font.pixelSize: root.sp(11); font.bold: true }
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -10689,7 +10694,7 @@ Item {
                                                 anchors.verticalCenter: parent.verticalCenter
                                                 text: modelData.text
                                                 color: root.cText
-                                                font.pixelSize: root.dp(11)
+                                                font.pixelSize: root.sp(11)
                                             }
                                         }
                                     }
@@ -10835,7 +10840,7 @@ Item {
                             Text {
                                 text: "UBICACIÓN DE LA CALICATA"
                                 color: root.cMuted
-                                font.pixelSize: root.dp(10)
+                                font.pixelSize: root.sp(10)
                                 font.letterSpacing: 1.4
                                 font.weight: Font.DemiBold
                             }
@@ -11074,7 +11079,7 @@ Item {
                     text: zoneValid ? "Nube: zona " + Number(zoneMatch[1]) + " · " + (root.doc && root.doc.header.datum === "PSAD56" ? "PSAD56" : "WGS84")
                                     : "Zona no reconocida: se conserva localmente y no se envía a la nube."
                     color: zoneValid ? root.cMuted : (root.flow ? root.flow.theme.error : "#B4232E")
-                    font.pixelSize: root.dp(11)
+                    font.pixelSize: root.sp(11)
                     wrapMode: Text.WordWrap
                 }
 
@@ -11341,7 +11346,7 @@ Item {
                                     color: root.darkMode ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(1, 1, 1, 0.55)
                                     border.width: 1
                                     border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(1, 1, 1, 0.85)
-                                    Text { id: photoCountText; anchors.centerIn: parent; text: photoCard.info.has ? "1 foto" : "0 fotos"; color: root.cMuted; font.pixelSize: root.dp(11) }
+                                    Text { id: photoCountText; anchors.centerIn: parent; text: photoCard.info.has ? "1 foto" : "0 fotos"; color: root.cMuted; font.pixelSize: root.sp(11) }
                                 }
                                 Rectangle {
                                     Layout.preferredWidth: root.dp(34); Layout.preferredHeight: root.dp(34)
@@ -11522,7 +11527,7 @@ Item {
                                                 text: photoCard.info.label
                                                 color: root.photoToneColor(photoCard.info.tone, false)
                                                 font.bold: true
-                                                font.pixelSize: root.dp(11)
+                                                font.pixelSize: root.sp(11)
                                             }
                                         }
                                     }
@@ -11531,20 +11536,20 @@ Item {
                                     Text {
                                         visible: photoCard.info.versionCount > 1
                                         text: photoCard.info.versionCount + " versiones"
-                                        color: root.cMuted; font.pixelSize: root.dp(11)
+                                        color: root.cMuted; font.pixelSize: root.sp(11)
                                     }
                                 }
                                 Text {
                                     Layout.fillWidth: true
                                     visible: photoCard.info.versionCount > 1
                                     text: "Original conservada"
-                                    color: root.cMuted; font.pixelSize: root.dp(11)
+                                    color: root.cMuted; font.pixelSize: root.sp(11)
                                 }
                                 Text {
                                     Layout.fillWidth: true
                                     visible: photoCard.info.error.length > 0 && !photoCard.info.conflict
                                     text: photoCard.info.error
-                                    color: root.cMuted; font.pixelSize: root.dp(11)
+                                    color: root.cMuted; font.pixelSize: root.sp(11)
                                     wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
                                 }
                             }
@@ -11715,7 +11720,7 @@ Item {
                                         ? "La tabla de estratos muestra la clasificación SUCS."
                                         : "No registrado. La tabla muestra SUCS mientras no se elija."
                                 color: root.cMuted
-                                font.pixelSize: root.dp(11)
+                                font.pixelSize: root.sp(11)
                                 wrapMode: Text.WordWrap
                             }
                         }
@@ -11754,7 +11759,7 @@ Item {
                                                     : "Carretera, edificación, cantera, ambiental / exploración o plantilla vacía."
                                 }
                                 color: root.cMuted
-                                font.pixelSize: root.dp(11)
+                                font.pixelSize: root.sp(11)
                                 wrapMode: Text.WordWrap
                             }
                         }
@@ -11846,7 +11851,7 @@ Item {
                                     Layout.fillWidth: true
                                     text: "Aún no hay estratos"
                                     color: root.cText
-                                    font.pixelSize: root.dp(19)
+                                    font.pixelSize: root.sp(19)
                                     font.weight: Font.DemiBold
                                     horizontalAlignment: Text.AlignHCenter
                                     wrapMode: Text.WordWrap
@@ -11902,7 +11907,7 @@ Item {
                                         Layout.horizontalStretchFactor: modelData.w === 0 ? (modelData.s || 1) : -1
                                         text: modelData.t
                                         color: root.cMuted
-                                        font.pixelSize: root.dp(12)
+                                        font.pixelSize: root.sp(12)
                                         font.weight: Font.DemiBold
                                         elide: Text.ElideRight
                                     }
@@ -11986,7 +11991,7 @@ Item {
                                                 Layout.preferredWidth: root.dp(22)
                                                 text: "⋮"
                                                 color: root.cMuted
-                                                font.pixelSize: root.dp(18)
+                                                font.pixelSize: root.sp(18)
                                                 horizontalAlignment: Text.AlignHCenter
                                             }
                                             PrfStratumBadge {
@@ -12028,7 +12033,7 @@ Item {
                                                     visible: prfRow.typeText.length > 0
                                                     text: prfRow.typeText
                                                     color: root.cMuted
-                                                    font.pixelSize: root.dp(12)
+                                                    font.pixelSize: root.sp(12)
                                                     wrapMode: Text.WordWrap
                                                     maximumLineCount: 2
                                                     elide: Text.ElideRight
@@ -12050,7 +12055,7 @@ Item {
                                                       : prfRow.descText.length ? prfRow.descText : "Sin descripción"
                                                 color: !prfRow.validInterval ? (root.flow ? root.flow.theme.error : "#B4232E")
                                                        : prfRow.descText.length ? root.cText : root.cMuted
-                                                font.pixelSize: root.dp(12)
+                                                font.pixelSize: root.sp(12)
                                                 wrapMode: Text.WordWrap
                                                 maximumLineCount: 3
                                                 elide: Text.ElideRight
@@ -12087,7 +12092,7 @@ Item {
                                                     text: prfRow.depthText(prfRow.fromDepth) + " – " + prfRow.depthText(prfRow.toDepth) + " m"
                                                           + (prfRow.validInterval ? "  ·  e = " + (prfRow.toDepth - prfRow.fromDepth).toFixed(2) + " m" : "")
                                                     color: root.cMuted
-                                                    font.pixelSize: root.dp(12)
+                                                    font.pixelSize: root.sp(12)
                                                     elide: Text.ElideRight
                                                 }
                                                 Text {
@@ -12107,7 +12112,7 @@ Item {
                                                     text: !prfRow.validInterval ? "Completa o corrige el intervalo"
                                                           : prfRow.descText.length ? prfRow.descText : "Sin descripción"
                                                     color: !prfRow.validInterval ? (root.flow ? root.flow.theme.error : "#B4232E") : root.cMuted
-                                                    font.pixelSize: root.dp(12)
+                                                    font.pixelSize: root.sp(12)
                                                     wrapMode: Text.WordWrap
                                                     maximumLineCount: 2
                                                     elide: Text.ElideRight
@@ -12174,7 +12179,7 @@ Item {
                                         anchors.centerIn: parent
                                         text: prfEditorCard.idx + 1
                                         color: root.prfInkOn(parent.color)
-                                        font.pixelSize: root.dp(14)
+                                        font.pixelSize: root.sp(14)
                                         font.bold: true
                                     }
                                 }
@@ -12185,7 +12190,7 @@ Item {
                                           + (root.stratumTypeText(prfEditorCard.s).length
                                              ? " (" + root.stratumTypeText(prfEditorCard.s) + ")" : "")
                                     color: root.cText
-                                    font.pixelSize: root.dp(17)
+                                    font.pixelSize: root.sp(17)
                                     font.weight: Font.DemiBold
                                     wrapMode: Text.WordWrap
                                     maximumLineCount: 2
@@ -12310,7 +12315,7 @@ Item {
                                         visible: !prfEditorCard.origin.length
                                         text: "Elige el origen. Antrópico o Mixto habilita el detalle del relleno."
                                         color: root.cMuted
-                                        font.pixelSize: root.dp(11)
+                                        font.pixelSize: root.sp(11)
                                         wrapMode: Text.WordWrap
                                     }
                                     ColumnLayout {
@@ -12418,7 +12423,7 @@ Item {
                                         Layout.fillWidth: true
                                         text: "SUCS, AASHTO y patrón vienen del Laboratorio: se cambian adoptando la clasificación allí."
                                         color: root.cMuted
-                                        font.pixelSize: root.dp(11)
+                                        font.pixelSize: root.sp(11)
                                         wrapMode: Text.WordWrap
                                     }
                                     Text {
@@ -12581,7 +12586,7 @@ Item {
                                             visible: !!root.prfActiveTemplate && root.prfActiveTemplate.featuresHint === true
                                             text: "Plantilla Ambiental: registra olor, manchas o contaminación solo si se observan."
                                             color: root.cMuted
-                                            font.pixelSize: root.dp(11)
+                                            font.pixelSize: root.sp(11)
                                             wrapMode: Text.WordWrap
                                         }
                                         PrfCheck {
@@ -12737,7 +12742,7 @@ Item {
                                 Layout.fillWidth: true
                                 text: "Clasificación representativa del perfil completo."
                                 color: root.cMuted
-                                font.pixelSize: root.dp(11)
+                                font.pixelSize: root.sp(11)
                                 wrapMode: Text.WordWrap
                             }
                             PrfToolButton {
@@ -12799,7 +12804,7 @@ Item {
                         text: "Aún no hay estratos\npara laboratorio"
                         color: root.cText
                         font.bold: true
-                        font.pixelSize: root.dp(20)
+                        font.pixelSize: root.sp(20)
                         wrapMode: Text.WordWrap
                     }
                     Text {
@@ -12942,10 +12947,10 @@ Item {
                                         color: labCard.kind === "RA" ? root.cGenOrange : labCard.kind === "ROCA" ? root.cMuted
                                              : labCard.kind === "ORG" ? root.cGenGreen : root.cGenTeal
                                         font.bold: true
-                                        font.pixelSize: root.dp(11)
+                                        font.pixelSize: root.sp(11)
                                     }
                                 }
-                                Text { text: "›"; color: root.cMuted; font.pixelSize: root.dp(22) }
+                                Text { text: "›"; color: root.cMuted; font.pixelSize: root.sp(22) }
                             }
                             Text {
                                 Layout.fillWidth: true
@@ -12962,7 +12967,7 @@ Item {
                                     Layout.preferredWidth: 1
                                     Layout.alignment: Qt.AlignTop
                                     spacing: 1
-                                    Text { text: "Estrato (proyección)"; color: root.cMuted; font.bold: true; font.pixelSize: root.dp(11) }
+                                    Text { text: "Estrato (proyección)"; color: root.cMuted; font.bold: true; font.pixelSize: root.sp(11) }
                                     Text { Layout.fillWidth: true; elide: Text.ElideRight; color: root.cText; font.pixelSize: root.fsLabel
                                            text: "SUCS: " + (labCard.info && labCard.info.projection.sucs.length ? labCard.info.projection.sucs : "Pendiente de laboratorio") }
                                     Text { Layout.fillWidth: true; elide: Text.ElideRight; color: root.cText; font.pixelSize: root.fsLabel
@@ -12975,7 +12980,7 @@ Item {
                                     spacing: 2
                                     Text {
                                         text: "Laboratorio"
-                                        color: root.cMuted; font.bold: true; font.pixelSize: root.dp(11)
+                                        color: root.cMuted; font.bold: true; font.pixelSize: root.sp(11)
                                     }
                                     Text {
                                         Layout.fillWidth: true
@@ -12997,7 +13002,7 @@ Item {
                                             text: labCard.info ? labCard.info.stageLabel : ""
                                             color: root.labStageColor(labCard.info ? labCard.info.stage : "", false)
                                             font.bold: true
-                                            font.pixelSize: root.dp(11)
+                                            font.pixelSize: root.sp(11)
                                         }
                                     }
                                 }
@@ -13054,10 +13059,10 @@ Item {
                                     radius: height / 2
                                     color: root.labStageColor(resultCard.modelData ? resultCard.modelData.stage : "", true)
                                     Text { id: resultStage; anchors.centerIn: parent; text: resultCard.modelData ? resultCard.modelData.stageLabel : ""
-                                           color: root.labStageColor(resultCard.modelData ? resultCard.modelData.stage : "", false); font.bold: true; font.pixelSize: root.dp(11) }
+                                           color: root.labStageColor(resultCard.modelData ? resultCard.modelData.stage : "", false); font.bold: true; font.pixelSize: root.sp(11) }
                                 }
                                 Item { Layout.fillWidth: true }
-                                Text { text: "›"; color: root.cMuted; font.pixelSize: root.dp(22) }
+                                Text { text: "›"; color: root.cMuted; font.pixelSize: root.sp(22) }
                             }
                             Text { Layout.fillWidth: true; text: "Estrato " + (resultCard.index + 1) + " · " + resultCard.num(resultCard.p.de) + " – " + resultCard.num(resultCard.p.a) + " m"
                                    color: root.cText; font.pixelSize: root.fsLabel; font.bold: true; elide: Text.ElideRight }
@@ -13074,8 +13079,8 @@ Item {
                                     required property var modelData
                                     Layout.fillWidth: true
                                     spacing: root.dp(8)
-                                    Text { Layout.fillWidth: true; text: modelData.l; color: root.cMuted; font.pixelSize: root.dp(11); elide: Text.ElideRight }
-                                    Text { text: modelData.v; color: root.cText; font.pixelSize: root.dp(11) }
+                                    Text { Layout.fillWidth: true; text: modelData.l; color: root.cMuted; font.pixelSize: root.sp(11); elide: Text.ElideRight }
+                                    Text { text: modelData.v; color: root.cText; font.pixelSize: root.sp(11) }
                                 }
                             }
                         }
@@ -13208,7 +13213,7 @@ Item {
                     Layout.fillWidth: true
                     text: mobileObservations.length + " caracteres"
                     color: root.cMuted
-                    font.pixelSize: root.dp(root.isPhone ? 10 : 12)
+                    font.pixelSize: root.sp(root.isPhone ? 10 : 12)
                     horizontalAlignment: Text.AlignRight
                 }
             }
