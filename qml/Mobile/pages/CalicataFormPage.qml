@@ -6330,6 +6330,7 @@ Item {
 
         if (doc) {
             importFromDoc()
+            Qt.callLater(root._recoverInterruptedCapture)
         } else {
             cortesModel.clear()
             renumerarCortesYIntervalos(false)
@@ -7770,8 +7771,12 @@ Item {
             logoFeedbackText = "Selección de logo cancelada al cambiar de ficha"
         }
         _documentClosing = false
-        if (doc && doc.closed !== true) importFromDoc()
-        else resetForm()
+        if (doc && doc.closed !== true) {
+            importFromDoc()
+            Qt.callLater(root._recoverInterruptedCapture)
+        } else {
+            resetForm()
+        }
 
         // ✅ clave:
         _applyPendingToDocIfAny()
@@ -7860,10 +7865,38 @@ Item {
                 ? "Abriendo cámara del dispositivo…"
                 : "Abriendo galería de imágenes…"
 
-        if (sourceKind === "camera")
+        if (sourceKind === "camera") {
+            // Identidad estable de la ficha: si Android mata InGe+ con la
+            // camara delante, la foto se recupera al reabrir esta ficha.
+            if (Perms.setPhotoCaptureContext)
+                Perms.setPhotoCaptureContext(String(doc.fileUrl))
             Perms.capturePhoto(idx)
-        else
+        } else {
             Perms.pickPhoto(idx)
+        }
+    }
+
+    // Captura interrumpida por la muerte del proceso (camara del OEM con poca
+    // RAM): se ofrece por el mismo camino que una captura normal, con el
+    // dialogo de datos impresos, y solo en la ficha que la pidio.
+    function _recoverInterruptedCapture() {
+        if (!doc || doc.closed === true || _photoRequestPending || _logoRequestPending
+                || _documentClosing || typeof Perms === "undefined" || !Perms.pendingCaptureSlot)
+            return
+        var contextKey = String(doc.fileUrl)
+        var slot = Perms.pendingCaptureSlot(contextKey)
+        if (slot < 0)
+            return
+        _releasePendingPhotoImport()
+        _pendingStampIdx = slot
+        _pendingPhotoDoc = doc
+        _pendingPhotoDocId = _docInstanceId(doc)
+        _photoRequestSerial++
+        _pendingPhotoSourceKind = "camera"
+        _photoRequestPending = true
+        photoFeedbackText = "Recuperando la fotografía tomada antes de que Android cerrara InGe+…"
+        console.info("[InGe+ M09] recovering interrupted camera capture slot=" + slot)
+        Perms.recoverPendingCapture(contextKey)
     }
 
     onRequestCapturePhoto: function(idx) {
