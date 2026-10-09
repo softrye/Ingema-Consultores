@@ -199,6 +199,8 @@ private:
     // descartan y nunca pueden resucitar ni sustituir la sesión actual.
     quint64 beginAuthOperation(const char* kind, bool cancelPasswordLogin);
     bool authOperationCurrent(quint64 generation, const char* callback) const;
+    void finishAvatarUpdate(const QString& userId, const QByteArray& pngBytes,
+                            const QString& error);
 
 private:
     static AuthSession* s_instance;
@@ -230,6 +232,7 @@ private:
     QString m_avatarUrl;
     QString m_avatarLocalFile;
     QString m_avatarPath;
+    bool m_avatarJobRunning = false;
 
     bool m_rememberFor30Days = false;
     QDateTime m_rememberUntilUtc;

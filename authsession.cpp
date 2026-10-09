@@ -24,6 +24,8 @@
 #include <QVariantMap>
 #include <QStringList>
 #include <QTimer>
+#include <QPointer>
+#include <QThreadPool>
 #include <algorithm>
 
 #ifdef Q_OS_ANDROID
@@ -117,6 +119,24 @@ static QByteArray readAndroidContentUriBytes(const QString& uriString)
 #endif
 }
 
+// Avatar decode: centre square and at most 1024 px, applied by the reader
+// itself. JPEG decodes at a reduced DCT scale instead of the full 12-50 MP
+// frame (48-200 MB RGBA). The centre square is invariant under the EXIF
+// rotation applied afterwards.
+static QImage readAvatarImage(QImageReader& reader)
+{
+    reader.setAutoTransform(true);
+    const QSize size = reader.size();
+    if (size.isValid() && !size.isEmpty()) {
+        const int side = qMin(size.width(), size.height());
+        reader.setClipRect(QRect((size.width() - side) / 2,
+                                 (size.height() - side) / 2, side, side));
+        if (side > 1024)
+            reader.setScaledSize(QSize(1024, 1024));
+    }
+    return reader.read();
+}
+
 static QImage readImageFromUrl(const QUrl& url)
 {
     if (!url.isValid())
@@ -124,8 +144,7 @@ static QImage readImageFromUrl(const QUrl& url)
 
     if (url.isLocalFile()) {
         QImageReader reader(url.toLocalFile());
-        reader.setAutoTransform(true);
-        return reader.read();
+        return readAvatarImage(reader);
     }
 
     const QString source = url.toString();
@@ -141,15 +160,13 @@ static QImage readImageFromUrl(const QUrl& url)
             return {};
 
         QImageReader reader(&buffer);
-        reader.setAutoTransform(true);
-        return reader.read();
+        return readAvatarImage(reader);
     }
 #endif
 
     // Recursos qrc y otras rutas soportadas directamente por Qt.
     QImageReader reader(source);
-    reader.setAutoTransform(true);
-    return reader.read();
+    return readAvatarImage(reader);
 }
 
 static QString guessMime(const QString& extLower)
@@ -1469,22 +1486,53 @@ void AuthSession::updateUserAvatar(const QUrl& fileUrl)
 {
     if (!m_api) { emit profileUpdatedFail("SupabaseClient no inicializado."); return; }
     if (m_accessToken.isEmpty() || m_userId.isEmpty()) { emit profileUpdatedFail("No hay sesión activa."); return; }
-
-    const QImage sourceImage = readImageFromUrl(fileUrl);
-    const QImage avatarImage = squareAvatarImage(sourceImage);
-    if (avatarImage.isNull()) {
-        emit profileUpdatedFail(
-            "No se pudo leer la imagen seleccionada. Elige una foto JPG o PNG e inténtalo otra vez.");
+    if (m_avatarJobRunning) {
+        emit profileUpdatedFail("Ya se está procesando una foto de perfil.");
         return;
     }
 
-    QByteArray bytes;
-    QBuffer buffer(&bytes);
-    if (!buffer.open(QIODevice::WriteOnly) || !avatarImage.save(&buffer, "PNG")) {
-        emit profileUpdatedFail("No se pudo preparar la imagen de perfil.");
+    // Decode, crop, scale and PNG-encode off the GUI thread: on a 2-4 GB phone
+    // this used to block Qt for seconds. content:// is read through JNI, and
+    // QJniEnvironment attaches the pool thread. Local save, upload and signals
+    // stay on the GUI thread (finishAvatarUpdate).
+    m_avatarJobRunning = true;
+    const QString userId = m_userId;
+    QPointer<AuthSession> guard(this);
+    QThreadPool::globalInstance()->start([guard, fileUrl, userId]() {
+        const QImage avatarImage = squareAvatarImage(readImageFromUrl(fileUrl));
+        QByteArray bytes;
+        QString error;
+        if (avatarImage.isNull()) {
+            error = QStringLiteral("No se pudo leer la imagen seleccionada. Elige una foto JPG o PNG e inténtalo otra vez.");
+        } else {
+            QBuffer buffer(&bytes);
+            if (!buffer.open(QIODevice::WriteOnly) || !avatarImage.save(&buffer, "PNG"))
+                error = QStringLiteral("No se pudo preparar la imagen de perfil.");
+            buffer.close();
+        }
+        if (!guard)
+            return;
+        QMetaObject::invokeMethod(guard.data(), [guard, userId, bytes, error]() {
+            if (guard)
+                guard->finishAvatarUpdate(userId, bytes, error);
+        }, Qt::QueuedConnection);
+    });
+}
+
+void AuthSession::finishAvatarUpdate(const QString& userId, const QByteArray& bytes,
+                                     const QString& error)
+{
+    m_avatarJobRunning = false;
+    // The account changed while the photo was processed: never write it into
+    // another account's profile.
+    if (userId != m_userId || m_accessToken.isEmpty()) {
+        qInfo() << "INGE_AVATAR_DISCARDED reason=account_changed";
         return;
     }
-    buffer.close();
+    if (!error.isEmpty()) {
+        emit profileUpdatedFail(error);
+        return;
+    }
 
     // Primero guardamos la copia local. Así el avatar cambia de inmediato incluso
     // si Storage está lento, sin políticas RLS o temporalmente sin conexión.
