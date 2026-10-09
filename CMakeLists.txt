@@ -29,7 +29,17 @@ if(ANDROID)
     set(CMAKE_ANDROID_STL_TYPE "c++_shared" CACHE STRING
         "STL usada por CMake" FORCE)
 
-    set(QT_ANDROID_DEPLOYMENT_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING
+    # Qt 6.9 solo reconoce Debug o Release aqui: con RelWithDebInfo o
+    # MinSizeRel no pasa --release a androiddeployqt y el APK sale
+    # debuggable, con Flutter en JIT aunque el C++ este optimizado.
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(_INGE_ANDROID_DEPLOYMENT_TYPE "Debug")
+        message(NOTICE "InGe+ Android Debug: APK debuggable, C++ sin optimizar "
+            "y Flutter en JIT. No usar este build para medir rendimiento.")
+    else()
+        set(_INGE_ANDROID_DEPLOYMENT_TYPE "Release")
+    endif()
+    set(QT_ANDROID_DEPLOYMENT_TYPE "${_INGE_ANDROID_DEPLOYMENT_TYPE}" CACHE STRING
         "Tipo de despliegue Android" FORCE)
 endif()
 
