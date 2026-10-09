@@ -10840,7 +10840,10 @@ Item {
                     Item {
                         x: root.dp(10)
                         y: root.dp(10)
-                        width: Math.min(parent.width - root.dp(20), root.dp(230))
+                        // El rotulo tiene texto minimo de 12 px (sp): el recuadro crece
+                        // con el y nunca pasa del ancho disponible del mapa.
+                        width: Math.min(parent.width - root.dp(20),
+                                        Math.max(root.dp(230), locationPointTitle.implicitWidth + root.dp(24)))
                         height: locationPointColumn.implicitHeight + root.dp(20)
                         FlowCore.LiquidGlassSurface {
                             anchors.fill: parent
@@ -10871,6 +10874,9 @@ Item {
                             width: parent.width - root.dp(24)
                             spacing: root.dp(2)
                             Text {
+                                id: locationPointTitle
+                                width: Math.min(implicitWidth, parent.width)
+                                elide: Text.ElideRight
                                 text: "UBICACIÓN DE LA CALICATA"
                                 color: root.cMuted
                                 font.pixelSize: root.sp(10)
