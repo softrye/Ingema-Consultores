@@ -2122,6 +2122,14 @@ Binding {
               : Mobile.InGeCoreFlow.performance.balanced)
 }
 
+// Misma escala efectiva que fs(): FlowText, FlowField y FlowIconButton la
+// aplican con accessibility.scaledTextSize().
+Binding {
+    target: Mobile.InGeCoreFlow.accessibility
+    property: "textScale"
+    value: app.effectiveTextScale
+}
+
 
 
 
@@ -2211,6 +2219,14 @@ property string welcomeText: "Te damos la bienvenida a InGe+"
 property url profilePhotoSource: icon("blank_profile.png")
 property string profilePhotoStatus: "Foto de perfil local"
 property real fontScale: 1.0
+// Escala de texto unica: ajuste A-/A+ de la app (fontScale, el unico que se
+// persiste) por el tamaño de fuente de Android (Configuration.fontScale, en
+// vivo via GraphicsCore). El tope 1.30 es el mismo maximo que A+ ya permitia:
+// una fuente del sistema al 130-200 % no lleva fs() mas alla del tamaño que
+// ya alcanzaba con A+ y que soportan sus filas de alto fijo. La usan fs() y,
+// por el Binding de InGeCoreFlow.accessibility, FlowText/FlowField.
+readonly property real effectiveTextScale:
+    Math.max(0.85, Math.min(1.30, fontScale * Mobile.InGeCoreFlow.systemFontScale))
 property string languageCode: "es"
 
 property string fichaTipo: "Calicata"
@@ -2310,7 +2326,7 @@ function card2Color() { return inGeCoreFlow.theme.surfaceSecondary }
 function borderColor() { return inGeCoreFlow.theme.border }
 function textColor() { return inGeCoreFlow.theme.textPrimary }
 function mutedColor() { return inGeCoreFlow.theme.textSecondary }
-function fs(n) { return Math.max(9, Math.round(n * fontScale)) }
+function fs(n) { return Math.max(9, Math.round(n * effectiveTextScale)) }
 function pageThemeModeV70() { return 0 }
 
 function setVisualThemeMode(mode, announce) {

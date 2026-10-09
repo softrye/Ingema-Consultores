@@ -4,6 +4,8 @@ QtObject {
     property bool reducedMotion: false
     property bool highContrast: false
     property bool focusVisible: true
+    // Main.qml lo enlaza a app.effectiveTextScale (A-/A+ x fuente de Android,
+    // limitado a 0.85-1.30), la misma escala que usa su fs().
     property real textScale: 1.0
     property int minimumTouchTarget: 48
     property bool transparentSurfaces: true
