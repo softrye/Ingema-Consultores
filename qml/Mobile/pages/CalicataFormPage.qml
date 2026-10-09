@@ -8872,8 +8872,6 @@ Item {
             barRadius: root.dp(26)
             absorbTaps: false
             // Preset y velo del peek "Información de la calicata".
-            veilColor: root.darkMode ? Qt.rgba(0.0824, 0.102, 0.1882, 0.30) : Qt.rgba(0.98, 0.99, 1.0, 0.42)
-            rimColor: root.darkMode ? Qt.rgba(1, 1, 1, 0.06) : Qt.rgba(1, 1, 1, 0.30)
         }
         Overlay.modal: GenScrim { popupItem: photoActionsSheet }
         enter: Transition {
@@ -10986,8 +10984,6 @@ Item {
                             anchors.fill: parent
                             barRadius: photoCard.radius
                             absorbTaps: false
-                            veilColor: root.darkMode ? Qt.rgba(0.08, 0.10, 0.14, 0.40) : Qt.rgba(1, 1, 1, 0.40)
-                            rimColor: root.darkMode ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(1, 1, 1, 0.85)
                         }
                         // Categoría activa: contorno azul sobre el vidrio (transición suave).
                         Rectangle {
@@ -11083,8 +11079,6 @@ Item {
                                     visible: !photoCard.info.has
                                     barRadius: root.dp(20)
                                     absorbTaps: false
-                                    veilColor: root.darkMode ? Qt.rgba(0.10, 0.12, 0.16, 0.30) : Qt.rgba(1, 1, 1, 0.34)
-                                    rimColor: root.darkMode ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(1, 1, 1, 0.92)
                                     opacity: visible ? 1 : 0
                                     Behavior on opacity { NumberAnimation { duration: root.flow ? root.flow.duration(200) : 200 } }
                                     Column {
