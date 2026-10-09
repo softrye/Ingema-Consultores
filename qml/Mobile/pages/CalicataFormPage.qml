@@ -196,30 +196,10 @@ Item {
         root.finishStratum(false)   // guarda y llama stratumSheet.close() -> transición de salida
         return true
     }
-    // Tabs: indicador desplazable + cambio de contenido con fundido/desplazamiento corto.
-    property real labTabFade: 1
-    property real labTabShift: 0
-    property string _labTabNext: "lab"
-    property int _labTabDir: 1
-    SequentialAnimation {
-        id: labTabSwitch
-        NumberAnimation { target: root; property: "labTabFade"; to: 0; duration: root.flow ? root.flow.duration(90) : 90; easing.type: Easing.InQuad }
-        ScriptAction { script: { root.labTab = root._labTabNext; root.labTabShift = root._labTabDir * root.dp(10) } }
-        ParallelAnimation {
-            NumberAnimation { target: root; property: "labTabFade"; to: 1; duration: root.flow ? root.flow.duration(170) : 170; easing.type: Easing.OutCubic }
-            NumberAnimation { target: root; property: "labTabShift"; to: 0; duration: root.flow ? root.flow.duration(200) : 200; easing.type: Easing.OutCubic }
-        }
-    }
+    // Pestañas del detalle de Laboratorio: cambio inmediato.
     function setLabTab(key) {
-        if (["lab", "context", "history"].indexOf(key) < 0 || (key === root.labTab && !labTabSwitch.running)) return
-        var order = ["lab", "context", "history"]
-        root._labTabDir = order.indexOf(key) >= order.indexOf(root.labTab) ? 1 : -1
-        root._labTabNext = key
-        if (!root.flow || !root.flow.motionAllowed || !stratumSheet.visible) {
-            labTabSwitch.stop(); root.labTab = key; root.labTabFade = 1; root.labTabShift = 0
-            return
-        }
-        labTabSwitch.restart()
+        if (["lab", "context", "history"].indexOf(key) < 0 || key === root.labTab) return
+        root.labTab = key
     }
     // Registrar/editar muestra = el MISMO editor de Perfil (misma fila y campos).
     function labEditSampleInProfile(index) {
@@ -568,7 +548,6 @@ Item {
 
     Dialog {
         id: aiReviewDialog
-        property Item glassBackdropItem: null
         parent: Overlay.overlay
         modal: true
         focus: true
@@ -578,8 +557,8 @@ Item {
         x: (parent.width - width) / 2
         y: (parent.height - height) / 2
         standardButtons: Dialog.Close
-        Overlay.modal: GenGlassScrim { popupItem: aiReviewDialog }
-        background: GenPopupGlass { popupItem: aiReviewDialog; surfaceName: "calicata-ai-dialog" }
+        Overlay.modal: GenScrim { popupItem: aiReviewDialog }
+        background: GenPopupSurface { popupItem: aiReviewDialog}
         header: GenDialogTitle { text: aiReviewDialog.title }
         footer: GenDialogButtonBox { standardButtons: aiReviewDialog.standardButtons }
         enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: root.flow && root.flow.motionAllowed ? root.flow.fastDuration : 0 } }
@@ -690,12 +669,48 @@ Item {
     // =========================================================
     // Modo híbrido táctil: phone / tablet / desktop-kit
     // =========================================================
-    readonly property bool isPhone: root.width > 0 && Math.min(root.width, root.height) < 600
-    readonly property bool isTablet: root.width > 0 && Math.min(root.width, root.height) >= 600
+    // El teclado (adjustResize) solo encoge el alto; nunca el ancho. Mientras
+    // escribe (IME visible o un campo de texto con foco, que llega antes que el
+    // resize) se conserva el alto previo: abrir el IME ya no cambia phone/tablet
+    // ni uiScale (re-maquetaba toda la ficha con el campo enfocado en tablets,
+    // plegables y landscape). Cualquier otro cambio (rotar, split arriba/abajo,
+    // ventanas libres) se acepta. El alto retenido solo se usa con el mismo
+    // ancho, asi que una rotacion se clasifica en el mismo frame.
+    property real _layoutWidth: 0
+    property real _layoutHeight: 0
+    function _imeLikely() {
+        // Acceso indexado, como InGeCoreFlow: existen en runtime aunque la
+        // metadata estatica de qmllint no las enumere.
+        if (Qt.inputMethod["visible"] === true)
+            return true
+        var focusItem = root.Window.activeFocusItem
+        return !!focusItem && focusItem["cursorPosition"] !== undefined
+    }
+    function _updateLayoutSize() {
+        if (Math.abs(root.width - root._layoutWidth) > 0.5
+                || root.height > root._layoutHeight || !root._imeLikely()) {
+            root._layoutHeight = root.height
+            root._layoutWidth = root.width
+        }
+    }
+    onWidthChanged: Qt.callLater(root._updateLayoutSize)
+    onHeightChanged: Qt.callLater(root._updateLayoutSize)
+    readonly property real _layoutMinSide: {
+        var w = root.width, h = root.height
+        if (Math.abs(w - root._layoutWidth) <= 0.5 && root._layoutHeight > h)
+            h = root._layoutHeight
+        return Math.min(w, h)
+    }
+    readonly property bool isPhone: root.width > 0 && root._layoutMinSide < 600
+    readonly property bool isTablet: root.width > 0 && root._layoutMinSide >= 600
     readonly property real uiScale: root.isPhone
-                                    ? Math.max(0.82, Math.min(1.00, Math.min(root.width, root.height) / 430.0))
-                                    : Math.max(0.92, Math.min(1.12, Math.min(root.width, root.height) / 760.0))
+                                    ? Math.max(0.82, Math.min(1.00, root._layoutMinSide / 430.0))
+                                    : Math.max(0.92, Math.min(1.12, root._layoutMinSide / 760.0))
     function dp(v) { return Math.round(v * root.uiScale) }
+    // Texto: misma regla que __sp() de CalicatasEditorPage. En telefonos de
+    // 360 dp uiScale baja a 0.84 y dp(11) quedaba en 9 px; ninguna fuente de
+    // la ficha baja de 12 px. La geometria sigue escalando con dp().
+    function sp(v) { return Math.max(12, root.dp(v)) }
 
     property double _lastTapMs: 0
     readonly property int tapGuardMs: 280
@@ -822,7 +837,7 @@ Item {
     // Mientras una etapa entra (toque o swipe) sus alturas pasan de "sin ancho" al ancho
     // final: esas Behaviors de altura NO se animan entonces (cada frame re-maquetaría toda
     // la columna y re-capturaría el vidrio); siguen animando los cambios del usuario.
-    readonly property bool _stageSettling: stageRevealAnimation.running || stageSettleAnimation.running
+    readonly property bool _stageSettling: stageSettleAnimation.running
                                           || stagePeekFade.running || _swipeNavigating
     // El panel de Ubicación se crea en la primera visita y se conserva oculto
     // (no se dibuja fuera de su etapa): antes se destruía y recreaba en cada entrada,
@@ -842,19 +857,6 @@ Item {
         if (_swipeNavigating) return
         stageSlideTranslate.x = 0
         finalPageCol.opacity = 1.0
-        if (root.flow && root.flow.motionAllowed) {
-            // Misma transición visual (fundido + desplazamiento de 56 dp, 220 ms), pero
-            // sobre UNA textura del tamaño del viewport (stageMotionSnapshot): la etapa
-            // nueva se rasteriza al asentarse y cada frame solo mueve/funde un quad,
-            // en vez de re-procesar todo el árbol de la etapa (cientos de nodos y vidrio).
-            stageMotionSnapshot.opacity = 0.0
-            stageMotionTranslate.x = forward ? root.dp(56) : -root.dp(56)
-            stageRevealAnimation.restart()
-        } else {
-            stageRevealAnimation.stop()
-            stageMotionSnapshot.opacity = 1.0
-            stageMotionTranslate.x = 0
-        }
     }
 
     // === Swipe horizontal interno entre etapas (manipulación directa) ===
@@ -952,9 +954,6 @@ Item {
         // La etapa real ya está debajo del peek, en la misma posición y con
         // la misma cabecera: se desvanece solo la capa del peek.
         _swipePeekFrozen = true
-        stageRevealAnimation.stop()
-        stageMotionSnapshot.opacity = 1.0
-        stageMotionTranslate.x = 0
         stageSlideTranslate.x = 0
         finalPageCol.opacity = 1.0
         stagePeekFade.duration = root.flow && root.flow.motionAllowed ? 140 : 0
@@ -1651,7 +1650,6 @@ Item {
         profileMode = "samples"
         labSheetActive = true
         labDetailClosing = false
-        labTabSwitch.stop(); labTabFade = 1; labTabShift = 0
         stratumSheet.open()
         scrollToTop()
     }
@@ -1815,7 +1813,8 @@ Item {
     readonly property int fsLabel: Math.max(12, root.dp(root.isPhone ? 12 : 14))
     readonly property int fsField: Math.max(14, root.dp(root.isPhone ? 14 : 16))
     readonly property int hField: Math.max(44, root.dp(root.isPhone ? 44 : 50))
-    readonly property int hBtn: root.dp(root.isPhone ? 46 : 52)
+    // Objetivo tactil minimo de Android (48 dp), tambien con uiScale < 1.
+    readonly property int hBtn: Math.max(48, root.dp(root.isPhone ? 46 : 52))
     readonly property int hBtnCompact: root.dp(root.isPhone ? 42 : 48)
     readonly property int fsBtn: root.dp(root.isPhone ? 13 : 15)
     readonly property int rField: root.dp(10)
@@ -1841,7 +1840,7 @@ Item {
     // Se deja activo también en Windows porque Qt Creator puede probar el target móvil con kit desktop.
     readonly property bool touchOptimized: true
     readonly property int touchPressDelay: 140
-    readonly property int touchMinTarget: root.dp(root.isPhone ? 48 : 54)
+    readonly property int touchMinTarget: Math.max(48, root.dp(root.isPhone ? 48 : 54))
     readonly property real touchMaxVelocity: root.isPhone ? 1600 : 2200
 
     readonly property string dateFmt: "dd/MM/yyyy"
@@ -2918,7 +2917,7 @@ Item {
         rightPadding: 34
         padding: 0
 
-        background: CalicataLiquidGlass {
+        background: CalicataSurface {
             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
             radius: cb.fieldRadius
             pressed: cb.pressed
@@ -2934,7 +2933,7 @@ Item {
             height: Math.max(root.dp(44), cbOptionText.implicitHeight + root.dp(16))
             highlighted: cb.highlightedIndex === cbOption.index
             padding: 0
-            background: CalicataLiquidGlass {
+            background: CalicataSurface {
                 dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
                 anchors.fill: parent
                 anchors.margins: root.dp(2)
@@ -2968,7 +2967,7 @@ Item {
                 boundsBehavior: Flickable.StopAtBounds
                 ScrollIndicator.vertical: ScrollIndicator {}
             }
-            background: CalicataLiquidGlass {
+            background: CalicataSurface {
                 dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
                 level: "sheet"
                 radius: root.dp(14)
@@ -3139,7 +3138,7 @@ Item {
             font.pixelSize: root.fsLabel
             wrapMode: Text.WordWrap
         }
-        background: CalicataLiquidGlass {
+        background: CalicataSurface {
             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
             radius: tf.fieldRadius
             focused: tf.activeFocus
@@ -3181,7 +3180,7 @@ Item {
             if (ta.onCommit) ta.onCommit(ta.text)
         }
 
-        background: CalicataLiquidGlass {
+        background: CalicataSurface {
             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
             radius: ta.fieldRadius
             focused: ta.activeFocus
@@ -3211,7 +3210,7 @@ Item {
         height: implicitHeight
         radius: root.dp(24)
         color: "transparent"
-        CalicataLiquidGlass {
+        CalicataSurface {
             visible: sectionCard.glassPanel
             anchors.fill: parent
             dark: root.darkMode
@@ -3232,7 +3231,7 @@ Item {
                 text: sectionCard.sectionTitle
                 color: root.cText
                 font.bold: true
-                font.pixelSize: root.dp(18)
+                font.pixelSize: root.sp(18)
                 wrapMode: Text.WordWrap
             }
             Text {
@@ -3258,7 +3257,7 @@ Item {
         Layout.preferredHeight: implicitHeight
         padding: root.dp(12)
         font.pixelSize: root.fsField
-        background: CalicataLiquidGlass {
+        background: CalicataSurface {
             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
             radius: root.rField
             tone: stageButton.primary ? "primary" : "glass"
@@ -3282,7 +3281,7 @@ Item {
         implicitHeight: Math.max(28, statusLabel.implicitHeight + root.dp(10))
         radius: height / 2
         color: "transparent"
-        CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: statusChip.radius; tone: "tinted" }
+        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: statusChip.radius; tone: "tinted" }
         Text {
             id: statusLabel
             anchors.centerIn: parent
@@ -3312,7 +3311,7 @@ Item {
             focusPolicy: Qt.NoFocus
             Accessible.name: "Cambios recientes, " + logoHistoryStrip.rows.length + " versiones"
             onClicked: logoHistoryStrip.expanded = !logoHistoryStrip.expanded
-            background: CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; radius: root.dp(12); pressed: logoHistoryToggle.down }
+            background: CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; radius: root.dp(12); pressed: logoHistoryToggle.down }
             contentItem: RowLayout {
                 spacing: root.dp(10)
                 Components.FlowIcon {
@@ -3377,7 +3376,7 @@ Item {
                     height: root.dp(44)
                     radius: root.dp(10)
                     color: "transparent"
-                    CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; selected: logoVersionRow.modelData.inUse }
+                    CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; selected: logoVersionRow.modelData.inUse }
                     Image {
                         anchors.fill: parent
                         anchors.margins: root.dp(5)
@@ -3420,7 +3419,7 @@ Item {
                         width: parent.width
                         text: logoVersionRow.modelData.detail
                         color: logoVersionRow.modelData.inUse ? root.cGenBlue : root.cMuted
-                        font.pixelSize: root.dp(11)
+                        font.pixelSize: root.sp(11)
                         elide: Text.ElideRight
                     }
                 }
@@ -3439,7 +3438,7 @@ Item {
                             anchors.centerIn: parent
                             text: "En uso"
                             color: root.cGenGreen
-                            font.pixelSize: root.dp(11)
+                            font.pixelSize: root.sp(11)
                             font.weight: Font.DemiBold
                         }
                     }
@@ -3521,7 +3520,7 @@ Item {
         id: photoPill
         property string text: ""
         property bool primary: false
-        // Dentro de una PhotoGlassBar oscura (visor): sin fondo sólido, solo luz del vidrio.
+        // Dentro de una PhotoBar oscura (visor): sin fondo sólido, solo luz del vidrio.
         property bool onGlass: false
         signal clicked()
         Layout.fillWidth: true
@@ -3530,7 +3529,7 @@ Item {
         color: photoPill.onGlass ? Qt.rgba(1, 1, 1, photoPillTap.pressed ? 0.22 : 0.10) : "transparent"
         border.width: photoPill.onGlass ? 1 : 0
         border.color: Qt.rgba(1, 1, 1, 0.16)
-        CalicataLiquidGlass {
+        CalicataSurface {
             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
             visible: !photoPill.onGlass
             anchors.fill: parent
@@ -3546,154 +3545,31 @@ Item {
         Accessible.role: Accessible.Button
         Accessible.name: photoPill.text
     }
-    // Liquid Glass de Fotos: UNA sola superficie para tarjeta, panel vacío, barra de
-    // acciones, visor y hoja de acciones. Es el material del sistema
-    // (FlowCore.LiquidGlassSurface con los tokens de los flotantes de Ubicación / peek
-    // de Información) + velo de legibilidad translúcido. `backdrop` es lo que la
-    // superficie tiene detrás y nunca un ancestro (sin recursión de captura).
-    component PhotoGlassBar: Item {
-        id: glassBar
-        // Superficie primaria de Fotos: lo anidado no la vuelve a capturar.
-        objectName: "calicataGlassPrimary"
-        property Item backdrop: null
-        // Sobre la foto a pantalla completa (visor): velo oscuro y contenido claro.
+    component PhotoBar: Item {
+        id: photoBar
+        // Sobre la foto a pantalla completa (visor): fondo oscuro y contenido claro.
         property bool onDark: false
         property real barRadius: root.dp(18)
         // Superficies grandes (tarjeta, hoja) dejan pasar los toques a su contenedor.
         property bool absorbTaps: true
-        property real frost: 6
-        property real lens: 0.15
-        property string surfaceName: "calicata-photo-actions"
-        // Hoja modal: un único grab estable mientras anima (como el popup de General).
-        property bool frozen: false
-        property rect captureRect: Qt.rect(0, 0, 0, 0)
-        readonly property rect _clampedCapture: {
-            var b = glassBar.backdrop
-            var dependency = glassBar.x + glassBar.y + glassBar.width + glassBar.height + (glassBar.visible ? 1 : 0)
-            if (!b || b.width <= 12 || b.height <= 12) return Qt.rect(0, 0, 0, 0)
-            var m = 6
-            var p = glassBar.mapToItem(b, 0, 0)
-            var w = Math.min(glassBar.width, b.width - 2 * m)
-            var h = Math.min(glassBar.height, b.height - 2 * m)
-            return Qt.rect(Math.max(m, Math.min(p.x, b.width - w - m)),
-                           Math.max(m, Math.min(p.y, b.height - h - m)), Math.max(1, w), Math.max(1, h))
-        }
-        // Superficie anidada dentro de otro vidrio: material de bajo coste (2 taps, sin
-        // segunda sombra); el vidrio exterior ya da profundidad.
-        property bool lowCost: false
-        property color veilColor: glassBar.onDark ? Qt.rgba(0.05, 0.07, 0.10, 0.42)
-                                  : root.darkMode ? Qt.rgba(0.0824, 0.102, 0.1882, 0.52) : Qt.rgba(0.98, 0.99, 1.0, 0.58)
-        property color rimColor: glassBar.onDark || root.darkMode ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(1, 1, 1, 0.62)
-        default property alias content: glassBarContent.data
-        QtObject {
-            id: glassBarTokens
-            // Al regresar de cámara/galería se vuelve a capturar el ambiente, incluso en hojas congeladas.
-            readonly property bool shown: glassBar.visible && glassBar.opacity > 0
-                                          && Qt.application.state === Qt.ApplicationActive
-            readonly property Item glassBackdrop: glassBar.backdrop
-            readonly property real materialPosition: 0
-            readonly property bool lowCostGlass: glassBar.lowCost
-            readonly property color glassTint: root.darkMode || glassBar.onDark ? Qt.rgba(0.0824, 0.102, 0.1882, 0.10) : Qt.rgba(0.95, 0.97, 1.0, 0.02)
-            // Opaco: Qt premultiplica los colores de un ShaderEffect; translúcido se pintaría gris.
-            readonly property color fallbackGlass: root.darkMode || glassBar.onDark ? Qt.rgba(0.14, 0.16, 0.20, 1.0) : Qt.rgba(0.985, 0.99, 1.0, 1.0)
-            readonly property real rimLight: root.darkMode || glassBar.onDark ? 0.18 : 0.20
-            readonly property real rimShade: root.darkMode || glassBar.onDark ? 0.04 : 0.035
-            readonly property real rimSheen: root.darkMode || glassBar.onDark ? 0.03 : 0.015
-            readonly property real edgeContrast: root.darkMode || glassBar.onDark ? 0.0 : 0.03
-            readonly property real glassSaturation: 1.12
-            readonly property color shadowColor: Qt.rgba(0.0824, 0.102, 0.1882, root.darkMode || glassBar.onDark ? 0.22 : 0.10)
-        }
-        FlowCore.LiquidGlassSurface {
-            anchors.fill: parent
-            tokens: glassBarTokens
-            cornerRadius: glassBar.barRadius
-            surfaceName: glassBar.surfaceName
-            lens: glassBar.lens
-            frost: glassBar.frost
-            frostTaps: 6
-            magnify: 0
-            bevel: root.dp(6)
-            elevation: true
-            liveCapture: !glassBar.frozen
-            // Sin rect explícito, la captura se recorta DENTRO del fondo: con fondo el
-            // shader pinta opaco y el margen de 6 px fuera del ambiente saldría negro
-            // (la tarjeta ocupa todo su ambiente).
-            captureRect: glassBar.captureRect.width > 0 ? glassBar.captureRect : glassBar._clampedCapture
-        }
-        // Velo de legibilidad translúcido (deja ver lo de detrás; no es un bloque gris).
+        default property alias content: photoBarContent.data
         Rectangle {
             anchors.fill: parent
-            radius: glassBar.barRadius
-            color: glassBar.veilColor
+            radius: photoBar.barRadius
+            color: photoBar.onDark ? "#1A1F29" : (root.darkMode ? "#171D29" : "#FFFFFF")
             border.width: 1
-            border.color: glassBar.rimColor
+            border.color: photoBar.onDark || root.darkMode ? "#3A4456" : "#D5DBE3"
         }
         // La barra absorbe toques en huecos o acciones deshabilitadas (no llegan a la foto).
-        MouseArea { anchors.fill: parent; enabled: glassBar.absorbTaps; acceptedButtons: Qt.LeftButton }
-        Item { id: glassBarContent; anchors.fill: parent }
+        MouseArea { anchors.fill: parent; enabled: photoBar.absorbTaps; acceptedButtons: Qt.LeftButton }
+        Item { id: photoBarContent; anchors.fill: parent }
     }
 
-    // Ambiente propio de cada tarjeta de Fotos: lo que el vidrio de la tarjeta, del panel
-    // vacío y de la barra refracta (la página es ancestro y no puede ser backdrop).
-    // Estático: gradiente + manchas radiales suaves (Shapes, sin pase de desenfoque).
-    component PhotoGlassAmbient: Rectangle {
-        id: ambient
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: root.darkMode ? "#182440" : root.brand.ingemaBlueWash }
-            GradientStop { position: 1.0; color: root.darkMode ? root.brand.ingemaDeep : "#F8FAFD" }
-        }
-        Shapes.Shape {
-            anchors.fill: parent
-            Shapes.ShapePath {
-                strokeWidth: -1
-                fillGradient: Shapes.RadialGradient {
-                    centerX: ambient.width * 0.22; centerY: ambient.height * 0.55
-                    centerRadius: ambient.width * 0.55
-                    focalX: centerX; focalY: centerY
-                    GradientStop { position: 0.0; color: Qt.rgba(root.cGenBlue.r, root.cGenBlue.g, root.cGenBlue.b, root.darkMode ? 0.32 : 0.30) }
-                    GradientStop { position: 1.0; color: Qt.rgba(root.cGenBlue.r, root.cGenBlue.g, root.cGenBlue.b, 0) }
-                }
-                startX: 0; startY: 0
-                PathLine { x: ambient.width; y: 0 }
-                PathLine { x: ambient.width; y: ambient.height }
-                PathLine { x: 0; y: ambient.height }
-                PathLine { x: 0; y: 0 }
-            }
-            Shapes.ShapePath {
-                strokeWidth: -1
-                fillGradient: Shapes.RadialGradient {
-                    centerX: ambient.width * 0.82; centerY: ambient.height * 0.18
-                    centerRadius: ambient.width * 0.42
-                    focalX: centerX; focalY: centerY
-                    GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, root.darkMode ? 0.07 : 0.85) }
-                    GradientStop { position: 1.0; color: Qt.rgba(1, 1, 1, 0) }
-                }
-                startX: 0; startY: 0
-                PathLine { x: ambient.width; y: 0 }
-                PathLine { x: ambient.width; y: ambient.height }
-                PathLine { x: 0; y: ambient.height }
-                PathLine { x: 0; y: 0 }
-            }
-            Shapes.ShapePath {
-                strokeWidth: -1
-                fillGradient: Shapes.RadialGradient {
-                    centerX: ambient.width * 0.78; centerY: ambient.height * 0.86
-                    centerRadius: ambient.width * 0.38
-                    focalX: centerX; focalY: centerY
-                    GradientStop { position: 0.0; color: Qt.rgba(0.38, 0.78, 1.0, root.darkMode ? 0.24 : 0.32) }
-                    GradientStop { position: 1.0; color: Qt.rgba(0.38, 0.78, 1.0, 0) }
-                }
-                startX: 0; startY: 0
-                PathLine { x: ambient.width; y: 0 }
-                PathLine { x: ambient.width; y: ambient.height }
-                PathLine { x: 0; y: ambient.height }
-                PathLine { x: 0; y: 0 }
-            }
-        }
+    component PhotoAmbient: Rectangle {
+        color: root.darkMode ? root.brand.ingemaDeep : "#F2F4F7"
     }
 
-    // Insignia circular de vidrio para iconos de Fotos (barra, panel vacío, hoja).
-    component PhotoGlassBadge: Rectangle {
+    component PhotoBadge: Rectangle {
         id: badge
         property string iconName: ""
         property color iconColor: root.cText
@@ -3703,9 +3579,6 @@ Item {
         color: root.darkMode ? Qt.rgba(1, 1, 1, badge.pressed ? 0.16 : 0.08) : Qt.rgba(1, 1, 1, badge.pressed ? 0.82 : 0.55)
         border.width: 1
         border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(1, 1, 1, 0.92)
-        scale: badge.pressed ? 0.94 : 1
-        Behavior on scale { NumberAnimation { duration: badge.pressed ? 70 : 170; easing.type: Easing.OutCubic } }
-        Behavior on color { ColorAnimation { duration: 140 } }
         Components.FlowIcon {
             anchors.centerIn: parent
             width: badge.iconSize; height: width
@@ -3753,7 +3626,7 @@ Item {
             visible: !tile.wide
             anchors.centerIn: parent
             spacing: root.dp(3)
-            PhotoGlassBadge {
+            PhotoBadge {
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: root.dp(tile.compact ? 30 : 32); height: width
                 iconName: tile.iconName
@@ -3764,7 +3637,7 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: tile.label
                 color: tile.ink
-                font.pixelSize: root.dp(tile.compact ? 10.5 : 11.5)
+                font.pixelSize: root.sp(tile.compact ? 10.5 : 11.5)
                 font.weight: Font.DemiBold
             }
         }
@@ -3772,7 +3645,7 @@ Item {
             visible: tile.wide
             anchors.centerIn: parent
             spacing: root.dp(tile.compact ? 6 : 10)
-            PhotoGlassBadge {
+            PhotoBadge {
                 anchors.verticalCenter: parent.verticalCenter
                 width: root.dp(tile.width < root.dp(150) ? 34 : 40); height: width
                 iconName: tile.iconName
@@ -3783,7 +3656,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 text: tile.label
                 color: tile.ink
-                font.pixelSize: root.dp(tile.width < root.dp(150) ? 13 : 15)
+                font.pixelSize: root.sp(tile.width < root.dp(150) ? 13 : 15)
                 font.weight: Font.Bold
             }
         }
@@ -3805,7 +3678,7 @@ Item {
         radius: height / 2
         color: "transparent"
         scale: labPillTap.pressed ? 0.97 : 1
-        CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: labPill.radius; tone: "tinted"; pressed: labPillTap.pressed }
+        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: labPill.radius; tone: "tinted"; pressed: labPillTap.pressed }
         Behavior on scale { NumberAnimation { duration: root.flow ? root.flow.instantDuration : 70; easing.type: Easing.OutQuad } }
         Behavior on color { ColorAnimation { duration: root.flow ? root.flow.duration(140) : 140 } }
         Accessible.role: Accessible.Button
@@ -3851,7 +3724,7 @@ Item {
         TapHandler { id: chipTap; enabled: !chip.current; onTapped: chip.adopt() }
     }
 
-    component GenGlassCheckBox: CheckBox {
+    component GenCheckBox: CheckBox {
         id: glassCheck
         font.pixelSize: root.fsLabel
         spacing: root.dp(10)
@@ -3860,7 +3733,7 @@ Item {
             implicitHeight: root.dp(22)
             x: glassCheck.leftPadding
             y: glassCheck.topPadding + (glassCheck.availableHeight - height) / 2
-            CalicataLiquidGlass {
+            CalicataSurface {
                 dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
                 anchors.fill: parent
                 radius: root.dp(6)
@@ -3873,7 +3746,7 @@ Item {
                 visible: glassCheck.checked
                 text: "✓"
                 color: root.darkMode ? root.brand.ingemaDeep : "#FFFFFF"
-                font.pixelSize: root.dp(13)
+                font.pixelSize: root.sp(13)
                 font.bold: true
             }
         }
@@ -3909,13 +3782,13 @@ Item {
                 Layout.preferredHeight: root.dp(34)
                 flat: true   // secundario: no domina sobre el campo editable
                 text: modelData[1]
-                background: CalicataLiquidGlass {
+                background: CalicataSurface {
                     dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
                     radius: root.dp(10)
                     pressed: labStepButton.down
                     enabledLook: labStepButton.enabled
                 }
-                font.pixelSize: root.dp(18)
+                font.pixelSize: root.sp(18)
                 focusPolicy: Qt.NoFocus
                 autoRepeat: true
                 autoRepeatDelay: 350
@@ -3946,7 +3819,7 @@ Item {
         color: genBadge.onGlassControl
                ? Qt.rgba(genBadge.accent.r, genBadge.accent.g, genBadge.accent.b, root.darkMode ? 0.22 : 0.12)
                : "transparent"
-        CalicataLiquidGlass {
+        CalicataSurface {
             visible: !genBadge.onGlassControl
             dark: root.darkMode
             accent: genBadge.accent
@@ -3991,7 +3864,7 @@ Item {
         Text {
             text: genGroup.title
             color: root.cText
-            font.pixelSize: root.dp(12)
+            font.pixelSize: root.sp(12)
             font.weight: Font.DemiBold
             font.letterSpacing: 1.4
         }
@@ -4033,7 +3906,7 @@ Item {
             visible: genShell.label.length > 0
             text: genShell.labelCaps ? genShell.label.toUpperCase() : genShell.label
             color: genShell.focused ? genShell.accent : root.cMuted
-            font.pixelSize: genShell.labelCaps ? root.dp(11) : root.dp(12)
+            font.pixelSize: genShell.labelCaps ? root.sp(11) : root.sp(12)
             font.letterSpacing: genShell.labelCaps ? 1.6 : 0.2
             font.weight: Font.DemiBold
             wrapMode: Text.WordWrap
@@ -4051,7 +3924,7 @@ Item {
             Accessible.name: genShell.label
             Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
 
-            CalicataLiquidGlass {
+            CalicataSurface {
                 dark: root.darkMode
                 accent: genShell.accent
                 anchors.fill: parent
@@ -4125,7 +3998,7 @@ Item {
             visible: genShell.caption.length > 0
             text: genShell.caption
             color: root.cMuted
-            font.pixelSize: root.dp(11)
+            font.pixelSize: root.sp(11)
             wrapMode: Text.WordWrap
         }
     }
@@ -4191,7 +4064,7 @@ Item {
         focusPolicy: Qt.NoFocus
         scale: genRoundBtn.down ? 0.94 : 1
         Behavior on scale { NumberAnimation { duration: genRoundBtn.down ? 70 : 170; easing.type: Easing.OutCubic } }
-        background: CalicataLiquidGlass {
+        background: CalicataSurface {
             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
             radius: width / 2
             pressed: genRoundBtn.down
@@ -4225,7 +4098,7 @@ Item {
                 Layout.fillWidth: true
                 text: genDialogHeader.title
                 color: root.cText
-                font.pixelSize: root.dp(18)
+                font.pixelSize: root.sp(18)
                 font.bold: true
                 elide: Text.ElideRight
             }
@@ -4265,7 +4138,7 @@ Item {
         font.weight: Font.DemiBold
         scale: genBtn.down ? 0.985 : 1
         Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-        background: CalicataLiquidGlass {
+        background: CalicataSurface {
             dark: root.darkMode
             accent: genBtn.accent
             radius: root.dp(12)
@@ -4314,7 +4187,7 @@ Item {
         placeholderTextColor: root.cMuted
         inputMethodHints: Qt.ImhNoPredictiveText
         background: Item {
-            CalicataLiquidGlass {
+            CalicataSurface {
                 dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
                 anchors.fill: parent
                 radius: root.dp(12)
@@ -4351,7 +4224,7 @@ Item {
         Accessible.role: Accessible.RadioButton
         Accessible.name: genChoice.title
         Accessible.checked: genChoice.selected
-        CalicataLiquidGlass {
+        CalicataSurface {
             dark: root.darkMode
             accent: genChoice.accent
             anchors.fill: parent
@@ -4441,10 +4314,8 @@ Item {
     // opacity/scale/translate y material Liquid Glass casi imperceptible.
     // Solo se animan opacity, scale y slideY; el backdrop se captura una vez
     // (liveCapture=false) sobre el rect final, sin blur animado.
-    readonly property Item _genGlassBackdrop: ApplicationWindow.contentItem ? ApplicationWindow.contentItem : root
     component GenPopup: Popup {
         id: genPopup
-        property Item glassBackdropItem: null
         property real preferredWidth: root.dp(480)
         property real preferredHeight: root.dp(620)
         property real slideY: 0
@@ -4463,7 +4334,7 @@ Item {
         y: baseY + slideY
         padding: root.dp(16)
 
-        Overlay.modal: GenGlassScrim { popupItem: genPopup }
+        Overlay.modal: GenScrim { popupItem: genPopup }
 
         enter: Transition {
             ParallelAnimation {
@@ -4480,146 +4351,22 @@ Item {
             }
         }
 
-        background: GenPopupGlass {
+        background: GenPopupSurface {
             popupItem: genPopup
-            finalY: genPopup.baseY
-            surfaceName: "calicata-general-popup"
         }
     }
 
-    // Material Liquid Glass de TODOS los emergentes de Calicatas = la composición de
-    // "Información de la calicata" (CalicatasEditorPage, infoPeek), sin reinterpretar:
-    //  · fondo: GenGlassScrim (captura congelada 0.5x de la ventana + MultiEffect
-    //    blur 0.26 + atenuación ligera), como el modal del peek;
-    //  · panel: FlowCore.LiquidGlassSurface con los tokens del peek (los del primer
-    //    menú 3D Touch del Dock) y su preset: lens 0.3, frost 8, 6 taps, bisel 14,
-    //    captura congelada del rect FINAL sin transformar (un grab estable);
-    //  · velo de lectura del peek (0.42 claro / 0.30 oscuro) + filo casi invisible.
-    // El contenido va encima, nítido; los controles NO vuelven a capturar.
-    component GenPopupGlass: Item {
-        id: popupGlass
-        // Superficie primaria del emergente: lo que vive dentro (filas, botones,
-        // campos) usa el tratamiento de control anidado y NO la vuelve a capturar.
-        objectName: "calicataGlassPrimary"
+    component GenPopupSurface: Rectangle {
         property var popupItem: null
-        property real radius: root.dp(28)
-        property real finalX: popupGlass.popupItem ? popupGlass.popupItem.x : 0
-        property real finalY: popupGlass.popupItem ? popupGlass.popupItem.y : 0
-        property string surfaceName: "calicata-popup"
-        // Fondo que refracta: la capa ya desenfocada de su scrim; si el emergente no
-        // tiene scrim (no modal), el contenido de la ventana como el peek.
-        readonly property Item activeBackdrop: popupGlass.popupItem && popupGlass.popupItem.glassBackdropItem
-                                               ? popupGlass.popupItem.glassBackdropItem : root._genGlassBackdrop
-        QtObject {
-            id: popupGlassTokens
-            readonly property bool shown: !!popupGlass.popupItem && popupGlass.popupItem.visible === true
-            readonly property Item glassBackdrop: shown ? popupGlass.activeBackdrop : null
-            readonly property real materialPosition: 0
-            readonly property bool lowCostGlass: false
-            readonly property color glassTint: root.darkMode ? Qt.rgba(0.0824, 0.102, 0.1882, 0.10) : Qt.rgba(0.95, 0.97, 1.0, 0.02)
-            // Opaco: Qt premultiplica los colores de un ShaderEffect; translúcido se pintaría gris.
-            readonly property color fallbackGlass: root.darkMode ? Qt.rgba(0.14, 0.16, 0.20, 1.0) : Qt.rgba(0.985, 0.99, 1.0, 1.0)
-            readonly property real rimLight: root.darkMode ? 0.18 : 0.20
-            readonly property real rimShade: root.darkMode ? 0.04 : 0.035
-            readonly property real rimSheen: root.darkMode ? 0.03 : 0.015
-            readonly property real edgeContrast: root.darkMode ? 0.0 : 0.03
-            readonly property real glassSaturation: 1.12
-            readonly property color shadowColor: Qt.rgba(0.0824, 0.102, 0.1882, root.darkMode ? 0.22 : 0.10)
-        }
-        FlowCore.LiquidGlassSurface {
-            anchors.fill: parent
-            tokens: popupGlassTokens
-            cornerRadius: popupGlass.radius
-            surfaceName: popupGlass.surfaceName
-            lens: 0.3
-            frost: 8
-            frostTaps: 6
-            magnify: 0
-            bevel: root.dp(14)
-            elevation: true
-            // Captura viva justificada: el fondo registrado es estático (imagen congelada
-            // ya desenfocada); solo se re-renderiza cuando cambia (al registrarse); sin timers.
-            liveCapture: true
-            captureRect: {
-                var b = popupGlass.activeBackdrop
-                var dependency = popupGlass.finalX + popupGlass.finalY + popupGlass.width + popupGlass.height
-                if (!b || !popupGlass.popupItem || !popupGlass.popupItem.parent) return Qt.rect(0, 0, 0, 0)
-                var r = popupGlass.popupItem.parent.mapToItem(b, popupGlass.finalX, popupGlass.finalY, popupGlass.width, popupGlass.height)
-                // Dentro del fondo (+ margen del shader): nunca se muestrea fuera (sería negro).
-                var m = 6
-                var w = Math.min(r.width, b.width - 2 * m), h = Math.min(r.height, b.height - 2 * m)
-                return Qt.rect(Math.max(m, Math.min(r.x, b.width - w - m)), Math.max(m, Math.min(r.y, b.height - h - m)),
-                               Math.max(1, w), Math.max(1, h))
-            }
-        }
-        // Tinte de lectura LIGERO sobre el vidrio (el fondo ya llega desenfocado, así que
-        // no hace falta un velo lechoso para tapar texto) y filo de luz.
-        Rectangle {
-            anchors.fill: parent
-            radius: popupGlass.radius
-            color: root.darkMode ? Qt.rgba(0.0824, 0.102, 0.1882, 0.26) : Qt.rgba(0.98, 0.99, 1.0, 0.24)
-            border.width: 1
-            border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(1, 1, 1, 0.55)
-        }
+        radius: root.dp(28)
+        color: root.darkMode ? "#171D29" : "#FFFFFF"
+        border.width: 1
+        border.color: root.darkMode ? "#3A4456" : "#D5DBE3"
     }
 
-    // Fondo de los emergentes (como el modal del peek "Información de la calicata"):
-    // captura congelada a 0.5x del contenido de la ventana (hermano del Overlay, nunca
-    // incluye el emergente), desenfocada UNA vez y con más color (vibrancia), sobre una
-    // base opaca de la página: así no hay texels transparentes en ningún borde.
-    // Esa capa se REGISTRA en el emergente (glassBackdropItem) y es lo que refracta su
-    // vidrio: fondo → desenfoque → vidrio → contenido, sin texto fantasma.
-    // La atenuación va fuera de la capa registrada (solo oscurece alrededor del panel).
-    component GenGlassScrim: Item {
-        id: glassScrim
-        // Fondo opaco y ya desenfocado: lo refractan los controles del emergente.
-        objectName: "calicataGlassBackdrop"
+    component GenScrim: Rectangle {
         property var popupItem: null
-        // Capa estable (no hereda la animación de opacidad de la raíz) para capturar.
-        property Item glassLayer: null
-        opacity: glassScrim.popupItem ? glassScrim.popupItem.opacity : 1
-        Loader {
-            anchors.fill: parent
-            active: !!glassScrim.popupItem && glassScrim.popupItem.visible === true
-            sourceComponent: Item {
-                id: scrimBlurLayer
-                Rectangle { anchors.fill: parent; color: root.cPage }
-                ShaderEffectSource {
-                    id: scrimCapture
-                    anchors.fill: parent
-                    sourceItem: root._genGlassBackdrop
-                    textureSize: Qt.size(Math.max(1, Math.round(width * 0.5)), Math.max(1, Math.round(height * 0.5)))
-                    live: false
-                    hideSource: false
-                    visible: false
-                    Component.onCompleted: scheduleUpdate()
-                }
-                MultiEffect {
-                    anchors.fill: parent
-                    source: scrimCapture
-                    autoPaddingEnabled: false
-                    blurEnabled: true
-                    blurMax: 48
-                    blur: 0.62
-                    saturation: 0.30
-                }
-                Component.onCompleted: {
-                    glassScrim.glassLayer = scrimBlurLayer
-                    if (glassScrim.popupItem && glassScrim.popupItem.glassBackdropItem !== undefined)
-                        glassScrim.popupItem.glassBackdropItem = scrimBlurLayer
-                }
-                Component.onDestruction: {
-                    if (glassScrim.glassLayer === scrimBlurLayer) glassScrim.glassLayer = null
-                    if (glassScrim.popupItem && glassScrim.popupItem.glassBackdropItem === scrimBlurLayer)
-                        glassScrim.popupItem.glassBackdropItem = null
-                }
-            }
-        }
-        Rectangle {
-            anchors.fill: parent
-            color: root.darkMode ? root.brand.ingemaDeepShade : root.brand.ingemaDeep
-            opacity: root.darkMode ? 0.20 : 0.07
-        }
+        color: Qt.rgba(0, 0, 0, root.darkMode ? 0.45 : 0.22)
     }
 
     // Cabecera y botonera de los Dialog de Calicatas (sin la franja blanca de Basic).
@@ -4627,7 +4374,7 @@ Item {
         padding: root.dp(18)
         bottomPadding: root.dp(6)
         color: root.cText
-        font.pixelSize: root.dp(18)
+        font.pixelSize: root.sp(18)
         font.bold: true
         elide: Label.ElideRight
         visible: text.length > 0
@@ -4658,7 +4405,7 @@ Item {
             width: parent.width
             text: genHeader.codeText || "NUEVA CALICATA"
             color: root.cMuted
-            font.pixelSize: root.dp(11)
+            font.pixelSize: root.sp(11)
             font.letterSpacing: 2.4
             font.weight: Font.DemiBold
             elide: Text.ElideRight
@@ -4677,7 +4424,7 @@ Item {
                 width: parent.width - root.dp(16)
                 text: genHeader.projectText
                 color: root.cText
-                font.pixelSize: root.dp(17)
+                font.pixelSize: root.sp(17)
                 maximumLineCount: 2
                 wrapMode: Text.WordWrap
                 elide: Text.ElideRight
@@ -4700,7 +4447,7 @@ Item {
                 Text {
                     text: "FICHA DE CALICATA"
                     color: root.cMuted
-                    font.pixelSize: root.dp(11)
+                    font.pixelSize: root.sp(11)
                     font.letterSpacing: 3
                     font.weight: Font.DemiBold
                 }
@@ -4708,7 +4455,7 @@ Item {
                     width: parent.width
                     text: genHeader.stageText
                     color: root.cText
-                    font.pixelSize: root.dp(34)
+                    font.pixelSize: root.sp(34)
                     font.bold: true
                     wrapMode: Text.WordWrap
                 }
@@ -4729,7 +4476,7 @@ Item {
         implicitHeight: prfCardLayout.implicitHeight + root.dp(32)
         radius: root.dp(18)
         color: "transparent"
-        CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: prfCard.radius; level: "card" }
+        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: prfCard.radius; level: "card" }
         ColumnLayout {
             id: prfCardLayout
             anchors.left: parent.left
@@ -4752,7 +4499,7 @@ Item {
                     Layout.fillWidth: true
                     text: prfCard.title
                     color: root.cText
-                    font.pixelSize: root.dp(17)
+                    font.pixelSize: root.sp(17)
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
                 }
@@ -4788,7 +4535,7 @@ Item {
                         : prfSub.naturalHeight
         radius: root.dp(14)
         color: "transparent"
-        CalicataLiquidGlass { dark: root.darkMode; accent: prfSub.accent; anchors.fill: parent; radius: prfSub.radius }
+        CalicataSurface { dark: root.darkMode; accent: prfSub.accent; anchors.fill: parent; radius: prfSub.radius }
         ColumnLayout {
             id: prfSubLayout
             anchors.left: parent.left
@@ -4811,7 +4558,7 @@ Item {
                     Layout.fillWidth: true
                     text: prfSub.title
                     color: root.cText
-                    font.pixelSize: root.dp(14)
+                    font.pixelSize: root.sp(14)
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
                 }
@@ -4910,7 +4657,7 @@ Item {
             implicitHeight: prfPickField.boxHeight
             radius: root.dp(10)
             color: "transparent"
-            CalicataLiquidGlass {
+            CalicataSurface {
                 dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
                 anchors.fill: parent
                 radius: parent.radius
@@ -5015,7 +4762,7 @@ Item {
         Accessible.role: Accessible.RadioButton
         Accessible.name: prfSegment.label
         Accessible.checked: prfSegment.isOn
-        CalicataLiquidGlass {
+        CalicataSurface {
             dark: root.darkMode
             accent: prfSegment.accent
             anchors.fill: parent
@@ -5068,7 +4815,7 @@ Item {
             Layout.preferredHeight: root.dp(24)
             radius: height / 2
             color: "transparent"
-            CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: prfSwitch.isOn ? "primary" : "glass" }
+            CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: prfSwitch.isOn ? "primary" : "glass" }
             Rectangle {
                 width: parent.height - root.dp(6)
                 height: width
@@ -5105,13 +4852,13 @@ Item {
             Layout.preferredHeight: root.dp(18)
             radius: root.dp(5)
             color: "transparent"
-            CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: prfCheck.isOn ? "primary" : "glass" }
+            CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: prfCheck.isOn ? "primary" : "glass" }
             Text {
                 anchors.centerIn: parent
                 visible: prfCheck.isOn
                 text: "✓"
                 color: "#FFFFFF"
-                font.pixelSize: root.dp(12)
+                font.pixelSize: root.sp(12)
                 font.bold: true
             }
         }
@@ -5138,7 +4885,7 @@ Item {
         Accessible.role: Accessible.CheckBox
         Accessible.name: prfChip.label
         Accessible.checked: prfChip.isOn
-        CalicataLiquidGlass {
+        CalicataSurface {
             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
             anchors.fill: parent
             radius: prfChip.radius
@@ -5173,7 +4920,7 @@ Item {
         bottomPadding: 0
         focusPolicy: Qt.NoFocus
         Accessible.name: prfTool.text
-        background: CalicataLiquidGlass {
+        background: CalicataSurface {
             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
             radius: prfTool.iconOnly ? height / 2 : root.dp(12)
             tone: prfTool.primaryTone || prfTool.checked ? "tinted" : "glass"
@@ -5230,7 +4977,7 @@ Item {
                         : prfArea.naturalHeight
         radius: root.dp(12)
         color: "transparent"
-        CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: prfArea.radius; focused: prfAreaEdit.activeFocus }
+        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: prfArea.radius; focused: prfAreaEdit.activeFocus }
         TextArea {
             id: prfAreaEdit
             anchors.left: parent.left
@@ -5278,7 +5025,7 @@ Item {
             anchors.margins: root.dp(8)
             text: prfAreaEdit.length + " / " + prfArea.maxLength
             color: root.cMuted
-            font.pixelSize: root.dp(11)
+            font.pixelSize: root.sp(11)
         }
     }
 
@@ -5327,7 +5074,7 @@ Item {
             anchors.centerIn: parent
             text: prfBadge.number
             color: root.prfInkOn(prfBadge.tone)
-            font.pixelSize: root.dp(13)
+            font.pixelSize: root.sp(13)
             font.bold: true
         }
     }
@@ -5365,7 +5112,7 @@ Item {
             visible: prfSymbol.files.length === 0
             text: "?"
             color: root.cMuted
-            font.pixelSize: root.dp(13)
+            font.pixelSize: root.sp(13)
         }
     }
 
@@ -5426,7 +5173,7 @@ Item {
             color: "transparent"
             clip: true
 
-            CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
+            CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
 
             Text {
                 id: fieldValue
@@ -5458,7 +5205,7 @@ Item {
 
         scale: mobileIconButton.down ? 0.94 : 1
         Behavior on scale { NumberAnimation { duration: mobileIconButton.down ? 70 : 170; easing.type: Easing.OutCubic } }
-        background: CalicataLiquidGlass {
+        background: CalicataSurface {
             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
             radius: root.dp(12)
             tone: mobileIconButton.danger ? "danger" : "glass"
@@ -5497,7 +5244,7 @@ Item {
         radius: root.dp(12)
         color: "transparent"
 
-        CalicataLiquidGlass {
+        CalicataSurface {
             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
             anchors.fill: parent
             radius: photoActionTile.radius
@@ -6286,11 +6033,13 @@ Item {
     }
 
     Component.onCompleted: {
+        root._updateLayoutSize()
         _ready = true
         ensureDocsRoots()
 
         if (doc) {
             importFromDoc()
+            Qt.callLater(root._recoverInterruptedCapture)
         } else {
             cortesModel.clear()
             renumerarCortesYIntervalos(false)
@@ -7731,8 +7480,12 @@ Item {
             logoFeedbackText = "Selección de logo cancelada al cambiar de ficha"
         }
         _documentClosing = false
-        if (doc && doc.closed !== true) importFromDoc()
-        else resetForm()
+        if (doc && doc.closed !== true) {
+            importFromDoc()
+            Qt.callLater(root._recoverInterruptedCapture)
+        } else {
+            resetForm()
+        }
 
         // ✅ clave:
         _applyPendingToDocIfAny()
@@ -7821,10 +7574,38 @@ Item {
                 ? "Abriendo cámara del dispositivo…"
                 : "Abriendo galería de imágenes…"
 
-        if (sourceKind === "camera")
+        if (sourceKind === "camera") {
+            // Identidad estable de la ficha: si Android mata InGe+ con la
+            // camara delante, la foto se recupera al reabrir esta ficha.
+            if (Perms.setPhotoCaptureContext)
+                Perms.setPhotoCaptureContext(String(doc.fileUrl))
             Perms.capturePhoto(idx)
-        else
+        } else {
             Perms.pickPhoto(idx)
+        }
+    }
+
+    // Captura interrumpida por la muerte del proceso (camara del OEM con poca
+    // RAM): se ofrece por el mismo camino que una captura normal, con el
+    // dialogo de datos impresos, y solo en la ficha que la pidio.
+    function _recoverInterruptedCapture() {
+        if (!doc || doc.closed === true || _photoRequestPending || _logoRequestPending
+                || _documentClosing || typeof Perms === "undefined" || !Perms.pendingCaptureSlot)
+            return
+        var contextKey = String(doc.fileUrl)
+        var slot = Perms.pendingCaptureSlot(contextKey)
+        if (slot < 0)
+            return
+        _releasePendingPhotoImport()
+        _pendingStampIdx = slot
+        _pendingPhotoDoc = doc
+        _pendingPhotoDocId = _docInstanceId(doc)
+        _photoRequestSerial++
+        _pendingPhotoSourceKind = "camera"
+        _photoRequestPending = true
+        photoFeedbackText = "Recuperando la fotografía tomada antes de que Android cerrara InGe+…"
+        console.info("[InGe+ M09] recovering interrupted camera capture slot=" + slot)
+        Perms.recoverPendingCapture(contextKey)
     }
 
     onRequestCapturePhoto: function(idx) {
@@ -8065,7 +7846,6 @@ Item {
 
     Dialog {
         id: replaceDlg
-        property Item glassBackdropItem: null
         parent: Overlay.overlay
         modal: true
         title: "Ya existe un archivo"
@@ -8076,8 +7856,8 @@ Item {
         palette.base: root.cField
         palette.button: root.cSurfaceAlt
         palette.highlight: root.cAccent
-        Overlay.modal: GenGlassScrim { popupItem: replaceDlg }
-        background: GenPopupGlass { popupItem: replaceDlg; surfaceName: "calicata-replace-dialog" }
+        Overlay.modal: GenScrim { popupItem: replaceDlg }
+        background: GenPopupSurface { popupItem: replaceDlg}
         header: GenDialogTitle { text: replaceDlg.title }
 
         property string dstPretty: ""
@@ -8125,7 +7905,6 @@ Item {
     // cota MANUAL: "Usar automática" o "Ingresar manual" (nunca se reemplaza sola).
     Dialog {
         id: altitudeReplaceDialog
-        property Item glassBackdropItem: null
         parent: Overlay.overlay
         modal: true
         title: "Cota automática"
@@ -8136,8 +7915,8 @@ Item {
         palette.base: root.cField
         palette.button: root.cSurfaceAlt
         palette.highlight: root.cAccent
-        Overlay.modal: GenGlassScrim { popupItem: altitudeReplaceDialog }
-        background: GenPopupGlass { popupItem: altitudeReplaceDialog; surfaceName: "calicata-altitude-dialog" }
+        Overlay.modal: GenScrim { popupItem: altitudeReplaceDialog }
+        background: GenPopupSurface { popupItem: altitudeReplaceDialog}
         header: GenDialogTitle { text: altitudeReplaceDialog.title }
         width: Math.min(560, parent ? parent.width * 0.94 : 560)
         x: parent ? Math.round((parent.width  - width)  / 2) : 0
@@ -8181,7 +7960,6 @@ Item {
 
     Dialog {
         id: coordsConfirm
-        property Item glassBackdropItem: null
         parent: Overlay.overlay
         modal: true
         title: "Capturar ubicación actual"
@@ -8192,8 +7970,8 @@ Item {
         palette.base: root.cField
         palette.button: root.cSurfaceAlt
         palette.highlight: root.cAccent
-        Overlay.modal: GenGlassScrim { popupItem: coordsConfirm }
-        background: GenPopupGlass { popupItem: coordsConfirm; surfaceName: "calicata-coords-dialog" }
+        Overlay.modal: GenScrim { popupItem: coordsConfirm }
+        background: GenPopupSurface { popupItem: coordsConfirm}
         header: GenDialogTitle { text: coordsConfirm.title }
 
         implicitWidth: Math.min(560, parent ? parent.width * 0.94 : 560)
@@ -8262,7 +8040,7 @@ Item {
                     Layout.alignment: Qt.AlignVCenter
                     text: infoDlg.title
                     color: root.cText
-                    font.pixelSize: root.dp(17)
+                    font.pixelSize: root.sp(17)
                     font.bold: true
                     wrapMode: Text.WordWrap
                 }
@@ -8401,7 +8179,6 @@ Item {
     // Una sola decisión: con datos / sin datos / cancelar (sin botones estándar No/Yes).
     Popup {
         id: tsDlg
-        property Item glassBackdropItem: null
         property string targetDocId: ""
         property int requestSerial: 0
         parent: Overlay.overlay
@@ -8410,8 +8187,8 @@ Item {
         focus: true
         closePolicy: Popup.NoAutoClose
         padding: root.dp(18)
-        background: GenPopupGlass { popupItem: tsDlg; surfaceName: "calicata-photo-data-dialog" }
-        Overlay.modal: GenGlassScrim { popupItem: tsDlg }
+        background: GenPopupSurface { popupItem: tsDlg}
+        Overlay.modal: GenScrim { popupItem: tsDlg }
         enter: Transition {
             ParallelAnimation {
                 NumberAnimation { property: "opacity"; from: 0; to: 1; duration: root.flow ? root.flow.duration(200) : 200; easing.type: Easing.OutCubic }
@@ -8464,7 +8241,7 @@ Item {
                 Layout.fillWidth: true
                 text: "¿Rellenar datos en la foto?"
                 color: root.cText
-                font.pixelSize: root.dp(17)
+                font.pixelSize: root.sp(17)
                 font.bold: true
                 wrapMode: Text.WordWrap
             }
@@ -8473,7 +8250,7 @@ Item {
                 Layout.bottomMargin: root.dp(4)
                 text: "Los datos de la ficha (coordenadas, código, proyecto, fecha) se imprimen en la derivada; la original se conserva."
                 color: root.cMuted
-                font.pixelSize: root.dp(12)
+                font.pixelSize: root.sp(12)
                 wrapMode: Text.WordWrap
             }
             PhotoPill { primary: true; text: "Guardar con datos"; onClicked: tsDlg.resolve(true) }
@@ -8489,7 +8266,6 @@ Item {
 
     Dialog {
         id: resourcesPicker
-        property Item glassBackdropItem: null
         parent: Overlay.overlay
         modal: true
         title: "Elegir logo (Recursos)"
@@ -8500,8 +8276,8 @@ Item {
         palette.base: root.cField
         palette.button: root.cSurfaceAlt
         palette.highlight: root.cAccent
-        Overlay.modal: GenGlassScrim { popupItem: resourcesPicker }
-        background: GenPopupGlass { popupItem: resourcesPicker; surfaceName: "calicata-resources-dialog" }
+        Overlay.modal: GenScrim { popupItem: resourcesPicker }
+        background: GenPopupSurface { popupItem: resourcesPicker}
         header: GenDialogTitle { text: resourcesPicker.title }
         footer: GenDialogButtonBox { standardButtons: resourcesPicker.standardButtons }
 
@@ -8594,7 +8370,7 @@ Item {
                 Layout.fillHeight: true
                 radius: 12
                 color: "transparent"
-                CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
+                CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
 
                 ColumnLayout {
                     anchors.fill: parent
@@ -8664,7 +8440,7 @@ Item {
         implicitHeight: genLogoLayout.implicitHeight + root.dp(24)
         radius: root.dp(14)
         color: "transparent"
-        CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
+        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
 
         ColumnLayout {
             id: genLogoLayout
@@ -8706,7 +8482,7 @@ Item {
                         anchors.centerIn: parent
                         text: genLogoSlot.logoState
                         color: genLogoSlot.hasLogo ? root.cGenGreen : root.cGenOrange
-                        font.pixelSize: root.dp(11)
+                        font.pixelSize: root.sp(11)
                         font.weight: Font.DemiBold
                     }
                 }
@@ -8720,7 +8496,7 @@ Item {
                 enabled: !root._logoRequestPending
                 Accessible.name: "Adjuntar " + genLogoSlot.title
                 onClicked: root._beginLogoRequest(genLogoSlot.target)
-                background: CalicataLiquidGlass {
+                background: CalicataSurface {
                     dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
                     radius: root.dp(12)
                     pressed: genLogoPreview.down
@@ -8834,7 +8610,7 @@ Item {
                         implicitHeight: identityInfoColumn.implicitHeight + root.dp(20)
                         radius: root.dp(12)
                         color: "transparent"
-                        CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: "tinted" }
+                        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: "tinted" }
                         ColumnLayout {
                             id: identityInfoColumn
                             anchors.left: parent.left
@@ -8917,19 +8693,9 @@ Item {
         }
     }
 
-    // === Ambiente de la ficha (Liquid Glass) ===
-    // El mismo ambiente estático de Fotos/Revisión: base blanca, luz azul suave.
-    // Sin desenfoque ni animación: los controles de vidrio lo dejan ver.
-    PhotoGlassAmbient {
-        objectName: "calicataGlassBackdrop"
+    // Fondo de la ficha.
+    PhotoAmbient {
         anchors.fill: parent
-    }
-
-    Image {
-        anchors.fill: parent
-        source: "qrc:/ui/v2/backgrounds/bg_topographic_lines.svg"
-        fillMode: Image.PreserveAspectCrop
-        opacity: root.liquidGlass ? 0.12 : 0.0
     }
 
     // Visor de fotografía: fondo oscuro, zoom con pellizco/doble toque, acciones claras.
@@ -9024,19 +8790,18 @@ Item {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 0
-                    Text { text: root.photoSlotTitles[root.activePhotoCategory - 1] || ""; color: "white"; font.bold: true; font.pixelSize: root.dp(16) }
-                    Text { text: photoViewer.info.label + (photoViewer.info.date.length ? " · " + photoViewer.info.date : ""); color: "#B8C0CC"; font.pixelSize: root.dp(11) }
+                    Text { text: root.photoSlotTitles[root.activePhotoCategory - 1] || ""; color: "white"; font.bold: true; font.pixelSize: root.sp(16) }
+                    Text { text: photoViewer.info.label + (photoViewer.info.date.length ? " · " + photoViewer.info.date : ""); color: "#B8C0CC"; font.pixelSize: root.sp(11) }
                 }
             }
             // Acciones del visor sobre la misma barra Liquid Glass de Fotos (variante oscura).
-            PhotoGlassBar {
+            PhotoBar {
                 id: viewerActionBar
                 anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
                 anchors.margins: root.dp(12)
                 height: viewerActions.implicitHeight + root.dp(20)
                 onDark: true
                 barRadius: root.dp(22)
-                backdrop: viewerStage
                 // Captura viva justificada: la foto se amplía/desplaza bajo la barra (pinch/pan);
                 // sin gesto el backdrop no cambia y no se re-renderiza.
                 ColumnLayout {
@@ -9089,7 +8854,6 @@ Item {
     // Hoja de acciones por categoría (flotante sobre Fotos; acciones según estado real).
     Popup {
         id: photoActionsSheet
-        property Item glassBackdropItem: null
         parent: Overlay.overlay
         readonly property var actions: root.photoActions(root.photoSheetSlot)
         width: Math.min(parent ? parent.width - root.dp(28) : 360, root.dp(520))
@@ -9104,24 +8868,14 @@ Item {
         transformOrigin: Popup.Bottom
         // Hoja de acciones = el mismo Liquid Glass de Fotos sobre la ventana (como el
         // popup de General): un grab estable mientras anima la entrada.
-        background: PhotoGlassBar {
-            backdrop: photoActionsSheet.visible ? (photoActionsSheet.glassBackdropItem ? photoActionsSheet.glassBackdropItem : root._genGlassBackdrop) : null
-            frozen: false   // el fondo registrado (ya desenfocado) es estático: captura dirigida por eventos
-            captureRect: photoActionsSheet.parent
-                         ? photoActionsSheet.parent.mapToItem(photoActionsSheet.glassBackdropItem ? photoActionsSheet.glassBackdropItem : root._genGlassBackdrop,
-                                                              photoActionsSheet.x, photoActionsSheet.y,
-                                                              photoActionsSheet.width, photoActionsSheet.height)
-                         : Qt.rect(photoActionsSheet.x, photoActionsSheet.y, photoActionsSheet.width, photoActionsSheet.height)
+        background: PhotoBar {
             barRadius: root.dp(26)
             absorbTaps: false
-            surfaceName: "calicata-photo-sheet"
             // Preset y velo del peek "Información de la calicata".
-            frost: 8
-            lens: 0.3
             veilColor: root.darkMode ? Qt.rgba(0.0824, 0.102, 0.1882, 0.30) : Qt.rgba(0.98, 0.99, 1.0, 0.42)
             rimColor: root.darkMode ? Qt.rgba(1, 1, 1, 0.06) : Qt.rgba(1, 1, 1, 0.30)
         }
-        Overlay.modal: GenGlassScrim { popupItem: photoActionsSheet }
+        Overlay.modal: GenScrim { popupItem: photoActionsSheet }
         enter: Transition {
             ParallelAnimation {
                 NumberAnimation { property: "opacity"; from: 0; to: 1; duration: root.flow ? root.flow.duration(200) : 200; easing.type: Easing.OutCubic }
@@ -9164,7 +8918,7 @@ Item {
                             anchors.fill: parent
                             anchors.leftMargin: root.dp(8); anchors.rightMargin: root.dp(10)
                             spacing: root.dp(12)
-                            PhotoGlassBadge {
+                            PhotoBadge {
                                 Layout.preferredWidth: root.dp(38); Layout.preferredHeight: root.dp(38)
                                 iconName: sheetRow.modelData.icon
                                 iconSize: root.dp(19)
@@ -9195,8 +8949,6 @@ Item {
     Popup {
         id: stratumSheet
         parent: Overlay.overlay
-        // Capa desenfocada que refracta la ventana flotante (labDetailBackdrop).
-        property Item glassBackdropItem: null
         // Laboratorio: ventana flotante grande sobre la lista (márgenes, radio 26,
         // máx. 780 dp, termina sobre la zona del Dock). Profundidad (Perfil) conserva
         // su hoja completa.
@@ -9243,22 +8995,18 @@ Item {
         }
         background: Item {
             // Hoja completa (Profundidad): el ambiente de la ficha, con controles de vidrio.
-            PhotoGlassAmbient {
-                objectName: "calicataGlassBackdrop"
+            PhotoAmbient {
                 visible: !stratumSheet.floating
                 anchors.fill: parent
                 radius: stratumSheet.floating ? root.dp(26) : 0
             }
             // Ventana flotante de Laboratorio: el material de los emergentes, un grab
             // estable sobre su rect final mientras anima desde la tarjeta de origen.
-            GenPopupGlass {
+            GenPopupSurface {
                 visible: stratumSheet.floating
                 anchors.fill: parent
                 popupItem: stratumSheet
                 radius: root.dp(26)
-                finalX: stratumSheet.baseX
-                finalY: stratumSheet.baseY
-                surfaceName: "calicata-lab-window"
             }
         }
         contentItem: ColumnLayout {
@@ -9282,7 +9030,7 @@ Item {
                                + (root.prfSel ? String(root.prfSel.de || "—") + " – " + String(root.prfSel.a || "—") + " m" : "")
                              : "Estrato " + (root.selectedStratum + 1))
                     color: root.cText
-                    font.pixelSize: root.labSheetActive ? root.dp(18) : 20
+                    font.pixelSize: root.labSheetActive ? root.sp(18) : 20
                     font.bold: root.labSheetActive
                     elide: Text.ElideRight
                 }
@@ -9292,7 +9040,7 @@ Item {
                     Layout.preferredHeight: root.dp(24)
                     radius: height / 2
                     color: root.cGenTealSoft
-                    Text { id: sheetKindText; anchors.centerIn: parent; text: root.labKindChip(root.labInfo(root.selectedStratum)); color: root.cGenTeal; font.bold: true; font.pixelSize: root.dp(11) }
+                    Text { id: sheetKindText; anchors.centerIn: parent; text: root.labKindChip(root.labInfo(root.selectedStratum)); color: root.cGenTeal; font.bold: true; font.pixelSize: root.sp(11) }
                 }
                 GenDialogButton { visible: !root.labSheetActive; Layout.fillWidth: false; primary: true; text: "Listo"; onClicked: root.finishStratum(true) }
             }
@@ -9313,7 +9061,7 @@ Item {
                 readonly property var tabs: [{ key: "lab", label: "Laboratorio" }, { key: "context", label: "Contexto" }, { key: "history", label: "Historial" }]
                 readonly property int current: Math.max(0, ["lab", "context", "history"].indexOf(root.labTab))
                 readonly property real slotWidth: (width - root.dp(6)) / 3
-                CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: height / 2 }
+                CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: height / 2 }
                 Rectangle {
                     y: root.dp(3)
                     height: parent.height - root.dp(6)
@@ -9414,7 +9162,7 @@ Item {
                         RowLayout {
                             Layout.fillWidth: true
                             Text { Layout.fillWidth: true; text: "Nivel freático (m)"; color: root.cMuted; font.pixelSize: root.fsLabel }
-                            GenGlassCheckBox {
+                            GenCheckBox {
                                 text: "Personalizado"
                                 checked: root.groundwaterCustom
                                 onToggled: {
@@ -9491,8 +9239,6 @@ Item {
 
                         ColumnLayout {
                             id: mobileSampleLayout
-                            opacity: root.labSheetActive ? root.labTabFade : 1
-                            transform: Translate { x: root.labSheetActive ? root.labTabShift : 0 }
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.top: parent.top
@@ -9519,7 +9265,7 @@ Item {
                                         text: "Estrato " + (mobileSampleCard.corteIdx + 1)
                                         color: root.cText
                                         font.bold: true
-                                        font.pixelSize: root.dp(root.isPhone ? 14 : 16)
+                                        font.pixelSize: root.sp(root.isPhone ? 14 : 16)
                                     }
                                     Text {
                                         Layout.fillWidth: true
@@ -9589,7 +9335,7 @@ Item {
                                     Layout.fillWidth: true
                                     text: "Solo lectura: estos datos se editan en Perfil."
                                     color: root.cMuted
-                                    font.pixelSize: root.dp(11)
+                                    font.pixelSize: root.sp(11)
                                     wrapMode: Text.WordWrap
                                 }
                             }
@@ -9629,7 +9375,7 @@ Item {
                                             + ". El valor local se conserva."
                                           : "Sin historial sincronizado desde el servidor."
                                     color: root.cMuted
-                                    font.pixelSize: root.dp(11)
+                                    font.pixelSize: root.sp(11)
                                     wrapMode: Text.WordWrap
                                 }
                             }
@@ -9645,7 +9391,7 @@ Item {
                                 Behavior on implicitHeight { enabled: !root._stageSettling; NumberAnimation { duration: root.flow ? root.flow.duration(180) : 180; easing.type: Easing.OutCubic } }
                                 radius: root.dp(14)
                                 color: "transparent"
-                                CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; level: "card" }
+                                CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; level: "card" }
                                 RowLayout {
                                     id: sampleSummaryRow
                                     anchors.left: parent.left; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
@@ -9663,7 +9409,7 @@ Item {
                                     ColumnLayout {
                                         Layout.fillWidth: true
                                         spacing: root.dp(2)
-                                        Text { text: "Muestra"; color: root.cMuted; font.pixelSize: root.dp(11); font.bold: true }
+                                        Text { text: "Muestra"; color: root.cMuted; font.pixelSize: root.sp(11); font.bold: true }
                                         Text {
                                             Layout.fillWidth: true
                                             elide: Text.ElideRight
@@ -9678,7 +9424,7 @@ Item {
                                             Layout.fillWidth: true
                                             wrapMode: Text.WordWrap
                                             color: root.cMuted
-                                            font.pixelSize: root.dp(11)
+                                            font.pixelSize: root.sp(11)
                                             text: !sampleSummaryCard.s ? ""
                                                   : (sampleSummaryCard.s.interval.length ? sampleSummaryCard.s.interval
                                                                                          : "Intervalo del estrato: " + sampleSummaryCard.s.stratumInterval)
@@ -9791,8 +9537,8 @@ Item {
                                             Layout.preferredHeight: root.dp(20)
                                             radius: height / 2
                                             color: "transparent"
-                                            CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: "tinted" }
-                                            Text { id: autoTag; anchors.centerIn: parent; text: "Auto"; color: root.cGenBlue; font.pixelSize: root.dp(10); font.bold: true }
+                                            CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: "tinted" }
+                                            Text { id: autoTag; anchors.centerIn: parent; text: "Auto"; color: root.cGenBlue; font.pixelSize: root.sp(10); font.bold: true }
                                         }
                                     }
                                 }
@@ -9819,7 +9565,7 @@ Item {
                                     implicitHeight: labReviewColumn.implicitHeight + root.dp(20)
                                     radius: root.dp(12)
                                     color: "transparent"
-                                    CalicataLiquidGlass {
+                                    CalicataSurface {
                                         dark: root.darkMode
                                         accent: labReviewPanel.info && labReviewPanel.info.reviewStatus === "revisar" ? root.cGenOrange : root.cGenBlue
                                         anchors.fill: parent
@@ -9845,7 +9591,7 @@ Item {
                                         RowLayout {
                                             Layout.fillWidth: true
                                             spacing: root.dp(6)
-                                            Text { Layout.preferredWidth: root.dp(56); text: "AASHTO"; color: root.cMuted; font.pixelSize: root.dp(11); font.bold: true }
+                                            Text { Layout.preferredWidth: root.dp(56); text: "AASHTO"; color: root.cMuted; font.pixelSize: root.sp(11); font.bold: true }
                                             LabSuggestionChip {
                                                 visible: !!(labReviewPanel.suggestion && labReviewPanel.suggestion.aashto)
                                                 code: labReviewPanel.suggestion && labReviewPanel.suggestion.aashto ? labReviewPanel.suggestion.aashto.code : ""
@@ -9854,14 +9600,14 @@ Item {
                                             }
                                             Text {
                                                 visible: !(labReviewPanel.suggestion && labReviewPanel.suggestion.aashto)
-                                                text: "Datos insuficientes"; color: root.cMuted; font.pixelSize: root.dp(11)
+                                                text: "Datos insuficientes"; color: root.cMuted; font.pixelSize: root.sp(11)
                                             }
                                             Item { Layout.fillWidth: true }
                                         }
                                         RowLayout {
                                             Layout.fillWidth: true
                                             spacing: root.dp(6)
-                                            Text { Layout.preferredWidth: root.dp(56); text: "SUCS"; color: root.cMuted; font.pixelSize: root.dp(11); font.bold: true }
+                                            Text { Layout.preferredWidth: root.dp(56); text: "SUCS"; color: root.cMuted; font.pixelSize: root.sp(11); font.bold: true }
                                             Repeater {
                                                 model: labReviewPanel.suggestion ? labReviewPanel.suggestion.sucs : []
                                                 delegate: LabSuggestionChip {
@@ -9874,11 +9620,11 @@ Item {
                                             Text {
                                                 visible: !!labReviewPanel.suggestion && labReviewPanel.suggestion.hidden > 0
                                                 text: labReviewPanel.suggestion ? "+" + labReviewPanel.suggestion.hidden : ""
-                                                color: root.cMuted; font.pixelSize: root.dp(11)
+                                                color: root.cMuted; font.pixelSize: root.sp(11)
                                             }
                                             Text {
                                                 visible: !!labReviewPanel.suggestion && labReviewPanel.suggestion.sucs.length === 0
-                                                text: "Datos insuficientes"; color: root.cMuted; font.pixelSize: root.dp(11)
+                                                text: "Datos insuficientes"; color: root.cMuted; font.pixelSize: root.sp(11)
                                             }
                                             Item { Layout.fillWidth: true }
                                         }
@@ -9886,13 +9632,13 @@ Item {
                                             Layout.fillWidth: true
                                             visible: text.length > 0
                                             text: labReviewPanel.suggestion ? labReviewPanel.suggestion.note : ""
-                                            color: root.cMuted; font.pixelSize: root.dp(11)
+                                            color: root.cMuted; font.pixelSize: root.sp(11)
                                         }
                                         Text {
                                             Layout.fillWidth: true
                                             visible: text.length > 0
                                             text: labReviewPanel.suggestion ? labReviewPanel.suggestion.reason : ""
-                                            wrapMode: Text.WordWrap; color: root.cMuted; font.pixelSize: root.dp(11)
+                                            wrapMode: Text.WordWrap; color: root.cMuted; font.pixelSize: root.sp(11)
                                         }
                                         Repeater {
                                             model: labReviewPanel.info ? labReviewPanel.info.review.observations : []
@@ -9919,7 +9665,7 @@ Item {
                                     implicitHeight: labClassColumn.implicitHeight + root.dp(20)
                                     radius: root.dp(12)
                                     color: "transparent"
-                                    CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; level: "card" }
+                                    CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; level: "card" }
                                     ColumnLayout {
                                         id: labClassColumn
                                         anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
@@ -9941,7 +9687,7 @@ Item {
                                                     text: (parent.stage === "confirmed" ? "✓ " : "") + (labClassPanel.info ? labClassPanel.info.stageLabel : "")
                                                     color: root.labStageColor(parent.stage, false)
                                                     font.bold: true
-                                                    font.pixelSize: root.dp(11)
+                                                    font.pixelSize: root.sp(11)
                                                     Behavior on color { ColorAnimation { duration: root.flow ? root.flow.duration(220) : 220 } }
                                                 }
                                             }
@@ -9996,7 +9742,7 @@ Item {
                                                 visible: text.length > 0
                                                 text: String(labClassPanel.fieldErrors[modelData] || "")
                                                 color: root.flow ? root.flow.theme.error : "#B4232E"
-                                                font.pixelSize: root.dp(11)
+                                                font.pixelSize: root.sp(11)
                                                 wrapMode: Text.WordWrap
                                             }
                                         }
@@ -10004,7 +9750,7 @@ Item {
                                             Layout.fillWidth: true
                                             wrapMode: Text.WordWrap
                                             color: root.cMuted
-                                            font.pixelSize: root.dp(11)
+                                            font.pixelSize: root.sp(11)
                                             text: "Estrato muestra: SUCS " + (labClassPanel.info && labClassPanel.info.projection.sucs.length ? labClassPanel.info.projection.sucs : "Pendiente de laboratorio")
                                                   + " · AASHTO " + (labClassPanel.info && labClassPanel.info.projection.aashto.length ? labClassPanel.info.projection.aashto : "Pendiente de laboratorio")
                                         }
@@ -10069,7 +9815,7 @@ Item {
                : stageSlideTranslate.x + root._swipeDir * parent.width
             opacity: 1 - 0.2 * Math.min(1, Math.abs(x) / Math.max(1, parent.width))
             color: root.cPage
-            PhotoGlassAmbient { anchors.fill: parent }
+            PhotoAmbient { anchors.fill: parent }
 
             Column {
                 x: Math.round((parent.width - width) / 2)
@@ -10091,25 +9837,6 @@ Item {
         }
     }
 
-    // Instantánea del viewport para la transición de etapa por toque. Mientras corre
-    // stageRevealAnimation, vFlick se dibuja SOLO a través de esta textura (hideSource):
-    // se rasteriza cuando la etapa nueva cambia (primer frame, capturas de vidrio) y la
-    // animación solo transforma un quad. La entrada sigue llegando a vFlick. Fuera de la
-    // transición no existe textura (sourceItem null) ni trabajo extra.
-    ShaderEffectSource {
-        id: stageMotionSnapshot
-        x: vFlick.x
-        y: vFlick.y
-        width: vFlick.width
-        height: vFlick.height
-        z: 0.5
-        readonly property bool active: stageRevealAnimation.running
-        sourceItem: active ? vFlick : null
-        hideSource: active
-        live: true
-        visible: active
-        transform: Translate { id: stageMotionTranslate; x: 0 }
-    }
 
     // === Un solo scroll vertical para TODA la ficha ===
     FlowCore.ImeAwareFlickable {
@@ -10129,26 +9856,6 @@ Item {
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
         ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AlwaysOff }
 
-        // Fondo que refracta el Liquid Glass de la ficha: HERMANO del contenido (nunca
-        // ancestro) y se desplaza con él, así cada superficie conserva su zona de captura
-        // durante el scroll (sin re-captura por frame). Mosaico de ambientes de una
-        // pantalla (alternos en espejo para que el degradado sea continuo): luz y color
-        // a lo largo de toda la ficha, opaco en todo punto (sin texels transparentes).
-        Column {
-            id: formGlassAmbient
-            objectName: "calicataGlassBackdrop"
-            readonly property real tileHeight: Math.max(vFlick.height, root.dp(560))
-            width: vFlick.width
-            Repeater {
-                model: Math.max(1, Math.ceil(Math.max(vFlick.height, vFlick.contentHeight) / formGlassAmbient.tileHeight))
-                delegate: PhotoGlassAmbient {
-                    required property int index
-                    width: formGlassAmbient.width
-                    height: formGlassAmbient.tileHeight
-                    rotation: index % 2 === 1 ? 180 : 0
-                }
-            }
-        }
 
         // Puente no visual para las claves/IDs que consume la serialización
         // histórica del documento. No contiene presentación ni interacción.
@@ -10320,24 +10027,6 @@ Item {
         // Una sola columna adaptable, sin tablas de escritorio ni scroll
         // horizontal. Todos los controles escriben en los mismos modelos.
         // =============================================================
-        ParallelAnimation {
-            id: stageRevealAnimation
-            NumberAnimation {
-                target: stageMotionSnapshot
-                property: "opacity"
-                from: 0.0
-                to: 1.0
-                duration: root.flow && root.flow.motionAllowed ? 220 : 0
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                target: stageMotionTranslate
-                property: "x"
-                to: 0
-                duration: root.flow && root.flow.motionAllowed ? 220 : 0
-                easing.type: Easing.OutCubic
-            }
-        }
 
         Column {
             id: finalPageCol
@@ -10380,8 +10069,8 @@ Item {
                             Rectangle {
                                 width: root.dp(22); height: width; radius: width / 2
                                 color: "transparent"
-                                CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: modelData.mode === "EDITING" ? "primary" : "glass" }
-                                Text { anchors.centerIn: parent; text: modelData.initial; color: root.cText; font.pixelSize: root.dp(11); font.bold: true }
+                                CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: modelData.mode === "EDITING" ? "primary" : "glass" }
+                                Text { anchors.centerIn: parent; text: modelData.initial; color: root.cText; font.pixelSize: root.sp(11); font.bold: true }
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -10441,16 +10130,24 @@ Item {
                     font.pixelSize: root.fsLabel
                     wrapMode: Text.WordWrap
                 }
-                Text {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: root.dp(4)
-                    readonly property string legacyName: root.doc && !root.doc.header.projectId
-                        ? String(root.doc.header.project_full_name || root.doc.header.excel_title || "").trim() : ""
-                    text: "Nombre registrado antes de asignar proyecto: " + legacyName
-                    visible: legacyName.length > 0
-                    color: root.cMuted
-                    font.pixelSize: root.fsLabel
-                    wrapMode: Text.WordWrap
+                // Denominación oficial completa (header.project_full_name; dato de la
+                // ficha, independiente de projects.name y del nombre corto).
+                GenHeaderField {
+                    label: "Nombre del proyecto"
+                    labelCaps: true
+                    iconName: "calgen.project"
+                    headerKey: "project_full_name"
+                    inputPlaceholder: "Denominación oficial completa del proyecto"
+                    inputMaximumLength: 600
+                }
+                // Nombre corto (rótulo de fotografías y vistas compactas).
+                GenHeaderField {
+                    label: "Nombre corto del proyecto"
+                    labelCaps: true
+                    iconName: "calgen.project"
+                    headerKey: "project_short_name"
+                    inputPlaceholder: "Ej.: Lechemayo"
+                    inputMaximumLength: 80
                 }
 
                 // ---- Fechas y responsable ----
@@ -10539,10 +10236,26 @@ Item {
                 // edita en el detalle; su valor se conserva y viaja tal cual.
                 GenGroupHeader { title: "FICHA"; accent: root.cGenBlue }
 
-                GenHeaderField {
-                    label: "Título de la ficha / testificación"
-                    glyph: "T"
-                    headerKey: "description"
+                // Tipo de ficha = calicatas.description (Web: "Título de la ficha /
+                // testificación"). Solo dos valores; un texto antiguo se muestra tal cual.
+                GenFieldShell {
+                    readonly property var sheetTypes: ["FICHA DE CALICATA", "FICHA DE CANTERA"]
+                    readonly property string current: root.doc ? String(root.doc.header.description || "") : ""
+                    label: "Título / Testificación"
+                    iconName: "calgen.code"
+                    tappable: true
+                    valueText: current
+                    placeholder: "Seleccionar tipo de ficha"
+                    onActivated: root._openOptionPicker("Título / Testificación", sheetTypes,
+                                                        Math.max(0, sheetTypes.indexOf(current)), "calgen.code",
+                                                        root.cGenBlue, root.cGenBlueSoft,
+                                                        function(i) {
+                                                            if (!root.doc || i < 0 || i >= sheetTypes.length) return
+                                                            var h = Object.assign({}, root.doc.header)
+                                                            h.description = sheetTypes[i]
+                                                            root.doc.header = h
+                                                            root._markDirty()
+                                                        })
                 }
 
                 // ---- Excavación ----
@@ -10628,7 +10341,7 @@ Item {
                     onClicked: identityPopup.open()
                     scale: down ? 0.985 : 1
                     Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-                    background: CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; radius: root.dp(14); tone: "tinted"; selected: true; pressed: genIdentityEntry.down }
+                    background: CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; radius: root.dp(14); tone: "tinted"; selected: true; pressed: genIdentityEntry.down }
                     contentItem: RowLayout {
                         id: genIdentityRow
                         spacing: root.dp(12)
@@ -10673,7 +10386,7 @@ Item {
                                         height: root.dp(24)
                                         radius: height / 2
                                         color: "transparent"
-                                        CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
+                                        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
                                         Row {
                                             id: identityChipRow
                                             anchors.centerIn: parent
@@ -10689,7 +10402,7 @@ Item {
                                                 anchors.verticalCenter: parent.verticalCenter
                                                 text: modelData.text
                                                 color: root.cText
-                                                font.pixelSize: root.dp(11)
+                                                font.pixelSize: root.sp(11)
                                             }
                                         }
                                     }
@@ -10730,7 +10443,7 @@ Item {
                         anchors.fill: parent
                         radius: locationMapCard.cardRadius
                         color: "transparent"
-                        CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
+                        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
                     }
 
                     Loader {
@@ -10749,6 +10462,7 @@ Item {
                                 item.selectCoordinate(p.lat, p.lon, Rules.parseDecimalSafe(h.utm_z))
                         }
                         onLoaded: {
+                            item.flow = root.flow
                             item.interactive = false
                             item.statusCardOnly = true
                             item.darkMode = root.darkMode
@@ -10781,43 +10495,22 @@ Item {
 
                     // Material de los flotantes: tokens del peek "Información de
                     // la calicata"; el backdrop es solo el mapa de esta tarjeta.
-                    QtObject {
-                        id: locationGlassTokens
-                        readonly property bool shown: locationMapCard.visible && locationPreview.status === Loader.Ready
-                        readonly property Item glassBackdrop: locationPreview.status === Loader.Ready ? locationPreview : null
-                        readonly property real materialPosition: 0
-                        readonly property bool lowCostGlass: false
-                        readonly property color glassTint: root.darkMode ? Qt.rgba(0.0824, 0.102, 0.1882, 0.10) : Qt.rgba(0.95, 0.97, 1.0, 0.02)
-                        // Opaco: Qt premultiplica los colores de un ShaderEffect; translúcido se pintaría gris.
-                        readonly property color fallbackGlass: root.darkMode ? Qt.rgba(0.14, 0.16, 0.20, 1.0) : Qt.rgba(0.985, 0.99, 1.0, 1.0)
-                        readonly property real rimLight: root.darkMode ? 0.18 : 0.20
-                        readonly property real rimShade: root.darkMode ? 0.04 : 0.035
-                        readonly property real rimSheen: root.darkMode ? 0.03 : 0.015
-                        readonly property real edgeContrast: root.darkMode ? 0.0 : 0.03
-                        readonly property real glassSaturation: 1.12
-                        readonly property color shadowColor: Qt.rgba(0.0824, 0.102, 0.1882, root.darkMode ? 0.22 : 0.10)
-                    }
 
                     // Ubicación de la calicata (lat/lon reales guardados en la ficha).
                     Item {
                         x: root.dp(10)
                         y: root.dp(10)
-                        width: Math.min(parent.width - root.dp(20), root.dp(230))
+                        // El rotulo tiene texto minimo de 12 px (sp): el recuadro crece
+                        // con el y nunca pasa del ancho disponible del mapa.
+                        width: Math.min(parent.width - root.dp(20),
+                                        Math.max(root.dp(230), locationPointTitle.implicitWidth + root.dp(24)))
                         height: locationPointColumn.implicitHeight + root.dp(20)
-                        FlowCore.LiquidGlassSurface {
+                        Rectangle {
                             anchors.fill: parent
-                            tokens: locationGlassTokens
-                            cornerRadius: root.dp(14)
-                            surfaceName: "calicata-location-point"
-                            // Captura viva justificada: el mapa carga teselas y se desplaza bajo el vidrio
-                            // (ShaderEffectSource solo re-renderiza cuando el mapa cambia).
-                            liveCapture: true
-                            lens: 0.15
-                            frost: 6
-                            frostTaps: 6
-                            magnify: 0
-                            bevel: root.dp(6)
-                            elevation: true
+                            radius: root.dp(14)
+                            color: Mobile.InGeCoreFlow.darkMode ? "#171D29" : "#FFFFFF"
+                            border.width: 1
+                            border.color: Mobile.InGeCoreFlow.darkMode ? "#3A4456" : "#D5DBE3"
                         }
                         Rectangle {
                             anchors.fill: parent
@@ -10833,9 +10526,12 @@ Item {
                             width: parent.width - root.dp(24)
                             spacing: root.dp(2)
                             Text {
+                                id: locationPointTitle
+                                width: Math.min(implicitWidth, parent.width)
+                                elide: Text.ElideRight
                                 text: "UBICACIÓN DE LA CALICATA"
                                 color: root.cMuted
-                                font.pixelSize: root.dp(10)
+                                font.pixelSize: root.sp(10)
                                 font.letterSpacing: 1.4
                                 font.weight: Font.DemiBold
                             }
@@ -10877,20 +10573,12 @@ Item {
                         Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
                         Accessible.role: Accessible.Button
                         Accessible.name: locationMapCard.hasPoint ? "Actualizar ubicación GPS" : "Obtener ubicación GPS"
-                        FlowCore.LiquidGlassSurface {
+                        Rectangle {
                             anchors.fill: parent
-                            tokens: locationGlassTokens
-                            cornerRadius: height / 2
-                            surfaceName: "calicata-location-adjust"
-                            // Captura viva justificada: el mapa carga teselas y se desplaza bajo el vidrio
-                            // (ShaderEffectSource solo re-renderiza cuando el mapa cambia).
-                            liveCapture: true
-                            lens: 0.15
-                            frost: 6
-                            frostTaps: 6
-                            magnify: 0
-                            bevel: root.dp(6)
-                            elevation: true
+                            radius: height / 2
+                            color: Mobile.InGeCoreFlow.darkMode ? "#171D29" : "#FFFFFF"
+                            border.width: 1
+                            border.color: Mobile.InGeCoreFlow.darkMode ? "#3A4456" : "#D5DBE3"
                         }
                         Rectangle {
                             anchors.fill: parent
@@ -11045,11 +10733,14 @@ Item {
                     }
                 }
                 // Altitud / Cota Z: valor, origen y acción explícita "Obtener altitud".
-                RowLayout {
+                // En columna: el resultado DEM (largo) ocupa todo el ancho y el
+                // botón va debajo, sin solaparse en pantallas estrechas.
+                ColumnLayout {
                     Layout.fillWidth: true
-                    spacing: root.dp(10)
+                    spacing: root.dp(8)
                     Text {
                         Layout.fillWidth: true
+                        Layout.preferredWidth: parent ? parent.width : implicitWidth
                         text: (root.elevationStatus.length ? root.elevationStatus
                               : Elevation.statusText(root.doc ? root.doc.header : {}))
                               + (root.elevationWarning.length ? "\nAdvertencia: " + root.elevationWarning : "")
@@ -11058,6 +10749,7 @@ Item {
                         wrapMode: Text.WordWrap
                     }
                     GenDialogButton {
+                        Layout.alignment: Qt.AlignRight
                         text: root.elevationBusy ? "Consultando…" : "Obtener altitud"
                         enabled: !root.elevationBusy && !!root.doc
                         onClicked: root.resolveAltitude("explicit", NaN)
@@ -11074,7 +10766,7 @@ Item {
                     text: zoneValid ? "Nube: zona " + Number(zoneMatch[1]) + " · " + (root.doc && root.doc.header.datum === "PSAD56" ? "PSAD56" : "WGS84")
                                     : "Zona no reconocida: se conserva localmente y no se envía a la nube."
                     color: zoneValid ? root.cMuted : (root.flow ? root.flow.theme.error : "#B4232E")
-                    font.pixelSize: root.dp(11)
+                    font.pixelSize: root.sp(11)
                     wrapMode: Text.WordWrap
                 }
 
@@ -11180,7 +10872,7 @@ Item {
                         focusPolicy: Qt.NoFocus
                         scale: down ? 0.985 : 1
                         Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
-                        background: CalicataLiquidGlass {
+                        background: CalicataSurface {
                             dark: root.darkMode
                             accent: root.cGenOrange
                             radius: height / 2
@@ -11227,7 +10919,7 @@ Item {
                     visible: root.photoFeedbackText.length > 0
                     radius: root.dp(10)
                     color: "transparent"
-                    CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
+                    CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
 
                     RowLayout {
                         anchors.fill: parent
@@ -11285,20 +10977,15 @@ Item {
                         TapHandler { id: photoCardTap; onTapped: root.activePhotoCategory = photoCard.slot }
                         Component.onCompleted: root._photoCardItems[photoCard.slot] = photoCard
                         Component.onDestruction: if (root._photoCardItems[photoCard.slot] === photoCard) delete root._photoCardItems[photoCard.slot]
-                        PhotoGlassAmbient {
+                        PhotoAmbient {
                             id: photoCardAmbient
                             anchors.fill: parent
                             radius: photoCard.radius
                         }
-                        PhotoGlassBar {
+                        PhotoBar {
                             anchors.fill: parent
-                            backdrop: photoCardAmbient
                             barRadius: photoCard.radius
                             absorbTaps: false
-                            frozen: false  // conserva el ambiente al cambiar foto o regresar de cámara/galería
-                            surfaceName: "calicata-photo-card"
-                            frost: 8
-                            lens: 0.08
                             veilColor: root.darkMode ? Qt.rgba(0.08, 0.10, 0.14, 0.40) : Qt.rgba(1, 1, 1, 0.40)
                             rimColor: root.darkMode ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(1, 1, 1, 0.85)
                         }
@@ -11341,7 +11028,7 @@ Item {
                                     color: root.darkMode ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(1, 1, 1, 0.55)
                                     border.width: 1
                                     border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(1, 1, 1, 0.85)
-                                    Text { id: photoCountText; anchors.centerIn: parent; text: photoCard.info.has ? "1 foto" : "0 fotos"; color: root.cMuted; font.pixelSize: root.dp(11) }
+                                    Text { id: photoCountText; anchors.centerIn: parent; text: photoCard.info.has ? "1 foto" : "0 fotos"; color: root.cMuted; font.pixelSize: root.sp(11) }
                                 }
                                 Rectangle {
                                     Layout.preferredWidth: root.dp(34); Layout.preferredHeight: root.dp(34)
@@ -11386,39 +11073,16 @@ Item {
                                         onStatusChanged: if (status === Image.Ready)
                                                              root._photoPreviewReady(photoCard.slot, source)
                                         opacity: status === Image.Ready ? 1 : 0
-                                        Behavior on opacity { NumberAnimation { duration: root.flow ? root.flow.duration(220) : 220 } }
-                                        // Esquinas redondeadas reales (máscara estática: se recalcula solo
-                                        // cuando cambia la foto, no por fotograma).
-                                        layer.enabled: true
-                                        layer.effect: MultiEffect {
-                                            maskEnabled: true
-                                            maskSource: photoHeroMask
-                                            maskThresholdMin: 0.5
-                                            maskSpreadAtMin: 1.0
-                                        }
-                                    }
-                                    Rectangle {
-                                        id: photoHeroMask
-                                        anchors.fill: parent
-                                        radius: root.dp(16)
-                                        visible: false
-                                        layer.enabled: true
                                     }
                                     TapHandler { enabled: photoCard.info.has; onTapped: root.runPhotoAction("view", photoCard.slot) }
                                 }
                                 // Sin foto: panel interior de vidrio (no un bloque gris).
-                                PhotoGlassBar {
+                                PhotoBar {
                                     id: photoEmptyPanel
                                     anchors.fill: parent
                                     visible: !photoCard.info.has
-                                    backdrop: photoCardAmbient
                                     barRadius: root.dp(20)
                                     absorbTaps: false
-                                    frozen: false
-                                    lowCost: true
-                                    surfaceName: "calicata-photo-empty"
-                                    frost: 8
-                                    lens: 0.08
                                     veilColor: root.darkMode ? Qt.rgba(0.10, 0.12, 0.16, 0.30) : Qt.rgba(1, 1, 1, 0.34)
                                     rimColor: root.darkMode ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(1, 1, 1, 0.92)
                                     opacity: visible ? 1 : 0
@@ -11429,7 +11093,7 @@ Item {
                                         y: root.dp(18)
                                         width: parent.width - root.dp(32)
                                         spacing: root.dp(6)
-                                        PhotoGlassBadge {
+                                        PhotoBadge {
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             width: root.dp(58); height: width
                                             iconName: "documents.image"
@@ -11455,17 +11119,14 @@ Item {
                                     }
                                 }
                                 // Acciones rápidas (mismas acciones que la hoja y el Dock).
-                                PhotoGlassBar {
+                                PhotoBar {
                                     id: photoActionBar
                                     anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
                                     anchors.margins: root.dp(photoHero.width < root.dp(330) ? 6 : 10)
                                     height: photoCard.info.has ? root.dp(66) : root.dp(60)
                                     barRadius: height / 2
-                                    backdrop: photoCard.info.has ? photoHeroBackdrop : photoCardAmbient
                                     // Ambiente vivo también sin foto: no conservar una textura vacía al volver
                                     // de cámara/galería. Sin foto se mantiene el material de bajo coste.
-                                    frozen: false
-                                    lowCost: !photoCard.info.has
                                     RowLayout {
                                         anchors.fill: parent
                                         anchors.leftMargin: root.dp(6); anchors.rightMargin: root.dp(6)
@@ -11522,7 +11183,7 @@ Item {
                                                 text: photoCard.info.label
                                                 color: root.photoToneColor(photoCard.info.tone, false)
                                                 font.bold: true
-                                                font.pixelSize: root.dp(11)
+                                                font.pixelSize: root.sp(11)
                                             }
                                         }
                                     }
@@ -11531,20 +11192,20 @@ Item {
                                     Text {
                                         visible: photoCard.info.versionCount > 1
                                         text: photoCard.info.versionCount + " versiones"
-                                        color: root.cMuted; font.pixelSize: root.dp(11)
+                                        color: root.cMuted; font.pixelSize: root.sp(11)
                                     }
                                 }
                                 Text {
                                     Layout.fillWidth: true
                                     visible: photoCard.info.versionCount > 1
                                     text: "Original conservada"
-                                    color: root.cMuted; font.pixelSize: root.dp(11)
+                                    color: root.cMuted; font.pixelSize: root.sp(11)
                                 }
                                 Text {
                                     Layout.fillWidth: true
                                     visible: photoCard.info.error.length > 0 && !photoCard.info.conflict
                                     text: photoCard.info.error
-                                    color: root.cMuted; font.pixelSize: root.dp(11)
+                                    color: root.cMuted; font.pixelSize: root.sp(11)
                                     wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
                                 }
                             }
@@ -11715,7 +11376,7 @@ Item {
                                         ? "La tabla de estratos muestra la clasificación SUCS."
                                         : "No registrado. La tabla muestra SUCS mientras no se elija."
                                 color: root.cMuted
-                                font.pixelSize: root.dp(11)
+                                font.pixelSize: root.sp(11)
                                 wrapMode: Text.WordWrap
                             }
                         }
@@ -11754,7 +11415,7 @@ Item {
                                                     : "Carretera, edificación, cantera, ambiental / exploración o plantilla vacía."
                                 }
                                 color: root.cMuted
-                                font.pixelSize: root.dp(11)
+                                font.pixelSize: root.sp(11)
                                 wrapMode: Text.WordWrap
                             }
                         }
@@ -11846,7 +11507,7 @@ Item {
                                     Layout.fillWidth: true
                                     text: "Aún no hay estratos"
                                     color: root.cText
-                                    font.pixelSize: root.dp(19)
+                                    font.pixelSize: root.sp(19)
                                     font.weight: Font.DemiBold
                                     horizontalAlignment: Text.AlignHCenter
                                     wrapMode: Text.WordWrap
@@ -11902,7 +11563,7 @@ Item {
                                         Layout.horizontalStretchFactor: modelData.w === 0 ? (modelData.s || 1) : -1
                                         text: modelData.t
                                         color: root.cMuted
-                                        font.pixelSize: root.dp(12)
+                                        font.pixelSize: root.sp(12)
                                         font.weight: Font.DemiBold
                                         elide: Text.ElideRight
                                     }
@@ -11947,7 +11608,7 @@ Item {
                                                         : Math.max(root.dp(76), contentImplicitHeight + root.dp(20))
                                         radius: root.dp(10)
                                         color: "transparent"
-                                        CalicataLiquidGlass {
+                                        CalicataSurface {
                                             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
                                             anchors.fill: parent
                                             radius: parent.radius
@@ -11986,7 +11647,7 @@ Item {
                                                 Layout.preferredWidth: root.dp(22)
                                                 text: "⋮"
                                                 color: root.cMuted
-                                                font.pixelSize: root.dp(18)
+                                                font.pixelSize: root.sp(18)
                                                 horizontalAlignment: Text.AlignHCenter
                                             }
                                             PrfStratumBadge {
@@ -12028,7 +11689,7 @@ Item {
                                                     visible: prfRow.typeText.length > 0
                                                     text: prfRow.typeText
                                                     color: root.cMuted
-                                                    font.pixelSize: root.dp(12)
+                                                    font.pixelSize: root.sp(12)
                                                     wrapMode: Text.WordWrap
                                                     maximumLineCount: 2
                                                     elide: Text.ElideRight
@@ -12050,7 +11711,7 @@ Item {
                                                       : prfRow.descText.length ? prfRow.descText : "Sin descripción"
                                                 color: !prfRow.validInterval ? (root.flow ? root.flow.theme.error : "#B4232E")
                                                        : prfRow.descText.length ? root.cText : root.cMuted
-                                                font.pixelSize: root.dp(12)
+                                                font.pixelSize: root.sp(12)
                                                 wrapMode: Text.WordWrap
                                                 maximumLineCount: 3
                                                 elide: Text.ElideRight
@@ -12087,7 +11748,7 @@ Item {
                                                     text: prfRow.depthText(prfRow.fromDepth) + " – " + prfRow.depthText(prfRow.toDepth) + " m"
                                                           + (prfRow.validInterval ? "  ·  e = " + (prfRow.toDepth - prfRow.fromDepth).toFixed(2) + " m" : "")
                                                     color: root.cMuted
-                                                    font.pixelSize: root.dp(12)
+                                                    font.pixelSize: root.sp(12)
                                                     elide: Text.ElideRight
                                                 }
                                                 Text {
@@ -12107,7 +11768,7 @@ Item {
                                                     text: !prfRow.validInterval ? "Completa o corrige el intervalo"
                                                           : prfRow.descText.length ? prfRow.descText : "Sin descripción"
                                                     color: !prfRow.validInterval ? (root.flow ? root.flow.theme.error : "#B4232E") : root.cMuted
-                                                    font.pixelSize: root.dp(12)
+                                                    font.pixelSize: root.sp(12)
                                                     wrapMode: Text.WordWrap
                                                     maximumLineCount: 2
                                                     elide: Text.ElideRight
@@ -12174,7 +11835,7 @@ Item {
                                         anchors.centerIn: parent
                                         text: prfEditorCard.idx + 1
                                         color: root.prfInkOn(parent.color)
-                                        font.pixelSize: root.dp(14)
+                                        font.pixelSize: root.sp(14)
                                         font.bold: true
                                     }
                                 }
@@ -12185,7 +11846,7 @@ Item {
                                           + (root.stratumTypeText(prfEditorCard.s).length
                                              ? " (" + root.stratumTypeText(prfEditorCard.s) + ")" : "")
                                     color: root.cText
-                                    font.pixelSize: root.dp(17)
+                                    font.pixelSize: root.sp(17)
                                     font.weight: Font.DemiBold
                                     wrapMode: Text.WordWrap
                                     maximumLineCount: 2
@@ -12310,7 +11971,7 @@ Item {
                                         visible: !prfEditorCard.origin.length
                                         text: "Elige el origen. Antrópico o Mixto habilita el detalle del relleno."
                                         color: root.cMuted
-                                        font.pixelSize: root.dp(11)
+                                        font.pixelSize: root.sp(11)
                                         wrapMode: Text.WordWrap
                                     }
                                     ColumnLayout {
@@ -12418,7 +12079,7 @@ Item {
                                         Layout.fillWidth: true
                                         text: "SUCS, AASHTO y patrón vienen del Laboratorio: se cambian adoptando la clasificación allí."
                                         color: root.cMuted
-                                        font.pixelSize: root.dp(11)
+                                        font.pixelSize: root.sp(11)
                                         wrapMode: Text.WordWrap
                                     }
                                     Text {
@@ -12581,7 +12242,7 @@ Item {
                                             visible: !!root.prfActiveTemplate && root.prfActiveTemplate.featuresHint === true
                                             text: "Plantilla Ambiental: registra olor, manchas o contaminación solo si se observan."
                                             color: root.cMuted
-                                            font.pixelSize: root.dp(11)
+                                            font.pixelSize: root.sp(11)
                                             wrapMode: Text.WordWrap
                                         }
                                         PrfCheck {
@@ -12737,7 +12398,7 @@ Item {
                                 Layout.fillWidth: true
                                 text: "Clasificación representativa del perfil completo."
                                 color: root.cMuted
-                                font.pixelSize: root.dp(11)
+                                font.pixelSize: root.sp(11)
                                 wrapMode: Text.WordWrap
                             }
                             PrfToolButton {
@@ -12781,7 +12442,7 @@ Item {
                         Layout.preferredHeight: root.dp(116)
                         radius: width / 2
                         color: "transparent"
-                        CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: "tinted" }
+                        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: "tinted" }
                         Components.FlowIcon {
                             anchors.centerIn: parent
                             width: root.dp(54)
@@ -12799,7 +12460,7 @@ Item {
                         text: "Aún no hay estratos\npara laboratorio"
                         color: root.cText
                         font.bold: true
-                        font.pixelSize: root.dp(20)
+                        font.pixelSize: root.sp(20)
                         wrapMode: Text.WordWrap
                     }
                     Text {
@@ -12884,7 +12545,7 @@ Item {
                         implicitHeight: labCardColumn.implicitHeight + root.dp(24)
                         radius: root.dp(16)
                         color: "transparent"
-                        CalicataLiquidGlass {
+                        CalicataSurface {
                             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
                             anchors.fill: parent
                             radius: parent.radius
@@ -12942,10 +12603,10 @@ Item {
                                         color: labCard.kind === "RA" ? root.cGenOrange : labCard.kind === "ROCA" ? root.cMuted
                                              : labCard.kind === "ORG" ? root.cGenGreen : root.cGenTeal
                                         font.bold: true
-                                        font.pixelSize: root.dp(11)
+                                        font.pixelSize: root.sp(11)
                                     }
                                 }
-                                Text { text: "›"; color: root.cMuted; font.pixelSize: root.dp(22) }
+                                Text { text: "›"; color: root.cMuted; font.pixelSize: root.sp(22) }
                             }
                             Text {
                                 Layout.fillWidth: true
@@ -12962,7 +12623,7 @@ Item {
                                     Layout.preferredWidth: 1
                                     Layout.alignment: Qt.AlignTop
                                     spacing: 1
-                                    Text { text: "Estrato (proyección)"; color: root.cMuted; font.bold: true; font.pixelSize: root.dp(11) }
+                                    Text { text: "Estrato (proyección)"; color: root.cMuted; font.bold: true; font.pixelSize: root.sp(11) }
                                     Text { Layout.fillWidth: true; elide: Text.ElideRight; color: root.cText; font.pixelSize: root.fsLabel
                                            text: "SUCS: " + (labCard.info && labCard.info.projection.sucs.length ? labCard.info.projection.sucs : "Pendiente de laboratorio") }
                                     Text { Layout.fillWidth: true; elide: Text.ElideRight; color: root.cText; font.pixelSize: root.fsLabel
@@ -12975,7 +12636,7 @@ Item {
                                     spacing: 2
                                     Text {
                                         text: "Laboratorio"
-                                        color: root.cMuted; font.bold: true; font.pixelSize: root.dp(11)
+                                        color: root.cMuted; font.bold: true; font.pixelSize: root.sp(11)
                                     }
                                     Text {
                                         Layout.fillWidth: true
@@ -12997,7 +12658,7 @@ Item {
                                             text: labCard.info ? labCard.info.stageLabel : ""
                                             color: root.labStageColor(labCard.info ? labCard.info.stage : "", false)
                                             font.bold: true
-                                            font.pixelSize: root.dp(11)
+                                            font.pixelSize: root.sp(11)
                                         }
                                     }
                                 }
@@ -13029,7 +12690,7 @@ Item {
                         implicitHeight: resultColumn.implicitHeight + root.dp(24)
                         radius: root.dp(16)
                         color: "transparent"
-                        CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; level: "card" }
+                        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; level: "card" }
                         Rectangle {
                             anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
                             anchors.margins: root.dp(10)
@@ -13054,10 +12715,10 @@ Item {
                                     radius: height / 2
                                     color: root.labStageColor(resultCard.modelData ? resultCard.modelData.stage : "", true)
                                     Text { id: resultStage; anchors.centerIn: parent; text: resultCard.modelData ? resultCard.modelData.stageLabel : ""
-                                           color: root.labStageColor(resultCard.modelData ? resultCard.modelData.stage : "", false); font.bold: true; font.pixelSize: root.dp(11) }
+                                           color: root.labStageColor(resultCard.modelData ? resultCard.modelData.stage : "", false); font.bold: true; font.pixelSize: root.sp(11) }
                                 }
                                 Item { Layout.fillWidth: true }
-                                Text { text: "›"; color: root.cMuted; font.pixelSize: root.dp(22) }
+                                Text { text: "›"; color: root.cMuted; font.pixelSize: root.sp(22) }
                             }
                             Text { Layout.fillWidth: true; text: "Estrato " + (resultCard.index + 1) + " · " + resultCard.num(resultCard.p.de) + " – " + resultCard.num(resultCard.p.a) + " m"
                                    color: root.cText; font.pixelSize: root.fsLabel; font.bold: true; elide: Text.ElideRight }
@@ -13074,8 +12735,8 @@ Item {
                                     required property var modelData
                                     Layout.fillWidth: true
                                     spacing: root.dp(8)
-                                    Text { Layout.fillWidth: true; text: modelData.l; color: root.cMuted; font.pixelSize: root.dp(11); elide: Text.ElideRight }
-                                    Text { text: modelData.v; color: root.cText; font.pixelSize: root.dp(11) }
+                                    Text { Layout.fillWidth: true; text: modelData.l; color: root.cMuted; font.pixelSize: root.sp(11); elide: Text.ElideRight }
+                                    Text { text: modelData.v; color: root.cText; font.pixelSize: root.sp(11) }
                                 }
                             }
                         }
@@ -13085,7 +12746,6 @@ Item {
 
             CalicataReview {
                 width: parent.width
-                viewport: vFlick
                 visible: root.stageIndex === 5 && !root.reviewNotesEditing
                 flow: root.flow
                 scaleFactor: root.uiScale
@@ -13177,7 +12837,7 @@ Item {
                     implicitHeight: Math.max(root.dp(130), mobileObservations.contentHeight + root.dp(30))
                     radius: root.rField
                     color: "transparent"
-                    CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; focused: mobileObservations.activeFocus }
+                    CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; focused: mobileObservations.activeFocus }
 
                     TextArea {
                         id: mobileObservations
@@ -13208,7 +12868,7 @@ Item {
                     Layout.fillWidth: true
                     text: mobileObservations.length + " caracteres"
                     color: root.cMuted
-                    font.pixelSize: root.dp(root.isPhone ? 10 : 12)
+                    font.pixelSize: root.sp(root.isPhone ? 10 : 12)
                     horizontalAlignment: Text.AlignRight
                 }
             }
@@ -13220,7 +12880,7 @@ Item {
                 implicitHeight: visible ? saveStatus.implicitHeight + root.dp(24) : 0
                 radius: root.rField
                 color: "transparent"
-                CalicataLiquidGlass { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; level: "card" }
+                CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; level: "card" }
                 Text {
                     id: saveStatus
                     anchors.left: parent.left
@@ -13239,40 +12899,6 @@ Item {
         }
     }
 
-    // Fondo desenfocado del detalle de Laboratorio. Captura vFlick (no la página: la
-    // capa vive en ella) una sola vez, sobre base opaca; se registra en la ventana.
-    Loader {
-        id: labDetailBackdrop
-        anchors.fill: vFlick
-        z: 899
-        active: stratumSheet.visible && stratumSheet.floating
-        opacity: stratumSheet.opacity
-        sourceComponent: Item {
-            id: labBlurLayer
-            Rectangle { anchors.fill: parent; color: root.cPage }
-            ShaderEffectSource {
-                id: labBlurCapture
-                anchors.fill: parent
-                sourceItem: vFlick
-                textureSize: Qt.size(Math.max(1, Math.round(width * 0.5)), Math.max(1, Math.round(height * 0.5)))
-                live: false
-                hideSource: false
-                visible: false
-                Component.onCompleted: scheduleUpdate()
-            }
-            MultiEffect {
-                anchors.fill: parent
-                source: labBlurCapture
-                autoPaddingEnabled: false
-                blurEnabled: true
-                blurMax: 48
-                blur: 0.62
-                saturation: 0.30
-            }
-            Component.onCompleted: stratumSheet.glassBackdropItem = labBlurLayer
-            Component.onDestruction: if (stratumSheet.glassBackdropItem === labBlurLayer) stratumSheet.glassBackdropItem = null
-        }
-    }
 
     // Velo del detalle de Laboratorio: atenúa la lista base (sigue reconocible) y
     // bloquea sus gestos; tocarlo cierra con la misma animación que Back.

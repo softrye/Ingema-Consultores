@@ -85,7 +85,7 @@ Popup {
 
     // Tokens (sistema Calicatas).
     readonly property color cPage: form ? form.cPage : "#101418"
-    // Tema del material Liquid Glass de Calicatas (CalicataLiquidGlass).
+    // Tema del material Liquid Glass de Calicatas (CalicataSurface).
     readonly property bool dark: form ? form.darkMode === true : true
     readonly property color cSurface: form ? form.cSurface : "#1B2128"
     readonly property color cSurfaceAlt: form ? form.cSurfaceAlt : "#232A33"
@@ -716,7 +716,7 @@ Popup {
         radius: width / 2
         color: "transparent"
         opacity: enabled ? 1 : 0.35
-        CalicataLiquidGlass { dark: editor.dark; accent: editor.cBlue; anchors.fill: parent; radius: eib.radius; tone: eib.on ? "tinted" : "glass"; selected: eib.on; pressed: eibTap.pressed }
+        CalicataSurface { dark: editor.dark; accent: editor.cBlue; anchors.fill: parent; radius: eib.radius; tone: eib.on ? "tinted" : "glass"; selected: eib.on; pressed: eibTap.pressed }
         scale: eibTap.pressed ? 0.92 : 1
         Behavior on scale { NumberAnimation { duration: 80 } }
         Components.FlowIcon {
@@ -747,7 +747,7 @@ Popup {
         opacity: enabled ? 1 : 0.4
         scale: pillTap.pressed ? 0.97 : 1
         Behavior on scale { NumberAnimation { duration: 80 } }
-        CalicataLiquidGlass {
+        CalicataSurface {
             dark: editor.dark; accent: editor.cBlue
             anchors.fill: parent
             radius: pill.radius
@@ -775,7 +775,7 @@ Popup {
         radius: height / 2
         color: "transparent"
         opacity: enabled ? 1 : 0.4
-        CalicataLiquidGlass { dark: editor.dark; accent: editor.cBlue; anchors.fill: parent; radius: sw.radius; tone: sw.checked ? "primary" : "glass" }
+        CalicataSurface { dark: editor.dark; accent: editor.cBlue; anchors.fill: parent; radius: sw.radius; tone: sw.checked ? "primary" : "glass" }
         Rectangle {
             width: parent.height - editor.dp(6); height: width; radius: width / 2
             y: editor.dp(3)
@@ -919,7 +919,7 @@ Popup {
                 color: "transparent"
                 scale: cellTap.pressed ? 0.96 : 1
                 Behavior on scale { NumberAnimation { duration: 80 } }
-                CalicataLiquidGlass {
+                CalicataSurface {
                     dark: editor.dark; accent: editor.cBlue
                     anchors.fill: parent
                     radius: anchorCell.radius
@@ -952,7 +952,7 @@ Popup {
         implicitHeight: secBody.implicitHeight + editor.dp(sec.title.length ? 44 : 20)
         radius: editor.dp(16)
         color: "transparent"
-        CalicataLiquidGlass { dark: editor.dark; accent: editor.cBlue; anchors.fill: parent; radius: sec.radius; level: "card" }
+        CalicataSurface { dark: editor.dark; accent: editor.cBlue; anchors.fill: parent; radius: sec.radius; level: "card" }
         Text {
             visible: sec.title.length > 0
             x: editor.dp(14); y: editor.dp(12)
@@ -985,7 +985,7 @@ Popup {
         opacity: choice.available ? 1 : 0.6
         scale: choiceTap.pressed ? 0.97 : 1
         Behavior on scale { NumberAnimation { duration: 80 } }
-        CalicataLiquidGlass {
+        CalicataSurface {
             dark: editor.dark; accent: editor.cBlue
             anchors.fill: parent
             radius: choice.radius
@@ -1056,7 +1056,7 @@ Popup {
         implicitHeight: editor.dp(52)
         radius: editor.dp(12)
         color: "transparent"
-        CalicataLiquidGlass { dark: editor.dark; accent: editor.cBlue; anchors.fill: parent; radius: tf.radius; focused: input.activeFocus }
+        CalicataSurface { dark: editor.dark; accent: editor.cBlue; anchors.fill: parent; radius: tf.radius; focused: input.activeFocus }
         onTextChanged: if (!input.activeFocus && input.text !== tf.text) input.text = tf.text
         onEditingChanged: {
             if (editing) { editor.beginGesture(); editor.ensureFieldVisible(tf) }
@@ -2201,7 +2201,7 @@ Popup {
                         onShownChanged: curveCanvas.requestPaint()
                         onWidthChanged: curveCanvas.requestPaint()
                         onHeightChanged: curveCanvas.requestPaint()
-                        CalicataLiquidGlass { dark: editor.dark; accent: editor.cBlue; anchors.fill: parent; radius: editor.dp(10) }
+                        CalicataSurface { dark: editor.dark; accent: editor.cBlue; anchors.fill: parent; radius: editor.dp(10) }
                         Canvas {
                             id: curveCanvas
                             anchors.fill: parent
@@ -2470,7 +2470,7 @@ Popup {
             visible: !editor.typing
             color: "transparent"
             // Barra de acciones del editor: el material de las hojas flotantes de Calicatas.
-            CalicataLiquidGlass { dark: editor.dark; accent: editor.cBlue; anchors.fill: parent; radius: 0; level: "sheet" }
+            CalicataSurface { dark: editor.dark; accent: editor.cBlue; anchors.fill: parent; radius: 0; level: "sheet" }
             GridLayout {
                 id: actionRow
                 // Teléfono: acción principal a lo ancho en su propia fila (etiquetas legibles).

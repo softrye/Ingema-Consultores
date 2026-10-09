@@ -393,8 +393,6 @@ Item {
         materialRole: "emphasized"
         // The Dock already owns the QML backdrop; native strips cannot cover
         // this sheet, so native pages retain the existing safe material.
-        blurSource: root.flow && root.flow.glassMaterial && !root.flow.glassMaterial.nativeSurface
-                    ? root.flow.glassMaterial.glassBackdrop : null
         darkMode: root.darkMode
         strength: 0.98
         fallbackLight: root.cardColor()

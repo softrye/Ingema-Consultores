@@ -1,4 +1,5 @@
 import QtQuick 2.15
+import QtQuick.Window
 import QtQuick.Effects
 import InGe.CoreFlow 3.0 as Mobile
 import "../flowcore" as FlowCore
@@ -15,9 +16,15 @@ Item {
     property bool pressed: false
     property bool mirror: false
     property bool tintEnabled: true
-    // Los SVG de iconos se rasterizan por encima de su tamaño lógico y luego
-    // se reducen. Evita contornos borrosos en pantallas Android de alta densidad.
-    property real rasterScale: 2.0
+    // Qt 6.9 solo multiplica sourceSize por el DPR en URLs que reconoce como
+    // escalables (image:, *.svg, *.svgz, *.pdf). Los SVG data: de IconCatalog no
+    // lo son: se rasterizan aqui al tamaño fisico exacto (nitidos con DPR 3+,
+    // sin sobremuestreo con DPR 1.5-2). Las URLs reconocidas usan el DPR de Qt.
+    readonly property bool sourceScaledByQt: {
+        var s = resolvedSource.toString()
+        return /^image:/i.test(s) || /\.(svgz?|pdf)(\?.*)?$/i.test(s)
+    }
+    property real rasterScale: sourceScaledByQt ? 1.0 : Math.max(1, Screen.devicePixelRatio)
     property color tintColor: flow.theme.textSecondary
     property color activeTintColor: flow.theme.accent
     property color disabledTintColor: flow.theme.textMuted
@@ -76,7 +83,9 @@ Item {
         source: root.resolvedSource
         fillMode: Image.PreserveAspectFit
         smooth: true
-        mipmap: root.rasterScale > 1.0
+        // Solo si se rasteriza por encima del tamaño fisico.
+        mipmap: root.rasterScale > (root.sourceScaledByQt ? 1.0
+                                                         : Math.max(1, Screen.devicePixelRatio)) + 0.01
         sourceSize.width: Math.max(1, Math.round(width * root.rasterScale))
         sourceSize.height: Math.max(1, Math.round(height * root.rasterScale))
         asynchronous: false

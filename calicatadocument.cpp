@@ -1226,7 +1226,7 @@ QVariantMap CalicataDocument::buildFullJson() const
         root["timestamp"] = ts;
     }
     root["images"] = m_images;
-    
+
     root["instance_id"] = m_instanceId;
     root["photo_draft_id"] = m_photoDraftId;
 
@@ -1276,7 +1276,7 @@ bool CalicataDocument::applyFullJson(const QVariantMap& root)
 
     m_timestamp = root.value("timestamp").toMap();
     m_images = restoredImages;
-    
+
     {
         // Legacy files may carry their stable UUID only in the header.
         const QString rawId = root.value("instance_id").toString().trimmed();
@@ -3134,7 +3134,9 @@ QVariantMap CalicataDocument::photoSheetMetadata() const
     // Rótulo de fotos = projects.name (contrato Web, CalicataPhotos: misma
     // fuente que la ficha y la exportación). Sin proyecto asignado, el nombre
     // antiguo guardado en la ficha se conserva como rótulo.
-    meta[QStringLiteral("project")] = m_header.value(QStringLiteral("projectId")).toString().trimmed().isEmpty()
+    // Rótulo de fotos: nombre corto de la ficha; si no existe, projects.name.
+    meta[QStringLiteral("project")] = !text({"project_short_name"}).isEmpty() ? text({"project_short_name"})
+        : m_header.value(QStringLiteral("projectId")).toString().trimmed().isEmpty()
         ? text({"project_full_name", "excel_title", "project_short_name"})
         : text({"projectName", "project_name"});
     // Fecha/hora: fecha de la ficha + hora manual o de la foto (photoMetadata);

@@ -35,6 +35,7 @@ import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 import android.webkit.ConsoleMessage;
 import android.webkit.JavascriptInterface;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -97,6 +98,11 @@ public final class InGeQtActivity extends QtActivity
     private static final int BIOMETRIC_AUTH_REQUEST = 8107;
     private static final int RENDITION_ATTACHMENT_REQUEST = 8108;
     private static final long LOCATION_TIMEBOX_MS = 8_000L;
+    // A GNSS cold start without assistance needs 18-30 s of continuous
+    // tracking. While the best fix is coarse the chip keeps tracking up to
+    // this bound from the start of the search, then it is always released.
+    private static final long LOCATION_SESSION_MAX_MS = 90_000L;
+    private static final double LOCATION_PRECISE_M = 20.0;
 
     private static WeakReference<InGeQtActivity> current = new WeakReference<>(null);
     private static String pendingHomeAction = "";
@@ -153,6 +159,26 @@ public final class InGeQtActivity extends QtActivity
     private boolean earthViewAttached;
     private boolean earthRendererActive;
     private WebView earthWebView;
+    // Pantalla de carga cartográfica ÚNICA (InGe Earth y selector de Calicatas).
+    private static final long MAP_LOADING_TIMEOUT_MS = 20_000L;
+    private static final long MAP_LOADING_FADE_MS = 260L;
+    // INGE_PERFORMANCE_BARE_UI: interruptor ÚNICO de desarrollo para Android
+    // host, QML (GraphicsCore.bareUiEnabled) y HTML de Earth (body.bare-ui).
+    // false = interfaz anterior completa.
+    public static final boolean BARE_UI = true;
+    // Carga del mapa: texto estático, sin spinner ni fundido.
+    private static final boolean MAP_LOADING_STATIC = BARE_UI;
+    private final Handler mapLoadingHandler = new Handler(Looper.getMainLooper());
+    private final Runnable mapLoadingTimeout = this::onMapLoadingTimeout;
+    private FrameLayout mapLoadingOverlay;
+    private android.widget.ProgressBar mapLoadingSpinner;
+    private android.widget.TextView mapLoadingText;
+    private android.widget.TextView mapLoadingRetry;
+    private boolean mapLoadingActive;
+    private int mapLoadingSession = -1;
+    private String mapLoadingType = "DEFAULT";
+    private String mapLoadingReason = "";
+    private long mapLoadingStartedAt;
     private InGeAssistantWebHost assistantHost;
 
     public static boolean showAssistant(String visuals) {
@@ -179,9 +205,22 @@ public final class InGeQtActivity extends QtActivity
     }
     private WebViewAssetLoader earthAssetLoader;
     private boolean earthWebViewLoaded;
+    // Selector de coordenadas de Calicatas: el MISMO WebView/Cesium de Earth,
+    // colocado sobre el área de mapa del selector Qt (nunca un segundo motor).
+    private volatile boolean earthPickerActive;
+    private boolean earthPickerSuspended;
+    private String pendingEarthPickerJson = "";
+    private final int[] earthPickerRect = new int[4];
     private String pendingEarthFocusJson = "";
     private volatile boolean earthBackTransitionInProgress;
     private volatile boolean earthHomeNavigationRequested;
+    private long earthRendererLostAtMs;
+    // LOW/ULTRA_LOW: a hidden Cesium WebView is released shortly after it
+    // leaves the screen; other tiers keep it for a fast reopen and release it
+    // only when Android reports memory pressure (onTrimMemory).
+    private static final long EARTH_LOW_TIER_RELEASE_MS = 2_000L;
+    private final Runnable releaseHiddenEarthRunnable =
+            () -> releaseHiddenEarthWebView("low_tier_hidden");
     private boolean activityResumed;
     private Configuration lastConfiguration;
     private float preferredRefreshRateHz;
@@ -256,6 +295,11 @@ public final class InGeQtActivity extends QtActivity
     private void exitFromHome() {
         super.onBackPressed();
     }
+
+    private static native void nativeEarthPickerSelected(double latitude, double longitude);
+    private static native void nativeEarthPickerState(String state);
+    private static native void nativeEarthPickerSnapshot(String mapType, double latitude,
+            double longitude, String dataUrl);
 
     private static native boolean nativeUseEarthPointInCalicata(
             double latitude, double longitude, double altitude, double accuracy,
@@ -546,6 +590,17 @@ public final class InGeQtActivity extends QtActivity
         return flutterLifecycle;
     }
 
+    // Mapa base de InGe Earth (DEFAULT_MAP_URL): la vista previa Qt de
+    // Calicatas usa el mismo servidor de teselas que Cesium.
+    public static boolean isBareUiEnabled() {
+        return BARE_UI;
+    }
+
+    public static String getEarthDefaultMapUrl() {
+        final String url = BuildConfig.DEFAULT_MAP_URL;
+        return url == null ? "" : url.trim();
+    }
+
     public static boolean isEarthAvailable() {
         return current.get() != null;
     }
@@ -556,6 +611,10 @@ public final class InGeQtActivity extends QtActivity
             double motionScale,
             double glassIntensity,
             String performanceProfile) {
+        if (visible && BARE_UI) {
+            android.util.Log.i("InGeNavigation", "INGE_FLUTTER_HOME_BLOCKED reason=BARE_UI");
+            return false;
+        }
         final InGeQtActivity activity = current.get();
         if (activity == null)
             return false;
@@ -724,6 +783,347 @@ public final class InGeQtActivity extends QtActivity
         return true;
     }
 
+    // Rect en píxeles de pantalla (coordenadas globales de la ventana Qt).
+    public static boolean showEarthPicker(String json, int left, int top, int width, int height) {
+        final InGeQtActivity activity = current.get();
+        if (activity == null || width <= 0 || height <= 0)
+            return false;
+        final String payload = json == null ? "{}" : json;
+        activity.runOnUiThread(() -> activity.enterEarthPicker(payload, left, top, width, height));
+        return true;
+    }
+
+    public static void updateEarthPickerRect(int left, int top, int width, int height) {
+        final InGeQtActivity activity = current.get();
+        if (activity == null || width <= 0 || height <= 0)
+            return;
+        activity.runOnUiThread(() -> {
+            if (!activity.earthPickerActive)
+                return;
+            activity.earthPickerRect[0] = left;
+            activity.earthPickerRect[1] = top;
+            activity.earthPickerRect[2] = width;
+            activity.earthPickerRect[3] = height;
+            activity.applyEarthPickerLayout();
+        });
+    }
+
+    public static void setEarthPickerPoint(String json) {
+        final InGeQtActivity activity = current.get();
+        if (activity == null || json == null || json.length() > 2048)
+            return;
+        activity.runOnUiThread(() -> activity.runEarthPickerScript(
+                "window.InGeEarthPicker&&window.InGeEarthPicker.setPoint(" + JSONObject.quote(json) + ");"));
+    }
+
+    // Diálogos Qt que se superponen al mapa: el WebView se oculta sin perder estado.
+    public static void setEarthPickerSuspended(boolean suspended) {
+        final InGeQtActivity activity = current.get();
+        if (activity == null)
+            return;
+        activity.runOnUiThread(() -> {
+            activity.earthPickerSuspended = suspended;
+            if (activity.earthPickerActive && activity.earthWebView != null)
+                activity.earthWebView.setVisibility(suspended ? View.INVISIBLE : View.VISIBLE);
+                activity.syncMapLoadingLayout();
+        });
+    }
+
+    public static void hideEarthPicker() {
+        final InGeQtActivity activity = current.get();
+        if (activity == null)
+            return;
+        activity.runOnUiThread(activity::exitEarthPicker);
+    }
+
+    private void enterEarthPicker(String json, int left, int top, int width, int height) {
+        if (earthRequested) {
+            // InGe Earth a pantalla completa ya usa el viewer: no se comparte a la vez.
+            notifyEarthPickerState("ERROR_EARTH_ACTIVE");
+            return;
+        }
+        try {
+            ensureDirectEarthWebView();
+        } catch (Throwable error) {
+            android.util.Log.e("InGeEarthPicker", "INGE_EARTH_PICKER_WEBVIEW_FAILED", error);
+            notifyEarthPickerState("ERROR_WEBVIEW");
+            return;
+        }
+        earthPickerActive = true;
+        earthPickerSuspended = false;
+        earthPickerRect[0] = left;
+        earthPickerRect[1] = top;
+        earthPickerRect[2] = width;
+        earthPickerRect[3] = height;
+        pendingEarthPickerJson = json;
+        applyEarthPickerLayout();
+        earthWebView.animate().cancel();
+        earthWebView.setAlpha(1.0f);
+        earthWebView.onResume();
+        earthWebView.setEnabled(true);
+        earthWebView.setVisibility(View.VISIBLE);
+        earthWebView.bringToFront();
+        showMapLoading("picker");
+        notifyEarthPickerState(earthWebViewLoaded ? "LOADING_VIEW" : "LOADING_ENGINE");
+        deliverPendingEarthPicker();
+        android.util.Log.i("InGeEarthPicker", "INGE_EARTH_PICKER_SHOWN loaded=" + earthWebViewLoaded
+                + " rect=" + width + "x" + height);
+    }
+
+    private void applyEarthPickerLayout() {
+        final WebView webView = earthWebView;
+        if (webView == null || !earthPickerActive)
+            return;
+        final FrameLayout content = findViewById(android.R.id.content);
+        final int[] origin = new int[2];
+        if (content != null)
+            content.getLocationOnScreen(origin);
+        final FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                earthPickerRect[2], earthPickerRect[3], Gravity.TOP | Gravity.START);
+        params.leftMargin = Math.max(0, earthPickerRect[0] - origin[0]);
+        params.topMargin = Math.max(0, earthPickerRect[1] - origin[1]);
+        webView.setLayoutParams(params);
+        syncMapLoadingLayout();
+    }
+
+    private void deliverPendingEarthPicker() {
+        final WebView webView = earthWebView;
+        if (webView == null || !earthWebViewLoaded || !earthPickerActive
+                || pendingEarthPickerJson.isEmpty())
+            return;
+        final String json = pendingEarthPickerJson;
+        pendingEarthPickerJson = "";
+        webView.evaluateJavascript(
+                "(function(){return !!(window.InGeEarthPicker&&window.InGeEarthPicker.enter("
+                        + JSONObject.quote(json) + "));})();",
+                result -> notifyEarthPickerState("true".equals(result) ? "READY" : "ERROR_SCRIPT"));
+    }
+
+    private void runEarthPickerScript(String script) {
+        final WebView webView = earthWebView;
+        if (webView == null || !earthWebViewLoaded || !earthPickerActive)
+            return;
+        webView.evaluateJavascript(script, null);
+    }
+
+    private void exitEarthPicker() {
+        if (!earthPickerActive)
+            return;
+        earthPickerActive = false;
+        earthPickerSuspended = false;
+        pendingEarthPickerJson = "";
+        cancelMapLoading("picker_closed");
+        final WebView webView = earthWebView;
+        if (webView != null) {
+            if (earthWebViewLoaded)
+                webView.evaluateJavascript(
+                        "window.InGeEarthPicker&&window.InGeEarthPicker.exit();", null);
+            webView.setVisibility(View.GONE);
+            webView.setEnabled(false);
+            webView.setLayoutParams(new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    Gravity.TOP | Gravity.START));
+            applyContextDockBand(webView);
+            webView.onPause();
+        }
+        notifyEarthPickerState("CLOSED");
+        android.util.Log.i("InGeEarthPicker", "INGE_EARTH_PICKER_HIDDEN");
+    }
+
+    private void ensureMapLoadingOverlay() {
+        if (mapLoadingOverlay != null)
+            return;
+        final float dp = getResources().getDisplayMetrics().density;
+        final FrameLayout overlay = new FrameLayout(this);
+        overlay.setBackgroundColor(Color.rgb(0xEE, 0xF3, 0xF8));
+        overlay.setClickable(true);      // el mapa no recibe toques mientras carga
+        overlay.setFocusable(true);
+        overlay.setContentDescription("Cargando mapa");
+        final android.widget.LinearLayout column = new android.widget.LinearLayout(this);
+        column.setOrientation(android.widget.LinearLayout.VERTICAL);
+        column.setGravity(Gravity.CENTER_HORIZONTAL);
+        final android.widget.ProgressBar spinner = new android.widget.ProgressBar(this);
+        spinner.setIndeterminate(true);
+        spinner.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(
+                Color.rgb(0x1F, 0x6F, 0xB2)));
+        column.addView(spinner, new android.widget.LinearLayout.LayoutParams(
+                Math.round(40 * dp), Math.round(40 * dp)));
+        final android.widget.TextView text = new android.widget.TextView(this);
+        text.setText("Cargando mapa…");
+        text.setTextColor(Color.rgb(0x33, 0x41, 0x55));
+        text.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
+        text.setGravity(Gravity.CENTER);
+        final android.widget.LinearLayout.LayoutParams textParams =
+                new android.widget.LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        textParams.topMargin = Math.round(12 * dp);
+        column.addView(text, textParams);
+        final android.widget.TextView retry = new android.widget.TextView(this);
+        retry.setText("Reintentar");
+        retry.setTextColor(Color.WHITE);
+        retry.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
+        retry.setGravity(Gravity.CENTER);
+        final android.graphics.drawable.GradientDrawable pill =
+                new android.graphics.drawable.GradientDrawable();
+        pill.setColor(Color.rgb(0x1F, 0x6F, 0xB2));
+        pill.setCornerRadius(22 * dp);
+        retry.setBackground(pill);
+        retry.setPadding(Math.round(22 * dp), Math.round(10 * dp),
+                Math.round(22 * dp), Math.round(10 * dp));
+        retry.setVisibility(View.GONE);
+        retry.setOnClickListener(view -> retryMapLoading("user"));
+        final android.widget.LinearLayout.LayoutParams retryParams =
+                new android.widget.LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, Math.round(44 * dp));
+        retryParams.topMargin = Math.round(16 * dp);
+        column.addView(retry, retryParams);
+        overlay.addView(column, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER));
+        overlay.setVisibility(View.GONE);
+        final FrameLayout content = findViewById(android.R.id.content);
+        content.addView(overlay, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+                Gravity.TOP | Gravity.START));
+        mapLoadingOverlay = overlay;
+        mapLoadingSpinner = spinner;
+        mapLoadingText = text;
+        mapLoadingRetry = retry;
+    }
+
+    // Misma geometría y visibilidad que el WebView (selector: rectángulo; Earth: pantalla).
+    private void syncMapLoadingLayout() {
+        final FrameLayout overlay = mapLoadingOverlay;
+        final WebView webView = earthWebView;
+        if (overlay == null || !mapLoadingActive || webView == null)
+            return;
+        final ViewGroup.LayoutParams source = webView.getLayoutParams();
+        if (source instanceof FrameLayout.LayoutParams)
+            overlay.setLayoutParams(new FrameLayout.LayoutParams((FrameLayout.LayoutParams) source));
+        overlay.setVisibility(webView.getVisibility() == View.VISIBLE ? View.VISIBLE : View.INVISIBLE);
+        overlay.bringToFront();
+    }
+
+    private void showMapLoading(String reason) {
+        ensureMapLoadingOverlay();
+        final boolean restart = !mapLoadingActive;
+        mapLoadingActive = true;
+        mapLoadingSession = -1;          // acepta solo el BEGIN de la sesión nueva
+        mapLoadingReason = reason;
+        if (restart)
+            mapLoadingStartedAt = SystemClock.uptimeMillis();
+        mapLoadingOverlay.animate().cancel();
+        mapLoadingOverlay.setAlpha(1.0f);
+        mapLoadingSpinner.setVisibility(MAP_LOADING_STATIC ? View.GONE : View.VISIBLE);
+        mapLoadingText.setText(MAP_LOADING_STATIC ? "Preparando mapa…" : "Cargando mapa…");
+        mapLoadingRetry.setVisibility(View.GONE);
+        syncMapLoadingLayout();
+        mapLoadingHandler.removeCallbacks(mapLoadingTimeout);
+        mapLoadingHandler.postDelayed(mapLoadingTimeout, MAP_LOADING_TIMEOUT_MS);
+        if (restart)
+            android.util.Log.i("InGeMapLoading", "INGE_MAP_LOAD_BEGIN reason=" + reason);
+    }
+
+    private void onMapLoadingEvent(String state, int session, String type, int jsMs) {
+        if ("CANCELLED".equals(state))
+            return;                      // la cancelación la decide el host
+        if ("BEGIN".equals(state)) {
+            if (!mapLoadingActive)
+                showMapLoading("layer");  // Mapa <-> Satélite o salto programático
+            mapLoadingSession = session;
+            mapLoadingType = type;
+            return;
+        }
+        if (!mapLoadingActive || session != mapLoadingSession) {
+            android.util.Log.i("InGeMapLoading", "INGE_MAP_STALE_EVENT " + state + " session=" + session);
+            return;
+        }
+        final long ms = SystemClock.uptimeMillis() - mapLoadingStartedAt;
+        android.util.Log.i("InGeMapLoading", "INGE_MAP_" + state + " ms=" + ms + " sessionMs=" + jsMs
+                + " type=" + type + " reason=" + mapLoadingReason);
+        if ("VISUAL_READY".equals(state))
+            revealMapLoading();
+    }
+
+    private void revealMapLoading() {
+        mapLoadingActive = false;
+        mapLoadingHandler.removeCallbacks(mapLoadingTimeout);
+        final FrameLayout overlay = mapLoadingOverlay;
+        if (overlay == null)
+            return;
+        final long ms = SystemClock.uptimeMillis() - mapLoadingStartedAt;
+        final String type = mapLoadingType;
+        final Runnable revealed = () -> {
+            overlay.setVisibility(View.GONE);
+            android.util.Log.i("InGeMapLoading", "INGE_MAP_REVEALED ms=" + ms + " type=" + type);
+        };
+        overlay.animate().cancel();
+        // Movimiento reducido (escala de animación 0): retirada inmediata.
+        if (MAP_LOADING_STATIC || !android.animation.ValueAnimator.areAnimatorsEnabled()
+                || overlay.getVisibility() != View.VISIBLE) {
+            revealed.run();
+            return;
+        }
+        overlay.animate().alpha(0.0f).setDuration(MAP_LOADING_FADE_MS)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f))
+                .withEndAction(revealed).start();
+    }
+
+    private void onMapLoadingTimeout() {
+        if (!mapLoadingActive || mapLoadingOverlay == null)
+            return;
+        android.util.Log.w("InGeMapLoading", "INGE_MAP_LOAD_TIMEOUT ms="
+                + (SystemClock.uptimeMillis() - mapLoadingStartedAt) + " type=" + mapLoadingType
+                + " reason=" + mapLoadingReason);
+        mapLoadingSpinner.setVisibility(View.GONE);
+        mapLoadingText.setText("El mapa tarda en cargar. Revisa la conexión.");
+        mapLoadingRetry.setVisibility(View.VISIBLE);
+    }
+
+    private void retryMapLoading(String why) {
+        if (!mapLoadingActive)
+            return;
+        mapLoadingStartedAt = SystemClock.uptimeMillis();
+        showMapLoading(mapLoadingReason);
+        final WebView webView = earthWebView;
+        if (webView == null)
+            return;
+        if (!earthWebViewLoaded) {
+            if ("user".equals(why))
+                webView.reload();
+            return;
+        }
+        webView.evaluateJavascript("(window.InGeEarthPicker&&window.InGeEarthPicker.isActive()"
+                + "&&window.InGeEarthPicker.reload())"
+                + "||(window.InGeMapLoading&&window.InGeMapLoading.retry());", null);
+    }
+
+    private void cancelMapLoading(String reason) {
+        mapLoadingHandler.removeCallbacks(mapLoadingTimeout);
+        if (!mapLoadingActive)
+            return;
+        mapLoadingActive = false;
+        mapLoadingSession = -1;
+        if (mapLoadingOverlay != null) {
+            mapLoadingOverlay.animate().cancel();
+            mapLoadingOverlay.setVisibility(View.GONE);
+        }
+        android.util.Log.i("InGeMapLoading", "INGE_MAP_LOAD_CANCELLED ms="
+                + (SystemClock.uptimeMillis() - mapLoadingStartedAt) + " reason=" + reason);
+        final WebView webView = earthWebView;
+        if (webView != null && earthWebViewLoaded)
+            webView.evaluateJavascript("window.InGeMapLoading&&window.InGeMapLoading.cancel();", null);
+    }
+
+    private void notifyEarthPickerState(String state) {
+        try {
+            nativeEarthPickerState(state);
+        } catch (Throwable error) {
+            android.util.Log.e("InGeEarthPicker", "INGE_EARTH_PICKER_STATE_FAILED", error);
+        }
+    }
+
     public static boolean isFlutterHomeReady() {
         final InGeQtActivity activity = current.get();
         return activity != null && activity.homeReady && activity.homeView != null;
@@ -823,8 +1223,24 @@ public final class InGeQtActivity extends QtActivity
                 buildBetaDeviceSnapshot());
         emitBetaDiagnostic("LIFECYCLE", "INFO", "ON_CREATE", null, null, null);
         configureAdaptiveRefreshRate();
-        android.util.Log.i("InGePerformance",
-                "INGE_FLUTTER_PREWARM=SELECTIVE_IDLE");
+        // Battery saver / thermal changes move the live tier: re-apply the
+        // refresh cap and publish the state to Qt (GraphicsCore).
+        performanceRuntime.setBudgetListener(this::configureAdaptiveRefreshRate);
+        performanceRuntime.startMonitoring();
+        // Flutter (Auth/Home) is the first surface after Qt loads Main.qml.
+        // startInitialization only queues libflutter/libapp loading on
+        // Flutter's own background executor; the later entrypoint() then
+        // waits on the UI thread only for what is still pending, overlapping
+        // it with Qt's startup. Idempotent: entrypoint() calls it again.
+        try {
+            FlutterInjector.instance().flutterLoader()
+                    .startInitialization(getApplicationContext());
+            android.util.Log.i("InGePerformance",
+                    "INGE_FLUTTER_PREWARM=LOADER_STARTED");
+        } catch (Throwable error) {
+            android.util.Log.w("InGePerformance",
+                    "INGE_FLUTTER_PREWARM=FAILED", error);
+        }
         flutterLifecycle.handleLifecycleEvent(Lifecycle.Event.ON_CREATE);
     }
 
@@ -834,6 +1250,8 @@ public final class InGeQtActivity extends QtActivity
         android.util.Log.i("InGeLifecycle",
                 "INGE_ACTIVITY_ON_RESUME instance=" + System.identityHashCode(this));
         activityResumed = true;
+        if (performanceRuntime != null)
+            performanceRuntime.onTrimMemory(0);
         emitBetaDiagnostic("LIFECYCLE", "INFO", "ON_RESUME", null, null, null);
         performanceHandler.removeCallbacks(betaPerformanceSample);
         performanceHandler.postDelayed(betaPerformanceSample, 15_000L);
@@ -846,6 +1264,16 @@ public final class InGeQtActivity extends QtActivity
             homeEngine.getLifecycleChannel().appIsPaused();
         if (homeRequested && homeEngine != null && homeView != null)
             resumeFlutterViewAfterActivityResume(homeView);
+        if (mapLoadingActive) {
+            mapLoadingHandler.removeCallbacks(mapLoadingTimeout);
+            mapLoadingHandler.postDelayed(mapLoadingTimeout, MAP_LOADING_TIMEOUT_MS);
+            retryMapLoading("resume");
+        }
+        if (earthPickerActive && earthWebView != null) {
+            earthWebView.onResume();
+            earthWebView.setVisibility(earthPickerSuspended ? View.INVISIBLE : View.VISIBLE);
+            applyEarthPickerLayout();
+        }
         if (earthRequested)
             applyDirectEarthVisibility(true);
         else if (homeRequested && homeEngine == null)
@@ -858,6 +1286,7 @@ public final class InGeQtActivity extends QtActivity
         android.util.Log.i("InGeLifecycle",
                 "INGE_ACTIVITY_ON_PAUSE instance=" + System.identityHashCode(this));
         activityResumed = false;
+        mapLoadingHandler.removeCallbacks(mapLoadingTimeout);
         emitBetaPerformanceSample();
         performanceHandler.removeCallbacks(betaPerformanceSample);
         emitBetaDiagnostic("LIFECYCLE", "INFO", "ON_PAUSE", null, null, null);
@@ -878,6 +1307,8 @@ public final class InGeQtActivity extends QtActivity
             emitEarthPageVisibility(false);
             stopEarthLocationSearch();
             earthWebView.onPause();
+        } else if (earthPickerActive && earthWebView != null) {
+            earthWebView.onPause();
         }
 
         android.util.Log.i("InGeLifecycle", "INGE_ACTIVITY_ON_PAUSE_END");
@@ -892,6 +1323,45 @@ public final class InGeQtActivity extends QtActivity
         super.onStop();
     }
 
+    // Android 14+ only delivers TRIM_MEMORY_UI_HIDDEN and _BACKGROUND; older
+    // versions also RUNNING_LOW/CRITICAL while in the foreground. This host
+    // is not a FlutterActivity, so the engines get the signal from here.
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        android.util.Log.i("InGePerformance", "INGE_TRIM_MEMORY level=" + level
+                + " earthRequested=" + earthRequested
+                + " earthAlive=" + (earthWebView != null));
+        if (performanceRuntime != null)
+            performanceRuntime.onTrimMemory(level);
+        notifyFlutterMemoryPressure(homeEngine, level);
+        notifyFlutterMemoryPressure(earthEngine, level);
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
+            releaseHiddenEarthWebView("trim_" + level);
+    }
+
+    @Override
+    public void onLowMemory() {
+        super.onLowMemory();
+        onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE);
+    }
+
+    // Same contract as FlutterActivityAndFragmentDelegate.onTrimMemory: Dart
+    // clears caches (image cache) and the renderer trims its textures.
+    private static void notifyFlutterMemoryPressure(FlutterEngine engine, int level) {
+        if (engine == null)
+            return;
+        try {
+            if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+                engine.getDartExecutor().notifyLowMemoryWarning();
+                engine.getSystemChannel().sendMemoryPressureWarning();
+            }
+            engine.getRenderer().onTrimMemory(level);
+        } catch (Throwable error) {
+            android.util.Log.w("InGePerformance", "INGE_FLUTTER_TRIM_FAILED", error);
+        }
+    }
+
     @Override
     public void onConfigurationChanged(@NonNull Configuration newConfig) {
         final Configuration previous = lastConfiguration == null
@@ -902,6 +1372,8 @@ public final class InGeQtActivity extends QtActivity
                         + " instance=" + System.identityHashCode(this));
         lastConfiguration = new Configuration(newConfig);
         super.onConfigurationChanged(newConfig);
+        if (performanceRuntime != null)
+            performanceRuntime.updateFontScale(newConfig.fontScale);
     }
 
     private void resumeFlutterViewAfterActivityResume(final FlutterView view) {
@@ -946,20 +1418,36 @@ public final class InGeQtActivity extends QtActivity
     }
 
     // Capability-derived request: never clamp every device to one global rate.
+    // The budget already picks a physical panel rate for the device tier. When
+    // it reaches the panel's top rate there is no request at all, so the system
+    // (adaptive/LTPO, the user's smooth-display setting) keeps deciding; when it
+    // is lower (LOW tier on a 90/120 Hz panel) the window is capped to it. The
+    // rate read at onCreate is not used: it pinned flagships idling at 60 Hz.
+    // preferredRefreshRate (not a mode id): the system maps it to a mode of the
+    // default resolution of whichever display hosts the window, so folding or
+    // moving to another display keeps the cap without recomputing ids.
     private void configureAdaptiveRefreshRate() {
         try {
-            // Keep the compositor on a physical display mode. Governor values
-            // describe sustainable content cost and may be fractional; asking
-            // SurfaceFlinger for ~40.9 Hz on a 60 Hz A12 creates uneven pacing.
-            preferredRefreshRateHz = performanceRuntime == null
-                    ? 0.0f : performanceRuntime.capabilities().currentRefreshHz;
+            float requestHz = 0.0f;
+            if (performanceRuntime != null) {
+                final float[] supported =
+                        performanceRuntime.capabilities().supportedRefreshRates;
+                final float panelMaxHz = supported.length == 0
+                        ? 0.0f : supported[supported.length - 1];
+                final float budgetHz =
+                        performanceRuntime.budget().sustainableRefreshHz;
+                if (panelMaxHz > 0.0f && budgetHz + 0.5f < panelMaxHz)
+                    requestHz = budgetHz;
+            }
+            preferredRefreshRateHz = requestHz;
             final android.view.WindowManager.LayoutParams params =
                     getWindow().getAttributes();
-            params.preferredRefreshRate = preferredRefreshRateHz;
+            params.preferredRefreshRate = requestHz;
             getWindow().setAttributes(params);
 
             android.util.Log.i("InGePerformance",
-                    "INGE_REFRESH_REQUEST_HZ=" + preferredRefreshRateHz);
+                    "INGE_REFRESH_REQUEST_HZ=" + requestHz
+                            + (requestHz > 0.0f ? "" : " owner=system"));
 
             getWindow().getDecorView().post(
                     () -> applyPreferredFrameRateToSurfaces(
@@ -1281,6 +1769,9 @@ public final class InGeQtActivity extends QtActivity
             hideDirectEarthWebView(!earthBackTransitionInProgress);
             return;
         }
+        if (earthPickerActive)
+            exitEarthPicker();
+        performanceHandler.removeCallbacks(releaseHiddenEarthRunnable);
         homeRequested = false;
         parkFlutterView(homeView);
         try {
@@ -1295,6 +1786,8 @@ public final class InGeQtActivity extends QtActivity
             earthWebView.setEnabled(true);
             earthWebView.bringToFront();
             earthWebView.requestFocus();
+            if (!earthWasShown || mapLoadingActive)
+                showMapLoading("earth");
             emitEarthPageVisibility(true);
             deliverPendingEarthFocus();
             android.util.Log.i("InGeEarthDirect",
@@ -1314,22 +1807,27 @@ public final class InGeQtActivity extends QtActivity
         if (earthWebView != null)
             return;
 
-        earthAssetLoader = new WebViewAssetLoader.Builder()
+        // Each WebView keeps its own loader: requests already queued by a
+        // WebView whose renderer died may still arrive after the field is reset.
+        final WebViewAssetLoader assetLoader = new WebViewAssetLoader.Builder()
                 .addPathHandler("/assets/",
                         new WebViewAssetLoader.AssetsPathHandler(this))
                 .build();
+        earthAssetLoader = assetLoader;
 
         final WebView webView = new WebView(this) {
             private boolean dockGesture;
             @Override public void draw(Canvas canvas) {
                 final int save = canvas.save();
-                clipNativeDock(canvas, getWidth(), getHeight());
+                if (!earthPickerActive)
+                    clipNativeDock(canvas, getWidth(), getHeight());
                 super.draw(canvas);
                 canvas.restoreToCount(save);
             }
             @Override public boolean dispatchTouchEvent(MotionEvent event) {
                 if (event.getActionMasked() == MotionEvent.ACTION_DOWN)
-                    dockGesture = dockOwnsTouch(event, getWidth(), getHeight());
+                    dockGesture = !earthPickerActive
+                            && dockOwnsTouch(event, getWidth(), getHeight());
                 // Latch on DOWN so map gestures crossing the dock are intact.
                 return !dockGesture && super.dispatchTouchEvent(event);
             }
@@ -1359,17 +1857,31 @@ public final class InGeQtActivity extends QtActivity
             @Override
             public WebResourceResponse shouldInterceptRequest(
                     WebView view, WebResourceRequest request) {
-                return earthAssetLoader.shouldInterceptRequest(request.getUrl());
+                return assetLoader.shouldInterceptRequest(request.getUrl());
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 earthWebViewLoaded = true;
-                emitEarthPageVisibility(earthRequested
-                        && view.getVisibility() == View.VISIBLE);
+                if (BARE_UI)
+                    view.evaluateJavascript(
+                            "document.body&&document.body.classList.add('bare-ui');", null);
+                if (!earthPickerActive)
+                    emitEarthPageVisibility(earthRequested
+                            && view.getVisibility() == View.VISIBLE);
                 deliverPendingEarthFocus();
+                deliverPendingEarthPicker();
                 android.util.Log.i("InGeEarthDirect",
                         "INGE_EARTH_DIRECT_PAGE_LOADED url=" + url);
+            }
+
+            @Override
+            public boolean onRenderProcessGone(WebView view,
+                                               RenderProcessGoneDetail detail) {
+                // Unhandled, Android 8+ kills the whole app with the renderer.
+                recoverEarthRendererGone(view,
+                        detail != null && detail.didCrash());
+                return true;
             }
         });
         webView.setWebChromeClient(new WebChromeClient() {
@@ -1397,6 +1909,7 @@ public final class InGeQtActivity extends QtActivity
     }
 
     private void hideDirectEarthWebView(boolean releaseBackCallback) {
+        cancelMapLoading("earth_closed");
         emitEarthPageVisibility(false);
         stopEarthLocationSearch();
         if (earthWebView != null) {
@@ -1404,7 +1917,42 @@ public final class InGeQtActivity extends QtActivity
             hiding.onPause();
             hiding.setEnabled(false);
             fadeOutSurface(hiding, () -> hiding.setVisibility(View.GONE));
+            if (isLowMemoryTier()) {
+                performanceHandler.removeCallbacks(releaseHiddenEarthRunnable);
+                performanceHandler.postDelayed(releaseHiddenEarthRunnable,
+                        EARTH_LOW_TIER_RELEASE_MS);
+            }
         }
+    }
+
+    private boolean isLowMemoryTier() {
+        final InGePerformanceRuntime runtime = performanceRuntime;
+        if (runtime == null)
+            return false;
+        final InGePerformanceRuntime.DeviceTier tier = runtime.baseTier();
+        return tier == InGePerformanceRuntime.DeviceTier.LOW
+                || tier == InGePerformanceRuntime.DeviceTier.ULTRA_LOW
+                || runtime.capabilities().lowRamDevice;
+    }
+
+    // Frees the Cesium WebGL context, tiles and its renderer only while Earth
+    // is not the requested surface; the next open (or onResume) recreates it.
+    // During the Back transition earthRequested is still true: retry later.
+    private void releaseHiddenEarthWebView(String reason) {
+        if (earthWebView == null)
+            return;
+        if (earthBackTransitionInProgress) {
+            performanceHandler.removeCallbacks(releaseHiddenEarthRunnable);
+            performanceHandler.postDelayed(releaseHiddenEarthRunnable,
+                    EARTH_LOW_TIER_RELEASE_MS);
+            return;
+        }
+        if (earthRequested || earthWebView.getVisibility() == View.VISIBLE
+                && earthWebView.isEnabled())
+            return;
+        android.util.Log.i("InGeEarthDirect",
+                "INGE_EARTH_WEBVIEW_RELEASED reason=" + reason);
+        destroyDirectEarthWebView();
     }
 
 
@@ -1464,15 +2012,20 @@ public final class InGeQtActivity extends QtActivity
             applyDirectEarthVisibility(true);
             android.util.Log.e("InGeNavigation",
                     "INGE_EARTH_BACK_TO_HOME_ABORTED bridgeAccepted=false");
+        } else if (BARE_UI) {
+            // Home QML mínima: Qt ya navegó; se cierra la transición aquí para
+            // que Atrás y onResume no sigan tratando a Earth como activa.
+            earthHomeNavigationRequested = true;
+            completeEarthBackTransitionIfHomePresented();
         }
         return true;
     }
 
     private void completeEarthBackTransitionIfHomePresented() {
         if (!earthBackTransitionInProgress || !earthHomeNavigationRequested
-                || !homeRequested || !homeReady
-                || !homeRendererActive || homeView == null
-                || homeView.getVisibility() != View.VISIBLE)
+                || (!BARE_UI && (!homeRequested || !homeReady
+                    || !homeRendererActive || homeView == null
+                    || homeView.getVisibility() != View.VISIBLE)))
             return;
         android.util.Log.i("InGeNavigation",
                 "INGE_EARTH_HOME_NAVIGATION_REQUESTED");
@@ -1503,6 +2056,7 @@ public final class InGeQtActivity extends QtActivity
         earthWebView = null;
         earthAssetLoader = null;
         earthWebViewLoaded = false;
+        cancelMapLoading("webview_destroyed");
         if (webView == null)
             return;
         try { webView.removeJavascriptInterface("InGeEarthTelemetry"); }
@@ -1516,6 +2070,71 @@ public final class InGeQtActivity extends QtActivity
         if (parent instanceof ViewGroup)
             ((ViewGroup) parent).removeView(webView);
         try { webView.destroy(); } catch (Throwable ignored) {}
+    }
+
+    // Android (or the OEM) kills a hidden Cesium renderer to reclaim memory; a
+    // dead WebView is unusable. Hidden or backgrounded Earth is released and
+    // recreated by the next open or by onResume (earthRequested stays true).
+    // Visible foreground Earth is recreated once; a second visible loss within
+    // 30 s returns Home through the normal Back bridge instead of looping.
+    private void recoverEarthRendererGone(WebView view, boolean crashed) {
+        final boolean current = view == earthWebView;
+        final boolean wasVisible = current && activityResumed && earthRequested
+                && !earthBackTransitionInProgress
+                && view.getVisibility() == View.VISIBLE;
+        final long nowElapsed = SystemClock.elapsedRealtime();
+        final boolean repeated = wasVisible && earthRendererLostAtMs > 0L
+                && nowElapsed - earthRendererLostAtMs < 30_000L;
+        if (wasVisible)
+            earthRendererLostAtMs = nowElapsed;
+        android.util.Log.e("InGeEarthDirect",
+                "INGE_EARTH_RENDERER_GONE crashed=" + crashed
+                        + " current=" + current + " visible=" + wasVisible
+                        + " foreground=" + activityResumed
+                        + " repeated=" + repeated);
+        final JSONObject context = new JSONObject();
+        try {
+            context.put("current", current);
+            context.put("visible", wasVisible);
+            context.put("foreground", activityResumed);
+            context.put("repeated", repeated);
+        } catch (org.json.JSONException ignored) {}
+        reportWebViewRendererGone("EARTH", crashed, context);
+        if (!current) {
+            final ViewParent parent = view.getParent();
+            if (parent instanceof ViewGroup)
+                ((ViewGroup) parent).removeView(view);
+            try { view.destroy(); } catch (Throwable ignored) {}
+            return;
+        }
+        stopEarthLocationSearch();
+        destroyDirectEarthWebView();
+        if (!wasVisible)
+            return;
+        if (repeated) {
+            earthBackTransitionInProgress = true;
+            earthHomeNavigationRequested = false;
+            boolean bridgeAccepted = false;
+            try {
+                bridgeAccepted = nativeRequestEarthBackToHome();
+            } catch (Throwable error) {
+                android.util.Log.e("InGeNavigation",
+                        "INGE_EARTH_HOME_BRIDGE_FAILED", error);
+            }
+            if (bridgeAccepted)
+                return;
+            earthBackTransitionInProgress = false;
+            earthHomeNavigationRequested = false;
+        }
+        applyDirectEarthVisibility(true);
+    }
+
+    // Renderer loss is recovered silently for the user, never for diagnostics
+    // (AGENTS.md rule 2). didCrash=true is a real renderer/GPU crash.
+    static void reportWebViewRendererGone(String surface, boolean crashed,
+                                          JSONObject context) {
+        emitBetaDiagnostic("ERROR", crashed ? "ERROR" : "WARNING",
+                surface + "_RENDERER_GONE", null, null, context);
     }
 
     private final class EarthTelemetryBridge {
@@ -1580,6 +2199,14 @@ public final class InGeQtActivity extends QtActivity
 
     private final class EarthUiBridge {
         @JavascriptInterface
+        public void mapLoading(String state, int session, String mapType, int elapsedMs) {
+            if (state == null || !state.matches("[A-Z_]{1,24}"))
+                return;
+            final String type = mapType != null && mapType.matches("[A-Z_]{1,24}") ? mapType : "DEFAULT";
+            runOnUiThread(() -> onMapLoadingEvent(state, session, type, elapsedMs));
+        }
+
+        @JavascriptInterface
         public void publishDockBackdrop(String json) {
             if (json == null || json.length() > 65536)
                 return;
@@ -1616,6 +2243,38 @@ public final class InGeQtActivity extends QtActivity
             try {
                 nativeDockComplete(json);
             } catch (Throwable ignored) {
+            }
+        }
+
+        @JavascriptInterface
+        public boolean pickerSelected(double latitude, double longitude) {
+            if (!earthPickerActive || !Double.isFinite(latitude) || !Double.isFinite(longitude)
+                    || latitude < -90.0 || latitude > 90.0
+                    || longitude < -180.0 || longitude > 180.0)
+                return false;
+            try {
+                nativeEarthPickerSelected(latitude, longitude);
+                return true;
+            } catch (Throwable error) {
+                android.util.Log.e("InGeEarthPicker", "INGE_EARTH_PICKER_SELECT_FAILED", error);
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public boolean pickerSnapshot(String mapType, double latitude, double longitude, String dataUrl) {
+            if (mapType == null || dataUrl == null || dataUrl.length() > 700_000
+                    || !dataUrl.startsWith("data:image/jpeg;base64,")
+                    || ("SATELLITE".equals(mapType) && dataUrl.length() < 1024)
+                    || !Double.isFinite(latitude) || !Double.isFinite(longitude))
+                return false;
+            try {
+                nativeEarthPickerSnapshot("SATELLITE".equals(mapType) ? "SATELLITE" : "DEFAULT",
+                        latitude, longitude, dataUrl);
+                return true;
+            } catch (Throwable error) {
+                android.util.Log.e("InGeEarthPicker", "INGE_EARTH_PICKER_SNAPSHOT_FAILED", error);
+                return false;
             }
         }
 
@@ -2146,6 +2805,10 @@ public final class InGeQtActivity extends QtActivity
         locationHandler.removeCallbacks(locationPoll);
         if (bestLocationFix.isEmpty()) {
             emitLocationStatus("error", "No se obtuvo un fix de ubicación en 8 s");
+            // Keep tracking so a late cold-start fix still arrives; the
+            // refinement poll releases GPS at the session bound.
+            locationRefineUntilMs = locationSearchStartedMs + LOCATION_SESSION_MAX_MS;
+            locationHandler.postDelayed(locationRefinePoll, 1_000L);
             return;
         }
         final Map<String, Object> result = new HashMap<>(bestLocationFix);
@@ -2169,8 +2832,18 @@ public final class InGeQtActivity extends QtActivity
 
     private void pollEarthLocationRefinement() {
         final long nowElapsed = SystemClock.elapsedRealtime();
-        if (nowElapsed > locationRefineUntilMs)
-            return;
+        if (nowElapsed > locationRefineUntilMs) {
+            final long sessionEnd = locationSearchStartedMs + LOCATION_SESSION_MAX_MS;
+            if (locationBestScore > LOCATION_PRECISE_M && nowElapsed < sessionEnd) {
+                // Coarse (network) fix: let GNSS converge instead of restarting
+                // it from zero on the next search.
+                locationRefineUntilMs = sessionEnd;
+            } else {
+                // Nothing is emitted after refinement: release GPS/fused/network.
+                InGeNativeLocation.stop();
+                return;
+            }
+        }
         if (InGeNativeLocation.hasFix()) {
             final long timestamp = InGeNativeLocation.timestampMs();
             final double accuracy = InGeNativeLocation.accuracy();
@@ -2197,6 +2870,9 @@ public final class InGeQtActivity extends QtActivity
                 bestLocationFix.clear();
                 bestLocationFix.putAll(refined);
                 emitLocationFix(refined);
+                if (accuracy <= LOCATION_PRECISE_M)
+                    locationRefineUntilMs = Math.min(locationRefineUntilMs,
+                            nowElapsed + 15_000L);
             }
         }
         locationHandler.postDelayed(locationRefinePoll, 1_000L);
@@ -2664,6 +3340,9 @@ public final class InGeQtActivity extends QtActivity
         }
         emitBetaDiagnostic("LIFECYCLE", "INFO", "ON_DESTROY", null, null, null);
         performanceHandler.removeCallbacks(betaPerformanceSample);
+        if (performanceRuntime != null)
+            performanceRuntime.setBudgetListener(null);
+        performanceHandler.removeCallbacks(releaseHiddenEarthRunnable);
         android.util.Log.i("InGeLifecycle",
                 "INGE_ACTIVITY_ON_DESTROY instance=" + System.identityHashCode(this));
         // Relaunch (config/core settings) vs real exit: process-global Qt state is

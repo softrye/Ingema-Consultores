@@ -628,3 +628,126 @@ button:active { transform: scale(.96); }
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
+
+/* Selector de coordenadas de Calicatas (mismo viewer; el WebView ocupa solo
+   el área de mapa del selector Qt). Sin buscador, dock ni hojas de Earth. */
+body.picker-mode #earthUi,
+body.picker-mode #earthHdChip,
+body.picker-mode #earthBoot,
+body.picker-mode #earthToast,
+body.picker-mode #modalScrim,
+body.picker-mode #streetViewContainer,
+body.picker-mode .cesium-viewer-toolbar,
+body.picker-mode .cesium-viewer-animationContainer,
+body.picker-mode .cesium-viewer-timelineContainer,
+body.picker-mode .cesium-viewer-fullscreenContainer,
+body.picker-mode .cesium-viewer-geocoderContainer,
+body.picker-mode .cesium-infoBox,
+body.picker-mode .cesium-selection-wrapper { display: none !important; }
+body.picker-mode .cesium-widget-credits {
+  display: flex !important;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+  max-width: calc(100% - 8px);
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 9px !important;
+  line-height: 12px;
+}
+body.picker-mode .cesium-credit-logoContainer,
+body.picker-mode .cesium-credit-logoContainer * {
+  display: inline-flex !important;
+  align-items: center;
+}
+body.picker-mode .cesium-credit-logoContainer img,
+body.picker-mode .cesium-credit-logo img,
+body.picker-mode .cesium-widget-credits img {
+  height: 14px !important;
+  max-height: 14px !important;
+  width: auto !important;
+}
+body.picker-mode .cesium-credit-textContainer { display: inline !important; }
+body.picker-mode .cesium-credit-lightbox-overlay { display: none !important; }
+body.picker-mode .cesium-viewer-bottom {
+  bottom: 4px !important;
+  left: 4px !important;
+  right: 4px !important;
+}
+.earth-picker {
+  position: fixed;
+  inset: 0;
+  z-index: 12;
+  pointer-events: none;
+  font-family: Roboto, system-ui, -apple-system, sans-serif;
+  color: var(--text);
+}
+.earth-picker[hidden] { display: none; }
+.earth-picker .glass { pointer-events: auto; border-radius: 999px; }
+.earth-picker .picker-types {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+}
+.earth-picker .picker-types button {
+  border: 0;
+  border-radius: 999px;
+  min-height: 34px;
+  padding: 0 14px;
+  background: transparent;
+  color: var(--text);
+  font: 600 13px Roboto, system-ui, sans-serif;
+}
+.earth-picker .picker-types button.selected { background: var(--selected); }
+.earth-picker .picker-types button:disabled { opacity: .45; }
+.earth-picker .picker-readout {
+  position: absolute;
+  left: 50%;
+  /* Por encima de la atribución (ion/Google/OSM ocupa hasta dos líneas). */
+  bottom: 58px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 20px);
+  padding: 7px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 13px;
+  line-height: 1.3;
+  text-align: center;
+}
+.earth-picker #pickerUtm { color: var(--muted); font-size: 12px; }
+.earth-picker .picker-loading {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  background: #EEF3F8; color: #24577D; font: 600 14px Roboto, system-ui, sans-serif;
+  pointer-events: auto; opacity: 1; transition: opacity 220ms ease-out;
+}
+.earth-picker .picker-loading.hidden { opacity: 0; pointer-events: none; }
+.earth-picker .picker-loading.error { color: #B42318; }
+.earth-picker .picker-loading button { border-radius: 999px; padding: 8px 18px; font: 600 13px Roboto, sans-serif; pointer-events: auto; }
+.earth-picker .picker-loading-ring {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 3px solid rgba(36, 87, 125, .18); border-top-color: #24577D;
+  animation: picker-spin 900ms linear infinite;
+}
+.earth-picker .picker-loading.error .picker-loading-ring { display: none; }
+@keyframes picker-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .earth-picker .picker-loading-ring { animation: none; } }
+
+/* Carga cartográfica única: la pinta el host Android sobre el WebView. */
+#earthBoot { display: none !important; }
+
+/* INGE_PERFORMANCE_BARE_UI: el host añade body.bare-ui. Sin efectos visuales. */
+body.bare-ui *,
+body.bare-ui *::before,
+body.bare-ui *::after {
+  animation: none !important;
+  transition: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+}

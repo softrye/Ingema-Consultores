@@ -1,19 +1,14 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
-import QtQuick.Shapes as Shapes
 import "../flowcore" as FlowCore
+import InGe.CoreFlow 3.0 as Mobile
 import "../components" as Components
 
 // Revisión de cierre de la calicata. Solo presentación: todos los valores llegan de
 // CalicataFormPage (Rules.reviewSummary / reviewFacts / reviewRecommendations /
 // reviewConclusion sobre la misma instantánea que exporta). Las exportaciones viven
 // en el Dock: esta pantalla no tiene botones de exportar.
-//
-// Liquid Glass: material del sistema (FlowCore.LiquidGlassSurface) sobre un ambiente
-// propio y estático (la página es ancestro y no puede ser backdrop). Una sola
-// superficie por tarjeta, con grab congelado (re-grab solo si cambia su geometría);
-// los elementos internos son translúcidos, sin vidrio anidado (coste acotado en A12).
 Item {
     id: review
 
@@ -33,7 +28,6 @@ Item {
 
     // ---- tema
     property var flow: null
-    property Flickable viewport: null
     property real scaleFactor: 1
     property bool darkMode: false
     property color ink: "#151A30"
@@ -59,95 +53,16 @@ Item {
              : status === "warning" ? "status.warning" : "status.sync"
     }
     function tint(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
-    function cardIsVisible(y, height) {
-        if (!review.viewport || !review.parent) return true
-        var origin = review.parent.mapToItem(review.viewport.contentItem, review.x, review.y)
-        var top = origin.y + content.y + y
-        return top + height > review.viewport.contentY
-            && top < review.viewport.contentY + review.viewport.height
-    }
     readonly property var components: review.summary && review.summary.components ? review.summary.components : []
     readonly property var pendingComponents: review.components.filter(function(c) { return c.status === "blocker" || c.status === "warning" })
-    readonly property real motionScale: review.flow && review.flow.motionAllowed === false ? 0 : 1
     readonly property bool narrow: review.width < review.dp(380)
 
-    // Entrada: las tarjetas aparecen escalonadas (opacity + desplazamiento corto).
-    property real reveal: 0
-    onVisibleChanged: {
-        if (visible) revealAnim.restart()
-        else { revealAnim.stop(); reveal = 0 }
-    }
-    Component.onCompleted: if (visible) revealAnim.restart()
-    NumberAnimation {
-        id: revealAnim
-        target: review; property: "reveal"; from: 0; to: 1
-        duration: 520 * review.motionScale + 1
-        easing.type: Easing.OutCubic
-    }
 
     implicitHeight: content.implicitHeight + review.dp(8)
 
-    // ---- ambiente estático: lo que el vidrio refracta (blanco, azul muy sutil)
     Rectangle {
-        id: ambient
-        // También lo refractan las celdas, insignias y chips (Liquid Glass real).
-        objectName: "calicataGlassBackdrop"
         anchors.fill: parent
-        // Sin esquinas transparentes: el vidrio pinta opaco lo que captura y una
-        // esquina vacía saldría negra.
-        radius: 0
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: review.darkMode ? "#182440" : "#F7FAFF" }
-            GradientStop { position: 1.0; color: review.darkMode ? "#151A30" : "#FFFFFF" }
-        }
-        Shapes.Shape {
-            anchors.fill: parent
-            Shapes.ShapePath {
-                strokeWidth: -1
-                fillGradient: Shapes.RadialGradient {
-                    centerX: ambient.width * 0.12; centerY: Math.min(ambient.height * 0.10, review.dp(260))
-                    centerRadius: ambient.width * 0.75
-                    focalX: centerX; focalY: centerY
-                    GradientStop { position: 0.0; color: review.tint(review.accent, review.darkMode ? 0.20 : 0.14) }
-                    GradientStop { position: 1.0; color: review.tint(review.accent, 0) }
-                }
-                startX: 0; startY: 0
-                PathLine { x: ambient.width; y: 0 }
-                PathLine { x: ambient.width; y: ambient.height }
-                PathLine { x: 0; y: ambient.height }
-                PathLine { x: 0; y: 0 }
-            }
-            Shapes.ShapePath {
-                strokeWidth: -1
-                fillGradient: Shapes.RadialGradient {
-                    centerX: ambient.width * 0.92; centerY: ambient.height * 0.45
-                    centerRadius: ambient.width * 0.70
-                    focalX: centerX; focalY: centerY
-                    GradientStop { position: 0.0; color: Qt.rgba(0.561, 0.698, 0.835, review.darkMode ? 0.14 : 0.12) }
-                    GradientStop { position: 1.0; color: Qt.rgba(0.561, 0.698, 0.835, 0) }
-                }
-                startX: 0; startY: 0
-                PathLine { x: ambient.width; y: 0 }
-                PathLine { x: ambient.width; y: ambient.height }
-                PathLine { x: 0; y: ambient.height }
-                PathLine { x: 0; y: 0 }
-            }
-            Shapes.ShapePath {
-                strokeWidth: -1
-                fillGradient: Shapes.RadialGradient {
-                    centerX: ambient.width * 0.20; centerY: ambient.height * 0.88
-                    centerRadius: ambient.width * 0.65
-                    focalX: centerX; focalY: centerY
-                    GradientStop { position: 0.0; color: Qt.rgba(0.678, 0.725, 0.616, review.darkMode ? 0.10 : 0.08) }
-                    GradientStop { position: 1.0; color: Qt.rgba(0.678, 0.725, 0.616, 0) }
-                }
-                startX: 0; startY: 0
-                PathLine { x: ambient.width; y: 0 }
-                PathLine { x: ambient.width; y: ambient.height }
-                PathLine { x: 0; y: ambient.height }
-                PathLine { x: 0; y: 0 }
-            }
-        }
+        color: review.darkMode ? "#151A30" : "#FFFFFF"
     }
 
     // ---------------------------------------------------------------- componentes
@@ -156,62 +71,14 @@ Item {
         property int order: 0
         property real cardRadius: review.dp(22)
         default property alias body: cardBody.data
-        readonly property real appear: Math.max(0, Math.min(1, review.reveal * 6 - card.order * 0.55))
-        readonly property bool inViewport: review.visible && review.cardIsVisible(card.y, card.height)
-        readonly property bool glassShown: cardTokens.shown
         Layout.fillWidth: true
         implicitHeight: cardBody.implicitHeight + review.dp(32)
-        opacity: card.appear
-        transform: Translate { y: (1 - card.appear) * review.dp(14) }
-        QtObject {
-            id: cardTokens
-            readonly property bool shown: card.visible && card.opacity > 0 && card.inViewport
-            readonly property Item glassBackdrop: ambient
-            readonly property real materialPosition: 0
-            readonly property bool lowCostGlass: false
-            readonly property color glassTint: review.darkMode ? Qt.rgba(0.0824, 0.102, 0.1882, 0.10) : Qt.rgba(0.95, 0.97, 1.0, 0.02)
-            // Opaco: Qt premultiplica los colores de un ShaderEffect; translúcido se pintaría gris.
-            readonly property color fallbackGlass: review.darkMode ? Qt.rgba(0.14, 0.16, 0.20, 1.0) : Qt.rgba(0.985, 0.99, 1.0, 1.0)
-            readonly property real rimLight: review.darkMode ? 0.18 : 0.20
-            readonly property real rimShade: review.darkMode ? 0.04 : 0.035
-            readonly property real rimSheen: review.darkMode ? 0.03 : 0.015
-            readonly property real edgeContrast: review.darkMode ? 0.0 : 0.03
-            readonly property real glassSaturation: 1.12
-            readonly property color shadowColor: Qt.rgba(0.0824, 0.102, 0.1882, review.darkMode ? 0.22 : 0.09)
-        }
-        FlowCore.LiquidGlassSurface {
-            anchors.fill: parent
-            visible: cardTokens.shown
-            tokens: cardTokens
-            cornerRadius: card.cardRadius
-            surfaceName: "calicata-review-card"
-            // Preset del panel "Información de la calicata".
-            lens: 0.3
-            frost: 8
-            frostTaps: 6
-            magnify: 0
-            bevel: review.dp(14)
-            elevation: true
-            liveCapture: false   // ambiente estático: un grab, re-grab solo si cambia la geometría
-            // La tarjeta ocupa todo el ancho del ambiente: el margen de captura del
-            // shader (6 px) caería fuera y pintaría negro. Se recorta dentro del ambiente.
-            captureRect: {
-                var dependency = card.x + card.y + card.width + card.height + (cardTokens.shown ? 1 : 0)
-                var m = 6
-                var p = card.mapToItem(ambient, 0, 0)
-                var w = Math.min(card.width, ambient.width - 2 * m)
-                var h = Math.min(card.height, ambient.height - 2 * m)
-                return Qt.rect(Math.max(m, Math.min(p.x, ambient.width - w - m)),
-                               Math.max(m, Math.min(p.y, ambient.height - h - m)), Math.max(1, w), Math.max(1, h))
-            }
-        }
         Rectangle {
             anchors.fill: parent
             radius: card.cardRadius
-            // Velo y filo del peek "Información de la calicata".
-            color: review.darkMode ? Qt.rgba(0.0824, 0.102, 0.1882, 0.30) : Qt.rgba(0.98, 0.99, 1.0, 0.42)
+            color: Mobile.InGeCoreFlow.darkMode ? "#171D29" : "#FFFFFF"
             border.width: 1
-            border.color: review.darkMode ? Qt.rgba(1, 1, 1, 0.06) : Qt.rgba(1, 1, 1, 0.30)
+            border.color: Mobile.InGeCoreFlow.darkMode ? "#3A4456" : "#D5DBE3"
         }
         ColumnLayout {
             id: cardBody
@@ -230,7 +97,7 @@ Item {
         implicitWidth: review.dp(38); implicitHeight: review.dp(38)
         radius: review.dp(12)
         color: "transparent"
-        CalicataLiquidGlass { dark: review.darkMode; accent: badge.tone; anchors.fill: parent; radius: badge.radius; tone: "tinted" }
+        CalicataSurface { dark: review.darkMode; accent: badge.tone; anchors.fill: parent; radius: badge.radius; tone: "tinted" }
         Components.FlowIcon {
             anchors.centerIn: parent
             width: badge.iconSize; height: width
@@ -288,9 +155,7 @@ Item {
         implicitHeight: review.dp(64)
         radius: review.dp(16)
         color: "transparent"
-        scale: tileTap.pressed ? 0.98 : 1
-        Behavior on scale { NumberAnimation { duration: tileTap.pressed ? 70 : 170; easing.type: Easing.OutCubic } }
-        CalicataLiquidGlass { dark: review.darkMode; accent: review.accent; anchors.fill: parent; radius: tile.radius; pressed: tileTap.pressed }
+        CalicataSurface { dark: review.darkMode; accent: review.accent; anchors.fill: parent; radius: tile.radius; pressed: tileTap.pressed }
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: review.dp(12); anchors.rightMargin: review.dp(10)
@@ -326,7 +191,7 @@ Item {
         radius: height / 2
         color: "transparent"
         scale: chipTap.pressed ? 0.97 : 1
-        CalicataLiquidGlass { dark: review.darkMode; accent: chip.tone; anchors.fill: parent; radius: chip.radius; tone: "tinted"; pressed: chipTap.pressed }
+        CalicataSurface { dark: review.darkMode; accent: chip.tone; anchors.fill: parent; radius: chip.radius; tone: "tinted"; pressed: chipTap.pressed }
         Behavior on scale { NumberAnimation { duration: chipTap.pressed ? 70 : 170; easing.type: Easing.OutCubic } }
         Row {
             id: chipRow
@@ -365,7 +230,7 @@ Item {
                     Text { Layout.fillWidth: true; visible: review.codeText.length > 0; text: review.codeText; color: review.muted; font.pixelSize: review.dp(12); elide: Text.ElideRight }
                 }
                 Text {
-                    text: review.reviewed ? Math.round((review.summary.percent || 0) * Math.min(1, review.reveal * 1.4)) + "%" : "—"
+                    text: review.reviewed ? Math.round(review.summary.percent || 0) + "%" : "—"
                     color: review.accent
                     font.pixelSize: review.dp(30)
                     font.weight: Font.Bold
@@ -380,7 +245,7 @@ Item {
                     color: review.tint(review.accent, review.darkMode ? 0.18 : 0.12)
                 }
                 Rectangle {
-                    width: parent.width * Math.max(0, Math.min(1, (review.summary.percent || 0) / 100)) * Math.min(1, review.reveal * 1.4)
+                    width: parent.width * Math.max(0, Math.min(1, (review.summary.percent || 0) / 100))
                     height: parent.height
                     radius: height / 2
                     gradient: Gradient {
@@ -575,7 +440,7 @@ Item {
                     y: review.dp(20)
                     width: parent.width
                     height: review.dp(44)
-                    property real sweep: Math.min(1, review.reveal * 1.3)
+                    property real sweep: 1
                     onSweepChanged: requestPaint()
                     onWidthChanged: requestPaint()
                     Connections { target: review; function onFactsChanged() { profileCanvas.requestPaint() } }
@@ -684,7 +549,7 @@ Item {
                     Canvas {
                         id: ring
                         anchors.fill: parent
-                        property real value: Math.min(1, review.reveal * 1.25) * (isFinite(review.facts.excavabilityIndex) ? review.facts.excavabilityIndex / 100 : 0)
+                        property real value: (isFinite(review.facts.excavabilityIndex) ? review.facts.excavabilityIndex / 100 : 0)
                         onValueChanged: requestPaint()
                         onPaint: {
                             var ctx = getContext("2d")
@@ -808,7 +673,7 @@ Item {
                             id: bar
                             anchors.horizontalCenter: parent.horizontalCenter
                             width: Math.min(review.dp(34), barSlot.width * 0.56)
-                            readonly property real grow: Math.max(0, Math.min(1, review.reveal * 2.2 - barSlot.index * 0.12))
+                            readonly property real grow: 1
                             height: Math.max(review.dp(3), chart.plotHeight * barSlot.modelData.percent / 100 * bar.grow)
                             y: chart.plotTop + chart.plotHeight - height
                             radius: review.dp(8)
@@ -860,14 +725,6 @@ Item {
                         id: aiRow
                         anchors.centerIn: parent
                         spacing: review.dp(6)
-                        FlowCore.FlowProgressRing {
-                            anchors.verticalCenter: parent.verticalCenter
-                            running: analysisCard.glassShown && review.aiBusy
-                            width: review.dp(14); height: width
-                            strokeWidth: review.dp(2)
-                            color: review.accent
-                            backgroundColor: review.tint(review.accent, 0.18)
-                        }
                         Text { anchors.verticalCenter: parent.verticalCenter; text: "Analizando…"; color: review.accent; font.pixelSize: review.dp(12.5); font.weight: Font.DemiBold }
                     }
                     Accessible.role: Accessible.StaticText
@@ -878,9 +735,9 @@ Item {
             Item {
                 Layout.fillWidth: true
                 implicitHeight: review.dp(38)
-                CalicataLiquidGlass { dark: review.darkMode; accent: review.accent; anchors.fill: parent; radius: height / 2 }
+                CalicataSurface { dark: review.darkMode; accent: review.accent; anchors.fill: parent; radius: height / 2 }
                 // Pestaña activa = la lente de selección del material (como en el Dock).
-                CalicataLiquidGlass {
+                CalicataSurface {
                     dark: review.darkMode; accent: review.accent
                     width: (parent.width - review.dp(8)) / 3
                     height: parent.height - review.dp(8)

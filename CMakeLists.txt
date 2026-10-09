@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(AppCalicatasDemo VERSION 1.1.9 LANGUAGES CXX)
+project(AppCalicatasDemo VERSION 1.1.10 LANGUAGES CXX)
 
 # ---------------------------------------------------------
 # INGE+ ANDROID RELEASE â€” Qt 6.9.3 / arm64-v8a
@@ -29,7 +29,33 @@ if(ANDROID)
     set(CMAKE_ANDROID_STL_TYPE "c++_shared" CACHE STRING
         "STL usada por CMake" FORCE)
 
-    set(QT_ANDROID_DEPLOYMENT_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING
+    # Qt 6.9 solo reconoce Debug o Release aqui: con RelWithDebInfo o
+    # MinSizeRel no pasa --release a androiddeployqt y el APK sale
+    # debuggable, con Flutter en JIT aunque el C++ este optimizado. Afecta
+    # al target apk/aab de CMake; el paso "Build Android APK" de Qt Creator
+    # decide por su cuenta (Profile/RelWithDebInfo sigue siendo debug alli).
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" _INGE_BUILD_TYPE_UPPER)
+    if(_INGE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
+        set(_INGE_ANDROID_DEPLOYMENT_TYPE "Debug")
+        message(NOTICE "InGe+ Android Debug: APK debuggable, C++ sin optimizar "
+            "y Flutter en JIT. No usar este build para medir rendimiento.")
+    else()
+        set(_INGE_ANDROID_DEPLOYMENT_TYPE "Release")
+        # Release ya generaba un APK release; RelWithDebInfo/MinSizeRel lo
+        # hacen desde este cambio y antes salian firmados con la clave debug.
+        if(NOT QT_ANDROID_SIGN_APK AND NOT _INGE_BUILD_TYPE_UPPER STREQUAL "RELEASE")
+            message(WARNING "InGe+ Android ${CMAKE_BUILD_TYPE}: el APK del target "
+                "apk de CMake sale release SIN firmar y adb install lo rechaza. "
+                "Activar QT_ANDROID_SIGN_APK con QT_ANDROID_KEYSTORE_* en el "
+                "entorno o firmar desde Qt Creator (configuracion Release).")
+        endif()
+        if(_INGE_BUILD_TYPE_UPPER STREQUAL "RELWITHDEBINFO")
+            message(NOTICE "InGe+ Android RelWithDebInfo: en Qt Creator la "
+                "configuracion Profile instala un APK debug (Flutter en JIT). "
+                "Para medir rendimiento usar Release.")
+        endif()
+    endif()
+    set(QT_ANDROID_DEPLOYMENT_TYPE "${_INGE_ANDROID_DEPLOYMENT_TYPE}" CACHE STRING
         "Tipo de despliegue Android" FORCE)
 endif()
 
@@ -59,10 +85,10 @@ endif()
 # Qt base
 # ----------------------------
 find_package(QT NAMES Qt6 Qt5 REQUIRED
-    COMPONENTS Core Network Positioning Location Quick Qml Xml Concurrent
+    COMPONENTS Core Network Positioning Quick Qml Xml Concurrent
 )
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED
-    COMPONENTS Core Network Positioning Location Quick Qml Xml Concurrent
+    COMPONENTS Core Network Positioning Quick Qml Xml Concurrent
 )
 
 # Si vamos a compilar Mobile, necesitamos QuickControls2
@@ -70,7 +96,6 @@ if(INGE_BUILD_MOBILE)
     find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS QuickControls2 QuickDialogs2)
     if(QT_VERSION_MAJOR GREATER_EQUAL 6)
         find_package(Qt6 REQUIRED COMPONENTS QuickEffects)
-        find_package(Qt6 REQUIRED COMPONENTS ShaderTools)
     endif()
 endif()
 
@@ -84,7 +109,7 @@ endif()
 
 # Desktop usa Widgets/QuickWidgets/Pdf (solo si NO es Android/iOS)
 if(NOT ANDROID AND NOT IOS AND NOT INGE_BUILD_MOBILE)
-    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets QuickWidgets Pdf PdfWidgets)
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets QuickWidgets Pdf PdfWidgets Location)
 endif()
 
 # ----------------------------
@@ -215,6 +240,13 @@ if(INGE_BUILD_MOBILE)
 
     # Cartography is provided by InGe Earth/Cesium; no native map provider dependency.
 
+    # Android packages only the brand resources used by Calicatas/export.
+    # Windows Mobile retains the legacy QRC to avoid desktop regressions.
+    set(INGE_MOBILE_BRAND_QRC "${INGE_PROJECT_ROOT}/resources.qrc")
+    if(ANDROID)
+        set(INGE_MOBILE_BRAND_QRC "${INGE_PROJECT_ROOT}/resources_mobile_brand.qrc")
+    endif()
+
     set(MOBILE_SOURCES
         "${INGE_PROJECT_ROOT}/main_mobile.cpp"
         "${INGE_PROJECT_ROOT}/src/core/InGeCore.h"
@@ -226,7 +258,7 @@ if(INGE_BUILD_MOBILE)
         "${INGE_PROJECT_ROOT}/src/core/InGeCoreContext.h"
         "${INGE_PROJECT_ROOT}/src/core/InGeCoreTypes.h"
         "${INGE_PROJECT_ROOT}/src/core/InGeCoreSkill.h"
-        "${INGE_PROJECT_ROOT}/resources.qrc"
+        ${INGE_MOBILE_BRAND_QRC}
 
         # AUTH compartido con Desktop
         "${INGE_PROJECT_ROOT}/appcontext.h"
@@ -501,7 +533,6 @@ if(INGE_BUILD_MOBILE)
             Qt${QT_VERSION_MAJOR}::Quick
             Qt${QT_VERSION_MAJOR}::QuickControls2
             Qt${QT_VERSION_MAJOR}::QuickDialogs2
-            Qt${QT_VERSION_MAJOR}::Location
             Qt${QT_VERSION_MAJOR}::Positioning
             Qt${QT_VERSION_MAJOR}::Concurrent
             Qt${QT_VERSION_MAJOR}::Xml
@@ -582,8 +613,6 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/flowcore/FlowProgressRing.qml"
             "${MOBILE_QML_DIR}/flowcore/FlowFocusRing.qml"
             "${MOBILE_QML_DIR}/flowcore/FlowGlassSurface.qml"
-            "${MOBILE_QML_DIR}/flowcore/LiquidGlassSurface.qml"
-            "${MOBILE_QML_DIR}/flowcore/GlobalContextDock.qml"
             "${MOBILE_QML_DIR}/flowcore/ContextPublisher.qml"
             "${MOBILE_QML_DIR}/flowcore/FlowSurface.qml"
             "${MOBILE_QML_DIR}/flowcore/FlowText.qml"
@@ -647,7 +676,6 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/lib/UiV2Theme.js"
             "${MOBILE_QML_DIR}/pages/HomePage.qml"
             "${MOBILE_QML_DIR}/pages/HomePageContent.qml"
-            "${MOBILE_QML_DIR}/pages/HomePagePhase1.qml"
             "${MOBILE_QML_DIR}/pages/LoginPage.qml"
             "${MOBILE_QML_DIR}/pages/LoginPageForm.qml"
             "${MOBILE_QML_DIR}/pages/MapPage.qml"
@@ -661,7 +689,7 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/pages/CalicatasEditorPage.qml"
             "${MOBILE_QML_DIR}/pages/CalicataFormPage.qml"
             "${MOBILE_QML_DIR}/pages/CalicataReview.qml"
-            "${MOBILE_QML_DIR}/pages/CalicataLiquidGlass.qml"
+            "${MOBILE_QML_DIR}/pages/CalicataSurface.qml"
             "${MOBILE_QML_DIR}/pages/CalicataProfile.qml"
             "${MOBILE_QML_DIR}/pages/CalicataPointPicker.qml"
             "${MOBILE_QML_DIR}/pages/CalicataPhotoEditor.qml"
@@ -867,19 +895,6 @@ if(INGE_BUILD_MOBILE)
                     fsutil.h fsutil.cpp
             )
         endif()
-
-        # Dock glass material (liquidglass.frag -> .qsb in the module resources).
-        qt_add_shaders(AppCalicatasMobile "inge_dock_glass_shaders"
-            PREFIX "/InGe/Mobile/shaders"
-            BASE "qml/Mobile/shaders"
-            # No GLSL override: ShaderEffect links this fragment stage with Qt's
-            # built-in vertex stage, which only ships the default variants
-            # (100 es,120,150). Adding "300 es" here made GLES 3 drivers pick
-            # 300 es for the fragment and 100 es for the vertex, and Mali
-            # rejects that program ("L0001 Shader languages do not match").
-            FILES
-                qml/Mobile/shaders/liquidglass.frag
-        )
 
         if(ANDROID)
             # androiddeployqt/qmlimportscanner debe inspeccionar solamente el

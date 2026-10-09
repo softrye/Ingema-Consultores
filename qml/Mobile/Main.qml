@@ -5,7 +5,6 @@ import QtQuick.Effects
 import QtQuick.Layouts 1.15
 import QtQuick.Shapes 1.15
 import QtPositioning
-import QtLocation
 import QtCore
 import QtQuick.Dialogs
 import QtQml 2.15
@@ -50,7 +49,6 @@ property bool sessionEntryWelcomeV600: false
 // una FlutterView: Home solo se pide DESPUÉS de ocultar Auth (orden original).
 property bool sessionWelcomeHoldV600: false
 property double sessionEntryStartedAtV501: 0
-property bool flutterHomeActiveV60: false
 property bool flutterSecurityOpenV70: false
 property string flutterAuthErrorV70: ""
 property string flutterAuthLastMethodV70: ""
@@ -65,6 +63,8 @@ property string biometricStatusV70: "Disponible"
 // operación asíncrona abre una generación y solo la operación pendiente
 // vigente puede cambiar el estado (los callbacks tardíos se descartan).
 property string authFlowStateV800: "BOOTSTRAP"
+// Home QML visible con la sesión confirmada (INGE_STARTUP HOME_READY).
+readonly property bool homeReadyV900: authFlowStateV800 === "HOME" && pageIndex === 0
 property int authGenerationV800: 0
 property int sessionEntryGenerationV800: -1
 property string authPendingOpV800: ""        // restore|password|switch|biometric|restore-cancelled
@@ -73,7 +73,6 @@ property string accountPickerSourceV800: ""  // home|sessionClosed
 property string accountSwitchSourceV800: ""  // home|sessionClosed|auth
 property string accountSwitchFromIdV800: ""
 property bool accountSwitchRollbackV800: false
-property bool flutterHomeHandoffV800: false
 readonly property bool authSurfaceStateV800:
     authFlowStateV800 === "BOOTSTRAP"
     || authFlowStateV800 === "AUTOLOGIN_WELCOME"
@@ -163,34 +162,20 @@ function enterLoginStateV800(reason, errorMessage) {
     accountSwitchBusyV20 = false
     serverBusy = false
     accountSwitchRollbackV800 = false
-    flutterHomeHandoffV800 = false
     clearVisibleSessionV18()
     flutterAuthErrorV70 = errorMessage ? String(errorMessage) : ""
     setAuthFlowStateV800("LOGIN", reason)
 }
 
-// Auth → Home en la MISMA FlutterView: Home reclama la superficie mientras
-// Auth aún la posee, y Flutter hace el crossfade interno (sin aparcar la
-// vista ni dejar ver QML entre ambos).
-function handoffFlutterSurfaceToHomeV800() {
+// Auth → Home: Home es QML; la superficie Flutter de Auth se retira.
+function releaseAuthSurfaceToQmlHomeV800() {
     if (Qt.platform.os !== "android") return
-    flutterHomeHandoffV800 = true
-    console.info("AUTH_OWNER from=auth to=home gen=" + authGenerationV800)
-    try {
-        syncFlutterAuthStateV70(false)
-        Perms.setFlutterHomeVisible(true,
-                                    darkMode ? "dark" : "light",
-                                    inGeCoreFlow.motionAllowed ? 1.0 : 0.0,
-                                    liquidGlass ? 0.72 : 0.0,
-                                    String(inGeCoreFlow.performance.profile))
-    } catch(e) {
-        flutterHomeHandoffV800 = false
-    }
+    console.info("AUTH_OWNER from=auth to=qml-home gen=" + authGenerationV800)
+    setFlutterAuthSurfaceV70(false)
 }
 
 function hideFlutterHomeForAuthV800() {
     if (Qt.platform.os !== "android") return
-    flutterHomeHandoffV800 = false
     try { Perms.setFlutterHomeVisible(false, "light", 1.0, 0.0, "balanced") }
     catch(e) {}
 }
@@ -275,7 +260,6 @@ function beginSessionTransitionV501(message, closing) {
     sessionEntryHomeTimeoutV600.stop()
     sessionWelcomeHoldV600 = false
     sessionEntryWelcomeV600 = false
-    flutterHomeHandoffV800 = false
     sessionEntryGenerationV800 = authGenerationV800
     sessionEntryTransitionActiveV501 = true
     sessionEntryIdentityCommittedV501 = false
@@ -404,14 +388,10 @@ function revealSessionWorkspaceV501() {
     var currentGen = sessionEntryGenerationV800 === authGenerationV800
     if (!currentGen)
         logStaleAuthCallbackV800("sessionReveal", sessionEntryGenerationV800)
-    // Home es Flutter: la misma FlutterView pasa de Auth a Home con
-    // crossfade interno; la cubierta QML solo protege si Home no responde.
+    // Home es QML: al revelar la sesión, Auth (Flutter) se retira.
     if (currentGen && !sessionEntryClosingV501 && Qt.platform.os === "android"
-            && pageIndex === 0 && (loggedIn || guestMode) && !flutterHomeActiveV60) {
-        handoffFlutterSurfaceToHomeV800()
-        sessionWelcomeHoldV600 = true
-        sessionEntryHomeTimeoutV600.restart()
-    }
+            && pageIndex === 0 && (loggedIn || guestMode))
+        releaseAuthSurfaceToQmlHomeV800()
     sessionEntryRevealV501.restart()
 }
 
@@ -428,13 +408,6 @@ function finishSessionEntryStateV800() {
             || s === "ADDING_ACCOUNT" || s === "ACCOUNT_SWITCHING"
             || s === "ACCOUNT_PICKER" || s === "BOOTSTRAP")
         setAuthFlowStateV800("HOME", "session-entry-revealed")
-}
-
-onFlutterHomeActiveV60Changed: {
-    if (flutterHomeActiveV60 && sessionWelcomeHoldV600) {
-        sessionEntryHomeTimeoutV600.stop()
-        sessionWelcomeHoldV600 = false
-    }
 }
 
 function accountEmailV18() {
@@ -632,7 +605,7 @@ function setFlutterAuthSurfaceV70(visible) {
                     true,
                     flutterAuthStateJsonV70(false),
                     darkMode ? "dark" : "light",
-                    inGeCoreFlow.motionAllowed ? 1.0 : 0.0,
+                    inGeCoreFlow.motionAllowedBase ? 1.0 : 0.0,
                     liquidGlass ? 0.72 : 0.0,
                     String(inGeCoreFlow.performance.profile))
     } catch(e1) {
@@ -1060,7 +1033,12 @@ Rectangle {
         color: profileOverlayV18.color
         Image {
             anchors.fill: parent
-            source: "qrc:/ui/v2/backgrounds/bg_topographic_lines.svg"
+            // Decoracion solo del tema Glass (liquidGlass es hoy la constante
+            // false). opacity 0 no evita decodificar el SVG de 1080x2400 (~10 MB
+            // RGBA residentes desde el arranque): sin Glass no se carga.
+            source: liquidGlass ? "qrc:/ui/v2/backgrounds/bg_topographic_lines.svg" : ""
+            sourceSize: Qt.size(Math.max(1, width), Math.max(1, height))
+            asynchronous: true
             fillMode: Image.PreserveAspectCrop
             opacity: liquidGlass ? 0.13 : 0.0
         }
@@ -1717,6 +1695,9 @@ Settings {
     property real lastFontScale: 1.0
     property bool lastReduceMotion: false
     property int lastPerformanceLevel: -1
+    // "auto": the level follows the device tier; "user": lastPerformanceLevel
+    // was picked in Ajustes. Empty only on installs before this key existed.
+    property string performanceSource: ""
 }
 
 property bool appActiveV41: Qt.application.state === Qt.ApplicationActive
@@ -1725,7 +1706,71 @@ property double lastBackPressEpochV41: 0
 function persistUiStateV41() {
     appSettingsV41.lastFontScale = fontScale
     appSettingsV41.lastReduceMotion = reduceMotion
-    appSettingsV41.lastPerformanceLevel = flowPerformanceLevel
+    if (!performanceAutomaticV90)
+        appSettingsV41.lastPerformanceLevel = flowPerformanceLevel
+}
+
+// =============================================================
+// V90 — Perfil de rendimiento automatico por dispositivo
+// =============================================================
+// Until the user picks a level in Ajustes it follows the device tier that
+// Android computes (InGeCoreFlow.automaticPerformanceLevel), live: battery
+// saver or heat lower it and it comes back on its own. A picked level is
+// kept and persisted. Severe thermal throttling caps any level.
+readonly property bool performanceAutomaticV90: appSettingsV41.performanceSource !== "user"
+readonly property int effectivePerformanceLevelV90:
+    Math.min(flowPerformanceLevel, Mobile.InGeCoreFlow.systemPerformanceCap)
+
+// Installs before performanceSource persisted the old default (2) on their
+// own, indistinguishable from a picked "Alto". Keep a stored level, except on
+// LOW/ULTRA_LOW devices, where that default is what overloaded the GPU.
+function resolvePerformanceSourceV90() {
+    if (appSettingsV41.performanceSource !== "")
+        return
+    if (Qt.platform.os === "android" && Mobile.InGeCoreFlow.deviceTier === "UNKNOWN")
+        return
+    var legacyLevel = appSettingsV41.lastPerformanceLevel
+    var source = legacyLevel >= 0 && Mobile.InGeCoreFlow.automaticPerformanceLevel > 0
+            ? "user" : "auto"
+    appSettingsV41.performanceSource = source
+    if (source === "user")
+        flowPerformanceLevel = Math.max(0, Math.min(2, legacyLevel))
+    console.info("INGE_PERFORMANCE_SOURCE_MIGRATED source=" + source
+                 + " legacyLevel=" + legacyLevel
+                 + " tier=" + Mobile.InGeCoreFlow.deviceTier)
+}
+
+Binding {
+    target: app
+    property: "flowPerformanceLevel"
+    value: Mobile.InGeCoreFlow.automaticPerformanceLevel
+    when: app.performanceAutomaticV90
+    restoreMode: Binding.RestoreNone
+}
+
+Connections {
+    target: Mobile.InGeCoreFlow
+    function onDeviceTierChanged() { app.resolvePerformanceSourceV90() }
+}
+
+function cyclePerformanceLevelV90() {
+    // Automatico -> Ahorro -> Balance -> Alto -> Automatico
+    if (performanceAutomaticV90) {
+        appSettingsV41.performanceSource = "user"
+        flowPerformanceLevel = 0
+    } else if (flowPerformanceLevel < 2) {
+        flowPerformanceLevel = flowPerformanceLevel + 1
+    } else {
+        appSettingsV41.performanceSource = "auto"
+    }
+    if (!performanceAutomaticV90) {
+        appSettingsV41.lastPerformanceLevel = flowPerformanceLevel
+        try { firstExperience.performanceLevel = flowPerformanceLevel } catch(e) {}
+    }
+}
+
+function performanceLevelNameV90(level) {
+    return level <= 0 ? "Ahorro" : (level >= 2 ? "Alto" : "Balance")
 }
 
 function clearPersistedGuestV41() {
@@ -1757,13 +1802,13 @@ function handleBackNavigationV41(nativeRequest) {
         return true
     }
 
-    // The dock context menu is the topmost transient layer: Back walks one
-    // branch level up, then closes it.
-    if (globalContextDockV1.handleBack()) {
-        console.info("INGE_BACK_ACTION=DOCK_MENU_LEVEL")
+    // El menú de acciones es la capa transitoria superior: Back sube un nivel y
+    // después lo cierra.
+    if (actionMenuV1.visible) {
+        actionMenuV1.back()
+        console.info("INGE_BACK_ACTION=ACTION_MENU_LEVEL")
         return true
     }
-
     if (profileOverlayOpenV18) {
         closeProfileOverlayV18()
         return true
@@ -2031,7 +2076,7 @@ Binding {
 Binding {
     target: Mobile.InGeCoreFlow
     property: "performanceLevel"
-    value: app.flowPerformanceLevel
+    value: app.effectivePerformanceLevelV90
 }
 
 Binding {
@@ -2043,11 +2088,19 @@ Binding {
 Binding {
     target: Mobile.InGeCoreFlow.performance
     property: "profile"
-    value: app.flowPerformanceLevel >= 2
+    value: app.effectivePerformanceLevelV90 >= 2
            ? Mobile.InGeCoreFlow.performance.high
-           : (app.flowPerformanceLevel <= 0
+           : (app.effectivePerformanceLevelV90 <= 0
               ? Mobile.InGeCoreFlow.performance.safe
               : Mobile.InGeCoreFlow.performance.balanced)
+}
+
+// Misma escala efectiva que fs(): FlowText, FlowField y FlowIconButton la
+// aplican con accessibility.scaledTextSize().
+Binding {
+    target: Mobile.InGeCoreFlow.accessibility
+    property: "textScale"
+    value: app.effectiveTextScale
 }
 
 
@@ -2139,6 +2192,14 @@ property string welcomeText: "Te damos la bienvenida a InGe+"
 property url profilePhotoSource: icon("blank_profile.png")
 property string profilePhotoStatus: "Foto de perfil local"
 property real fontScale: 1.0
+// Escala de texto unica: ajuste A-/A+ de la app (fontScale, el unico que se
+// persiste) por el tamaño de fuente de Android (Configuration.fontScale, en
+// vivo via GraphicsCore). El tope 1.30 es el mismo maximo que A+ ya permitia:
+// una fuente del sistema al 130-200 % no lleva fs() mas alla del tamaño que
+// ya alcanzaba con A+ y que soportan sus filas de alto fijo. La usan fs() y,
+// por el Binding de InGeCoreFlow.accessibility, FlowText/FlowField.
+readonly property real effectiveTextScale:
+    Math.max(0.85, Math.min(1.30, fontScale * Mobile.InGeCoreFlow.systemFontScale))
 property string languageCode: "es"
 
 property string fichaTipo: "Calicata"
@@ -2238,7 +2299,7 @@ function card2Color() { return inGeCoreFlow.theme.surfaceSecondary }
 function borderColor() { return inGeCoreFlow.theme.border }
 function textColor() { return inGeCoreFlow.theme.textPrimary }
 function mutedColor() { return inGeCoreFlow.theme.textSecondary }
-function fs(n) { return Math.max(9, Math.round(n * fontScale)) }
+function fs(n) { return Math.max(9, Math.round(n * effectiveTextScale)) }
 function pageThemeModeV70() { return 0 }
 
 function setVisualThemeMode(mode, announce) {
@@ -2274,7 +2335,7 @@ onReduceMotionChanged: {
 }
 
 onFlowPerformanceLevelChanged: {
-    if (appSettingsV41)
+    if (appSettingsV41 && !performanceAutomaticV90)
         appSettingsV41.lastPerformanceLevel = flowPerformanceLevel
 }
 
@@ -3740,20 +3801,20 @@ Component.onCompleted: {
     try {
         languageCode = firstExperience.languageCode
         flowMotionLevel = firstExperience.motionLevel
-        var selectedPerformance = appSettingsV41.lastPerformanceLevel >= 0
-                ? appSettingsV41.lastPerformanceLevel
-                : Number(firstExperience.performanceLevel)
-        flowPerformanceLevel = isFinite(selectedPerformance)
-                               ? Math.max(0, Math.min(2, Math.round(selectedPerformance)))
-                               : 1
+        // V90: automatic levels come from the Binding on flowPerformanceLevel;
+        // only a level picked in Ajustes is restored here.
+        resolvePerformanceSourceV90()
+        if (!performanceAutomaticV90)
+            flowPerformanceLevel = Math.max(0, Math.min(2, appSettingsV41.lastPerformanceLevel))
         reduceMotion = firstExperience.motionLevel === 0
         fontScale = appSettingsV41.lastFontScale > 0
                     ? appSettingsV41.lastFontScale : 1.0
         setVisualThemeMode(0, false)
     } catch (experienceError) {
         reduceMotion = appSettingsV41.lastReduceMotion
-        flowPerformanceLevel = appSettingsV41.lastPerformanceLevel >= 0
-                ? Math.max(0, Math.min(2, appSettingsV41.lastPerformanceLevel)) : 1
+        resolvePerformanceSourceV90()
+        if (!performanceAutomaticV90)
+            flowPerformanceLevel = Math.max(0, Math.min(2, appSettingsV41.lastPerformanceLevel))
         fontScale = appSettingsV41.lastFontScale > 0
                     ? appSettingsV41.lastFontScale : 1.0
         setVisualThemeMode(0, false)
@@ -3835,7 +3896,8 @@ Connections {
         languageCode = selectedLanguage
         reduceMotion = selectedMotion === 0
         flowMotionLevel = selectedMotion
-        flowPerformanceLevel = Math.max(0, Math.min(2, Math.round(Number(selectedPerformance) || 1)))
+        // The onboarding has no performance choice (it always reports 2):
+        // the level stays automatic or the one picked in Ajustes.
         setVisualThemeMode(0, false)
         persistUiStateV41()
         forceFirstExperiencePreview = false
@@ -4419,34 +4481,155 @@ Item {
         value: navigationShellV51.foregroundSurface
     }
 
-    // The single physical dock of the application.
-    Binding {
-        target: app.inGeCoreFlow
-        property: "glassMaterial"
-        value: globalContextDockV1
-    }
 
-    FlowCore.GlobalContextDock {
-        id: globalContextDockV1
+
+    // Barra de acciones de la app: las acciones de primer nivel publicadas en
+    // dockContextController, despachadas por dockCommandRouter (calicatas.next,
+    // calicatas.previous, exportar...). Una acción con hijos abre su menú; sin efectos.
+    Rectangle {
+        id: bareNavBarV1
         parent: navigationShellV51
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         z: 140
-        flow: inGeCoreFlow
-        bottomSafeInset: app.safeBottomInsetV49
-        // Supresión temporal durante una operación bloqueante de Calicatas: usa
-        // el mismo camino de ocultación que el teclado (sin tocar el Dock).
-        // Con InGe+ IA abierta (estado real GeminiAssistant.active) el Dock
-        // global cede el borde inferior al panel de la IA por el mismo camino.
-        keyboardVisible: inGeCoreFlow.imeVisible || Qt.inputMethod.visible
-                         || (app.pageIndex === 1 && app.calicataDockSuppressed)
-                         || app.geminiAssistantTransport.active === true
-        backdropItem: pageViewport
-        nativeSurface: app.flutterHomeActiveV60 || app.pageIndex === 2 || app.pageIndex === 6
-        // Earth's WebView exposes the dock through apertures over MapNativePage
-        // (#02050A), so the material behind the glass is dark.
-        darkBackdrop: app.pageIndex === 2
+        function visibleOf(list) {
+            var result = []
+            for (var i = 0; list && i < list.length; ++i)
+                if (list[i] && list[i].visible !== false)
+                    result.push(list[i])
+            return result
+        }
+        function hasCommand(action) { return !!action && String(action.command || "").length > 0 }
+        function hasChildren(action) { return !!action && visibleOf(action.children).length > 0 }
+        // Toque en una acción: con comando se despacha; si solo tiene hijos, abre su menú.
+        function tapKind(action) {
+            if (!action || action.enabled !== true) return "none"
+            if (hasCommand(action)) return "dispatch"
+            return hasChildren(action) ? "menu" : "none"
+        }
+        readonly property var actions: visibleOf(dockContextController ? dockContextController.actions : [])
+        readonly property bool coreAvailable: !!dockContextController && dockContextController.ingeCoreAvailable === true
+        visible: (actions.length > 0 || coreAvailable)
+                 && !(inGeCoreFlow.imeVisible || Qt.inputMethod.visible)
+                 && !(app.pageIndex === 1 && app.calicataDockSuppressed)
+        height: visible ? 48 + app.safeBottomInsetV49 : 0
+        color: app.darkMode ? "#11161D" : "#F2F4F7"
+        Flickable {
+            anchors.fill: parent
+            anchors.bottomMargin: app.safeBottomInsetV49
+            contentWidth: bareNavRowV1.width
+            flickableDirection: Flickable.HorizontalFlick
+            boundsBehavior: Flickable.StopAtBounds
+            clip: true
+            Row {
+                id: bareNavRowV1
+                height: 48
+                spacing: 4
+                leftPadding: 4
+                rightPadding: 4
+                Repeater {
+                    model: bareNavBarV1.actions
+                    delegate: Button {
+                        anchors.verticalCenter: parent.verticalCenter
+                        flat: true
+                        text: String(modelData.label || modelData.id)
+                              + (bareNavBarV1.hasChildren(modelData) && !bareNavBarV1.hasCommand(modelData) ? " ▾" : "")
+                        enabled: modelData.enabled === true && !dockCommandRouter.busy
+                        onClicked: {
+                            var kind = bareNavBarV1.tapKind(modelData)
+                            if (kind === "dispatch")
+                                dockCommandRouter.dispatch(String(modelData.id), dockContextController.generation)
+                            else if (kind === "menu")
+                                actionMenuV1.openFor(modelData)
+                        }
+                        // Una acción con comando Y submenú: mantener pulsado abre el menú.
+                        onPressAndHold: if (bareNavBarV1.hasChildren(modelData)) actionMenuV1.openFor(modelData)
+                    }
+                }
+                Button {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: bareNavBarV1.coreAvailable
+                    flat: true
+                    text: "InGe Core"
+                    enabled: !dockCommandRouter.busy
+                    onClicked: dockCommandRouter.dispatchGlobal("inge.core")
+                }
+            }
+        }
+    }
+
+    // Menú de acciones: lista estática del nivel actual; una entrada con hijos
+    // abre el siguiente nivel. Se invalida si cambia la generación publicada.
+    Popup {
+        id: actionMenuV1
+        parent: Overlay.overlay
+        modal: true
+        dim: true
+        enter: null
+        exit: null
+        padding: 8
+        property var path: []
+        property int generation: -1
+        readonly property var node: path.length > 0 ? path[path.length - 1] : null
+        readonly property var entries: node ? bareNavBarV1.visibleOf(node.children) : []
+        width: Math.min(parent ? parent.width - 32 : 320, 360)
+        x: parent ? Math.round((parent.width - width) / 2) : 0
+        y: parent ? Math.max(16, parent.height - height - bareNavBarV1.height - 8) : 0
+        function openFor(action) {
+            path = [action]
+            generation = dockContextController.generation
+            open()
+        }
+        function back() {
+            if (path.length > 1) path = path.slice(0, path.length - 1)
+            else close()
+        }
+        function activate(entry) {
+            if (!entry || entry.enabled !== true) return
+            if (generation !== dockContextController.generation) { close(); return }
+            if (bareNavBarV1.hasChildren(entry)) { path = path.concat([entry]); return }
+            var dispatchGeneration = generation
+            close()
+            dockCommandRouter.dispatch(String(entry.id), dispatchGeneration)
+        }
+        onClosed: path = []
+        Connections {
+            target: dockContextController
+            function onContextChanged() { if (actionMenuV1.visible) actionMenuV1.close() }
+        }
+        background: Rectangle {
+            color: app.darkMode ? "#171D29" : "#FFFFFF"
+            border.width: 1
+            border.color: app.darkMode ? "#3A4456" : "#D5DBE3"
+        }
+        contentItem: Column {
+            spacing: 2
+            Label {
+                width: parent.width
+                padding: 8
+                font.bold: true
+                elide: Label.ElideRight
+                text: actionMenuV1.node ? String(actionMenuV1.node.label || actionMenuV1.node.id) : ""
+            }
+            Button {
+                width: parent.width
+                visible: actionMenuV1.path.length > 1
+                flat: true
+                text: "‹ Atrás"
+                onClicked: actionMenuV1.back()
+            }
+            Repeater {
+                model: actionMenuV1.entries
+                delegate: Button {
+                    width: actionMenuV1.availableWidth
+                    flat: true
+                    text: String(modelData.label || modelData.id) + (bareNavBarV1.hasChildren(modelData) ? "  ›" : "")
+                    enabled: modelData.enabled === true
+                    onClicked: actionMenuV1.activate(modelData)
+                }
+            }
+        }
     }
 
     Item {
@@ -4457,8 +4640,6 @@ Item {
         anchors.top: parent.top
         height: visible ? 72 : 0
         visible: navigationShellV51.headerVisible
-                 && !(navigationShellV51.currentContext === "home"
-                      && app.flutterHomeActiveV60)
         enabled: visible
         z: 120
 
@@ -4817,7 +4998,6 @@ ParallelAnimation {
         app.sessionEntryTransitionActiveV501 = false
         app.sessionEntryIdentityCommittedV501 = false
         app.sessionEntryClosingV501 = false
-        app.flutterHomeHandoffV800 = false
         sessionEntryOverlayV501.opacity = 0.0
     }
 }
@@ -4851,346 +5031,63 @@ GlobalSearchOverlay {
     }
 }
 
-Component {
-    id: homePhase1Page
 
-    Pages.HomePagePhase1 {
-        anchors.fill: parent
-        flow: inGeCoreFlow
-        themeMode: app.pageThemeModeV70()
-        darkMode: app.darkMode
-        calCode: app.calCode
-        calProject: app.calProject
-        navigationInset: app.safeBottomInsetV49
-        onNavigateRequested: function(page) { app.navigateToPage(page) }
-        onMessageRequested: function(message) { app.showToast(message) }
-    }
-}
-
+// Home: navegación real existente, controles básicos.
 Component {
     id: homePage
 
-    Item {
-        id: homeRoot
-        anchors.fill: parent
-
-        function requestFlutterHomeV60() {
-            if (!flutterHomeShouldShowV60()) {
-                syncFlutterHomeVisibilityV60()
-                return
-            }
-            var accepted = false
-            try {
-                app.syncFlutterAuthStateV70(false)
-                accepted = Perms.setFlutterHomeVisible(
-                            true,
-                            app.darkMode ? "dark" : "light",
-                            inGeCoreFlow.motionAllowed ? 1.0 : 0.0,
-                            app.liquidGlass ? 0.72 : 0.0,
-                            String(inGeCoreFlow.performance.profile))
-            } catch (error) {
-                console.warn("[InGe+ Home] Flutter host no disponible:", error)
-            }
-            if (accepted)
-                flutterHomeReadyPollV60.start()
-        }
-
-        function flutterHomeShouldShowV60() {
-            return Qt.platform.os === "android" && navigationShellV51.currentContext === "home"
-                    && (app.loggedIn || app.guestMode)
-                    && (app.flutterHomeHandoffV800
-                        || (!app.sessionEntryTransitionActiveV501
-                            && !authView.visible
-                            && (app.authFlowStateV800 === "HOME"
-                                || app.authFlowStateV800 === "ACCOUNT_PICKER")))
-                    && !app.profileOverlayOpenV18
-                    && !app.accountSwitchSheetOpenV18
-                    && !app.loginRedirectOpenV18
-                    && !globalSearchOverlayV30.presented
-                    && !quickBubbleV32.presented
-        }
-
-        function syncFlutterHomeVisibilityV60() {
-            var shouldShow = flutterHomeShouldShowV60()
-            if (!app.flutterHomeActiveV60) {
-                if (shouldShow) {
-                    requestFlutterHomeV60()
-                } else {
-                    try {
-                        Perms.setFlutterHomeVisible(
-                                    false, "light", 1.0, 0.0, "balanced")
-                    } catch (error) {}
-                }
-                return
-            }
-            try {
-                Perms.setFlutterHomeVisible(
-                            shouldShow,
-                            app.darkMode ? "dark" : "light",
-                            inGeCoreFlow.motionAllowed ? 1.0 : 0.0,
-                            app.liquidGlass ? 0.72 : 0.0,
-                            String(inGeCoreFlow.performance.profile))
-            } catch (error) {}
-        }
-
-        function consumeFlutterHomeActionV60(action) {
-            if (action === "home") {
-                app.navigateToPage(0)
-            } else if (action === "profile") {
-                app.openProfileOverlayV18()
-            } else if (action === "search") {
-                app.openGlobalSearchV30("")
-            } else if (action === "notifications") {
-                // Conserva el callback actualmente vacío del Header QML.
-            } else if (action === "calicatas" || action === "newProject") {
-                app.navigateToPage(1)
-            } else if (action === "documents" || action === "templates") {
-                app.navigateToPage(3)
-            } else if (action === "earth") {
-                app.navigateToPage(2)
-            } else if (action === "renditions") {
-                app.navigateToPage(6)
-            } else if (action === "sync") {
-                app.dispatchGlobalSyncV60()
-            } else if (action === "settings") {
-                app.navigateToPage(4)
-            }
-        }
-
-        Component.onCompleted: Qt.callLater(requestFlutterHomeV60)
-        Component.onDestruction: {
-            flutterHomeReadyPollV60.stop()
-            flutterHomeActionPollV60.stop()
-            app.flutterHomeActiveV60 = false
-            try {
-                Perms.setFlutterHomeVisible(false, "light", 1.0, 0.0, "balanced")
-            } catch (error) {}
-        }
-
-        Timer {
-            id: flutterHomeReadyPollV60
-            interval: 100
-            repeat: true
-            onTriggered: {
-                var ready = false
-                try { ready = Perms.isFlutterHomeReady() } catch (error) {}
-                if (!ready)
-                    return
-                stop()
-                app.flutterHomeActiveV60 = true
-                flutterHomeActionPollV60.start()
-                homeRoot.syncFlutterHomeVisibilityV60()
-            }
-        }
-
-        Connections {
-            target: app
-            function onProfileOverlayOpenV18Changed() {
-                homeRoot.syncFlutterHomeVisibilityV60()
-            }
-            function onAccountSwitchSheetOpenV18Changed() {
-                homeRoot.syncFlutterHomeVisibilityV60()
-            }
-            function onLoginRedirectOpenV18Changed() {
-                homeRoot.syncFlutterHomeVisibilityV60()
-            }
-            function onLoggedInChanged() {
-                homeRoot.syncFlutterHomeVisibilityV60()
-            }
-            function onGuestModeChanged() {
-                homeRoot.syncFlutterHomeVisibilityV60()
-            }
-            function onSessionEntryTransitionActiveV501Changed() {
-                homeRoot.syncFlutterHomeVisibilityV60()
-            }
-            function onPageIndexChanged() {
-                homeRoot.syncFlutterHomeVisibilityV60()
-            }
-            function onAuthFlowStateV800Changed() {
-                homeRoot.syncFlutterHomeVisibilityV60()
-            }
-        }
-
-        Connections {
-            target: authView
-            function onVisibleChanged() {
-                homeRoot.syncFlutterHomeVisibilityV60()
-            }
-        }
-
-        Connections {
-            target: globalSearchOverlayV30
-            function onPresentedChanged() {
-                homeRoot.syncFlutterHomeVisibilityV60()
-            }
-        }
-
-        Connections {
-            target: quickBubbleV32
-            function onPresentedChanged() {
-                homeRoot.syncFlutterHomeVisibilityV60()
-            }
-        }
-
-        Timer {
-            id: flutterHomeActionPollV60
-            interval: 60
-            repeat: true
-            onTriggered: {
-                var action = ""
-                try { action = Perms.takeFlutterHomeAction() } catch (error) {}
-                if (action.length > 0)
-                    homeRoot.consumeFlutterHomeActionV60(action)
-            }
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            // Fondo del renderer QML de respaldo. Durante Home activo la
-            // superficie Flutter ocupa el viewport completo y proyecta sus
-            // propios controles flotantes, sin bandas nativas reservadas.
-            color: app.flutterHomeActiveV60 && app.liquidGlass
-                   ? (app.darkMode ? inGeCoreFlow.colors.ingemaDeepShade : inGeCoreFlow.colors.blue100)
-                   : inGeCoreFlow.theme.background
-            visible: true
-            z: -10
-        }
-
-        Image {
-            anchors.fill: parent
-            visible: app.liquidGlass
-                     && !app.flutterHomeActiveV60
-            source: "qrc:/ui/v2/backgrounds/bg_topographic_lines.svg"
-            fillMode: Image.PreserveAspectCrop
-            opacity: 0.34
-            smooth: true
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            visible: app.liquidGlass
-                     && !app.flutterHomeActiveV60
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: "#4D8FB2D5" }
-                GradientStop { position: 1.0; color: "#661C2D50" }
-            }
-        }
-
-        // Todo el movimiento continúa gobernado por InGeCoreFlow.
-        // Este módulo solo define estructura, contenido y navegación.
-
-
+    Rectangle {
+        color: app.darkMode ? "#0E1116" : "#FFFFFF"
         Flickable {
-            id: homeFlickable
             anchors.fill: parent
-            visible: !app.flutterHomeActiveV60
-            clip: true
-            interactive: contentHeight > height
-            flickableDirection: Flickable.VerticalFlick
-            pressDelay: inGeCoreFlow.touchPressDelay
-            flickDeceleration: inGeCoreFlow.flickDeceleration
-            maximumFlickVelocity: inGeCoreFlow.scrollVelocity(contentHeight, height)
-            boundsBehavior: inGeCoreFlow.motionAllowed
-                            ? Flickable.DragAndOvershootBounds
-                            : Flickable.StopAtBounds
-            contentWidth: width
-            contentHeight: homeCol.height + app.safeBottomInsetV49
-
+            contentHeight: bareHomeColumnV1.implicitHeight + 32
+            boundsBehavior: Flickable.StopAtBounds
             Column {
-                id: homeCol
-                width: homeFlickable.width
-                spacing: 14
-                padding: 16
-                // Conserva la posicion visual de Home; solo su fondo ocupa
-                // ahora la superficie completa por debajo del Header overlay.
-                topPadding: accountHeaderV20.height + 16
-
-                Text {
-                    id: homeTitle
-                    width: parent.width - 32
-                    text: "Herramientas de campo"
-                    opacity: 1.0
-                    scale: 1.0
-                    transformOrigin: Item.Left
-                    color: textColor()
-                    font.pixelSize: fs(22)
+                id: bareHomeColumnV1
+                x: 16
+                y: 16
+                width: parent.width - 32
+                spacing: 8
+                Label {
+                    text: "InGe+"
+                    font.pixelSize: 24
                     font.bold: true
-                    maximumLineCount: 1
-                    elide: Text.ElideRight
+                    color: app.darkMode ? "#FFFFFF" : "#111827"
                 }
-
-                ModuleCardV2 {
-                    id: homeCardCalicatas
-                    width: parent.width - 32
-                    featured: true
-                    revealProgress: 1.0
-                    moduleAvailable: true
-                    statusLabel: "Disponible"
-                    actionLabel: "Abrir Calicatas"
-                    title: "Calicatas"
-                    subtitle: "Crea, edita y administra registros geotécnicos de campo."
-                    iconName: "module.calicatas"
-                    imageSource: "qrc:/ui/v2/illustrations/illus_module_calicatas.svg"
-                    accent: inGeCoreFlow.colors.ingemaBlue
-                    onClicked: navigateToPage(1)
+                Repeater {
+                    model: [
+                        { label: "Calicatas", page: 1 },
+                        { label: "Documentos / InGeDrive", page: 3 },
+                        { label: "InGe Earth", page: 2 },
+                        { label: "Rendiciones", page: 6 },
+                        { label: "Ajustes", page: 4 }
+                    ]
+                    delegate: Button {
+                        width: bareHomeColumnV1.width
+                        text: modelData.label
+                        onClicked: app.navigateToPage(modelData.page)
+                    }
                 }
-
-                Text {
-                    width: parent.width - 32
-                    text: "Módulos en desarrollo"
-                    color: mutedColor()
-                    font.pixelSize: fs(13)
-                    font.bold: true
-                    topPadding: 2
+                Button {
+                    width: bareHomeColumnV1.width
+                    text: "Sincronizar"
+                    onClicked: app.dispatchGlobalSyncV60()
                 }
-
-                ModuleCardV2 {
-                    id: homeCardTaludes
-                    width: parent.width - 32
-                    featured: false
-                    revealProgress: 1.0
-                    moduleAvailable: false
-                    statusLabel: "Próximamente"
-                    title: "Taludes"
-                    subtitle: "Evaluación y registro técnico de taludes y laderas."
-                    iconName: "module.taludes"
-                    accent: inGeCoreFlow.colors.ingemaGreen
+                Button {
+                    width: bareHomeColumnV1.width
+                    text: "InGe+ IA"
+                    onClicked: dockCommandRouter.dispatchGlobal("inge.core")
                 }
-
-                ModuleCardV2 {
-                    id: homeCardEstratos
-                    width: parent.width - 32
-                    featured: false
-                    revealProgress: 1.0
-                    moduleAvailable: false
-                    statusLabel: "Próximamente"
-                    title: "Perfiles estratigráficos"
-                    subtitle: "Construcción y organización de perfiles del terreno."
-                    iconName: "module.stratigraphy"
-                    accent: inGeCoreFlow.colors.ingemaBlue
-                }
-
-                ModuleCardV2 {
-                    id: homeCardGeomecanica
-                    width: parent.width - 32
-                    featured: false
-                    revealProgress: 1.0
-                    moduleAvailable: false
-                    statusLabel: "Próximamente"
-                    title: "Estaciones geomecánicas"
-                    subtitle: "Registro técnico de estaciones y macizos rocosos."
-                    iconName: "module.geomechanics"
-                    accent: inGeCoreFlow.colors.ingemaGreen
-                }
-
-                Item {
-                    width: 1
-                    height: app.safeBottomInsetV49
+                Button {
+                    width: bareHomeColumnV1.width
+                    text: "Cerrar sesión"
+                    onClicked: app.performLogoutV18()
                 }
             }
         }
     }
 }
+
 
 
     Component {
@@ -5327,7 +5224,7 @@ Component {
         systemDark: app.darkMode
         motionAllowed: inGeCoreFlow.motionAllowed
         flow: inGeCoreFlow
-        bottomSafeInset: globalContextDockV1.shown ? 0 : app.safeBottomInsetV49
+        bottomSafeInset: bareNavBarV1.visible ? bareNavBarV1.height : app.safeBottomInsetV49
     }
 }
 
@@ -5348,7 +5245,9 @@ Component {
             }
             Image {
                 anchors.fill: parent
-                source: "qrc:/ui/v2/backgrounds/bg_topographic_lines.svg"
+                source: liquidGlass ? "qrc:/ui/v2/backgrounds/bg_topographic_lines.svg" : ""
+                sourceSize: Qt.size(Math.max(1, width), Math.max(1, height))
+                asynchronous: true
                 fillMode: Image.PreserveAspectCrop
                 opacity: liquidGlass ? 0.34 : 0.0
             }
@@ -5464,16 +5363,20 @@ Component {
                         SettingsActionRow {
                             width: parent.width
                             title: "Perfil visual"
-                            subtitle: flowPerformanceLevel <= 0 ? "Ahorro y máxima compatibilidad"
-                                      : (flowPerformanceLevel >= 2 ? "Alta fluidez" : "Equilibrado")
+                            subtitle: app.performanceAutomaticV90
+                                      ? "Según este dispositivo"
+                                      : (flowPerformanceLevel <= 0 ? "Ahorro y máxima compatibilidad"
+                                         : (flowPerformanceLevel >= 2 ? "Alta fluidez" : "Equilibrado"))
                             iconName: "nav.settings"
-                            trailingText: flowPerformanceLevel <= 0 ? "Ahorro"
-                                          : (flowPerformanceLevel >= 2 ? "Alto" : "Balance")
+                            trailingText: app.performanceAutomaticV90
+                                          ? "Auto · " + app.performanceLevelNameV90(flowPerformanceLevel)
+                                          : app.performanceLevelNameV90(flowPerformanceLevel)
                             onClicked: {
-                                flowPerformanceLevel = (flowPerformanceLevel + 1) % 3
-                                try { firstExperience.performanceLevel = flowPerformanceLevel } catch(e) {}
-                                showToast(flowPerformanceLevel <= 0 ? "Perfil de ahorro"
-                                          : (flowPerformanceLevel >= 2 ? "Rendimiento alto" : "Rendimiento equilibrado"))
+                                app.cyclePerformanceLevelV90()
+                                showToast(app.performanceAutomaticV90
+                                          ? "Perfil automático: " + app.performanceLevelNameV90(flowPerformanceLevel)
+                                          : (flowPerformanceLevel <= 0 ? "Perfil de ahorro"
+                                             : (flowPerformanceLevel >= 2 ? "Rendimiento alto" : "Rendimiento equilibrado")))
                             }
                         }
                     }
@@ -5662,6 +5565,9 @@ Component {
             }
             function onProfileOverlayOpenV18Changed() {
                 flutterRenditionsRootV70.syncFlutterRenditionsV70()
+            }
+            function onEffectivePerformanceLevelV90Changed() {
+                Qt.callLater(flutterRenditionsRootV70.syncFlutterRenditionsV70)
             }
         }
 

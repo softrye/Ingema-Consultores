@@ -24,9 +24,38 @@ Page {
 
 
     // === ARM HYBRID PHONE/TABLET HELPERS ===
+    // Alto sin teclado: mismo criterio que _layoutHeight de CalicataFormPage.
+    // Mientras se escribe se conserva el alto previo (abrir el IME ya no cambia
+    // __armPhone ni __armScale); rotar, split arriba/abajo o ventanas libres se
+    // aceptan. El alto retenido solo se usa con el mismo ancho.
+    property real __armLayoutWidth: 0
+    property real __armLayoutHeight: 0
+    function __armImeLikely() {
+        // Acceso indexado, como InGeCoreFlow: existen en runtime aunque la
+        // metadata estatica de qmllint no las enumere.
+        if (Qt.inputMethod["visible"] === true)
+            return true
+        var focusItem = Window.activeFocusItem
+        return !!focusItem && focusItem["cursorPosition"] !== undefined
+    }
+    function __armUpdateLayoutSize() {
+        if (Math.abs(width - __armLayoutWidth) > 0.5
+                || height > __armLayoutHeight || !__armImeLikely()) {
+            __armLayoutHeight = height
+            __armLayoutWidth = width
+        }
+    }
+    onWidthChanged: Qt.callLater(__armUpdateLayoutSize)
+    onHeightChanged: Qt.callLater(__armUpdateLayoutSize)
     readonly property real __armWidth:  width  > 0 ? width  : 420
     readonly property real __armHeight: height > 0 ? height : 820
-    readonly property real __armMinSide: Math.min(__armWidth, __armHeight)
+    readonly property real __armMinSide: {
+        var w = width > 0 ? width : 420
+        var h = height > 0 ? height : 820
+        if (Math.abs(width - __armLayoutWidth) <= 0.5 && __armLayoutHeight > h)
+            h = __armLayoutHeight
+        return Math.min(w, h)
+    }
     readonly property bool __armPhone: __armMinSide < 600
     readonly property bool __armTablet: !__armPhone
     readonly property real __armScale: __armPhone
@@ -939,9 +968,6 @@ Page {
             updatedAt: text(h.updated_at),
             version: text(h.row_version)
         }
-        infoPeek.originX = root._dockSlotCenterX(1, root.buildContextActions(
-            root.contextStage, root.contextCorrectingReview, !!formLoader.item).length,
-            Overlay.overlay ? Overlay.overlay.width : root.width)
         infoPeek.open()
     }
 
@@ -3011,13 +3037,6 @@ Page {
     }
 
     // ===== INFORMACIÓN DE LA CALICATA · peek invocado por el Dock =====
-    // Centre of a capsule slot of the Dock (GlobalContextDock geometry:
-    // sidePadding 10, slot 46, gap 8, core 49 + coreGap 16, group centred).
-    function _dockSlotCenterX(slot, count, width) {
-        var main = 20 + count * 46 + Math.max(0, count - 1) * 8
-        return (width - (main + 16 + 49)) / 2 + 10 + slot * 54 + 23
-    }
-    readonly property Item _peekBackdropSource: ApplicationWindow.contentItem ? ApplicationWindow.contentItem : root
     function _peekText(value) { return value && String(value).length ? String(value) : "—" }
     function _peekHero(name) { return IconCatalog.heroiconSvg(name, 1.5) }
     function _statusTone(status) {
@@ -3079,13 +3098,6 @@ Page {
         closePolicy: Popup.CloseOnEscape
         background: Item {}
 
-        // Motion state driven only by enter/exit. originX: Dock slot centre.
-        property real originX: width / 2
-        property real reveal: 0
-        property real panelOpacity: 0
-        property real panelScale: 0.9
-        property real panelShift: 22
-        readonly property bool motion: !root.flow || root.flow.motionAllowed !== false
         readonly property bool dark: root.darkMode
         readonly property color labelColor: dark ? Mobile.InGeCoreFlow.colors.ingemaPaperSecondary : Mobile.InGeCoreFlow.colors.ingemaInkSecondary
         readonly property color valueColor: dark ? "#F6F6F7" : Mobile.InGeCoreFlow.colors.ingemaDeep
@@ -3100,97 +3112,11 @@ Page {
         onOpened: console.info("INGE_CALICATA_INFO_PEEK_TRANSITION phase=open-end")
         onAboutToHide: console.info("INGE_CALICATA_INFO_PEEK_TRANSITION phase=close-start")
 
-        // Only opacity/scale/translation animate; blur, taps and shadow stay
-        // fixed. Leading pauses absorb the first-frame cost (backdrop grab,
-        // effect creation) so the motion is never skipped. Reduced motion: fade.
-        enter: Transition {
-            ParallelAnimation {
-                SequentialAnimation {
-                    PauseAnimation { duration: infoPeek.motion ? 40 : 0 }
-                    NumberAnimation { property: "reveal"; from: 0; to: 1; duration: infoPeek.motion ? 110 : 120; easing.type: Easing.OutCubic }
-                }
-                SequentialAnimation {
-                    PauseAnimation { duration: infoPeek.motion ? 50 : 0 }
-                    ParallelAnimation {
-                        NumberAnimation { property: "panelOpacity"; from: 0; to: 1; duration: infoPeek.motion ? 140 : 120; easing.type: Easing.OutCubic }
-                        NumberAnimation { property: "panelScale"; from: infoPeek.motion ? 0.96 : 1; to: 1; duration: infoPeek.motion ? 210 : 0; easing.type: Easing.OutQuart }
-                        NumberAnimation { property: "panelShift"; from: infoPeek.motion ? 12 : 0; to: 0; duration: infoPeek.motion ? 210 : 0; easing.type: Easing.OutQuart }
-                    }
-                }
-            }
-        }
-        exit: Transition {
-            ParallelAnimation {
-                NumberAnimation { property: "reveal"; to: 0; duration: infoPeek.motion ? 150 : 120; easing.type: Easing.OutCubic }
-                NumberAnimation { property: "panelOpacity"; to: 0; duration: infoPeek.motion ? 130 : 120; easing.type: Easing.InOutQuad }
-                NumberAnimation { property: "panelScale"; to: infoPeek.motion ? 0.978 : 1; duration: infoPeek.motion ? 150 : 0; easing.type: Easing.OutCubic }
-                NumberAnimation { property: "panelShift"; to: infoPeek.motion ? 6 : 0; duration: infoPeek.motion ? 150 : 0; easing.type: Easing.OutCubic }
-            }
-        }
-
-        // Material tokens consumed by the Dock's GlassSurface/liquidglass.frag.
-        QtObject {
-            id: peekGlassTokens
-            readonly property bool shown: infoPeek.visible
-            readonly property Item glassBackdrop: infoPeek.visible ? root._peekBackdropSource : null
-            // Static: the panel grabs its backdrop once, not per animation frame.
-            readonly property real materialPosition: 0
-            readonly property bool lowCostGlass: false
-            // Same material as the Dock's first 3D Touch menu (Dock tokens,
-            // near-zero tint); legibility comes from one light veil, not tint.
-            readonly property color glassTint: infoPeek.dark ? Qt.rgba(0.0824, 0.102, 0.1882, 0.10) : Qt.rgba(0.95, 0.97, 1.0, 0.02)
-            readonly property color fallbackGlass: infoPeek.dark ? Qt.rgba(0.30, 0.33, 0.38, 0.18) : Qt.rgba(0.97, 0.98, 1.0, 0.14)
-            readonly property real rimLight: infoPeek.dark ? 0.18 : 0.20
-            readonly property real rimShade: infoPeek.dark ? 0.04 : 0.035
-            readonly property real rimSheen: infoPeek.dark ? 0.03 : 0.015
-            readonly property real edgeContrast: infoPeek.dark ? 0.0 : 0.03
-            readonly property real glassSaturation: 1.12
-            readonly property color shadowColor: Qt.rgba(0.0824, 0.102, 0.1882, infoPeek.dark ? 0.22 : 0.10)
-        }
-
         contentItem: Item {
-            // Real blur of the live content behind the popup (form, header,
-            // Dock) plus a light dim; both follow `reveal`. ApplicationWindow's
-            // contentItem is a sibling of Overlay.overlay, so the capture never
-            // includes this popup. Created only while the peek is visible.
-            Loader {
-                anchors.fill: parent
-                active: infoPeek.visible
-                // One frozen grab at 0.5x (it is blurred anyway), blurred once
-                // with fixed parameters; released when the popup is hidden.
-                sourceComponent: Item {
-                    ShaderEffectSource {
-                        id: peekBackdropCapture
-                        anchors.fill: parent
-                        sourceItem: root._peekBackdropSource
-                        textureSize: Qt.size(Math.max(1, Math.round(width * 0.5)),
-                                             Math.max(1, Math.round(height * 0.5)))
-                        live: false
-                        hideSource: false
-                        visible: false
-                        Component.onCompleted: {
-                            scheduleUpdate()
-                            console.info("INGE_CALICATA_INFO_PEEK_TRANSITION phase=backdrop-grab snapshotSize="
-                                         + textureSize.width + "x" + textureSize.height)
-                        }
-                    }
-                    MultiEffect {
-                        anchors.fill: parent
-                        source: peekBackdropCapture
-                        visible: infoPeek.reveal > 0
-                        autoPaddingEnabled: false
-                        blurEnabled: true
-                        blurMax: 16
-                        blur: 0.26
-                        saturation: -0.04
-                        opacity: infoPeek.reveal
-                    }
-                }
-            }
             Rectangle {
                 anchors.fill: parent
                 color: infoPeek.dark ? Mobile.InGeCoreFlow.colors.ingemaDeepShade : Mobile.InGeCoreFlow.colors.ingemaDeep
-                opacity: (infoPeek.dark ? 0.22 : 0.10) * infoPeek.reveal
+                opacity: infoPeek.dark ? 0.22 : 0.10
             }
             // Tap outside the panel closes; the form and Dock stay inert.
             MouseArea {
@@ -3212,35 +3138,15 @@ Page {
                 x: Math.round((parent.width - width) / 2)
                 y: Math.round(Math.max(topLimit, Math.min(parent.height - bottomLimit - height,
                                                           (parent.height - height) / 2 + root.__dp(12))))
-                opacity: infoPeek.panelOpacity
-                transform: [
-                    Scale {
-                        origin.x: infoPeek.originX - peekPanel.x
-                        origin.y: peekPanel.height
-                        xScale: infoPeek.panelScale
-                        yScale: infoPeek.panelScale
-                    },
-                    Translate { y: infoPeek.panelShift }
-                ]
 
                 MouseArea { anchors.fill: parent }   // swallow taps on the glass
 
-                FlowCore.LiquidGlassSurface {
+                Rectangle {
                     anchors.fill: parent
-                    tokens: peekGlassTokens
-                    cornerRadius: root.__dp(30)
-                    surfaceName: "calicata-info"
-                    // Balanced preset for the peek only (Dock keeps its defaults).
-                    lens: 0.3
-                    frost: 8
-                    frostTaps: 6
-                    magnify: 0
-                    bevel: root.__dp(14)
-                    elevation: true
-                    liveCapture: false
-                    // Final (untransformed) panel rect: one stable grab while
-                    // scale/translate animate.
-                    captureRect: Qt.rect(peekPanel.x, peekPanel.y, peekPanel.width, peekPanel.height)
+                    radius: root.__dp(30)
+                    color: Mobile.InGeCoreFlow.darkMode ? "#171D29" : "#FFFFFF"
+                    border.width: 1
+                    border.color: Mobile.InGeCoreFlow.darkMode ? "#3A4456" : "#D5DBE3"
                 }
                 // Legibility veil, same values as the Dock menu, plus a
                 // near-invisible hairline edge.
@@ -3577,8 +3483,7 @@ Page {
     Popup {
         id: nameMismatchPopup
         // Fondo del peek "Información de la calicata" (captura 0.5x desenfocada + atenuación).
-        property Item glassBackdropItem: null
-        Overlay.modal: CalGlassScrim { popupItem: nameMismatchPopup }
+        Overlay.modal: CalScrim { popupItem: nameMismatchPopup }
         parent: Overlay.overlay
         modal: true
         focus: true
@@ -3593,8 +3498,7 @@ Page {
         x: Math.round((root.width - width) / 2)
         y: Math.round((root.height - height) / 2)
 
-        background: CalicataLiquidGlass {
-            backdrop: nameMismatchPopup.glassBackdropItem
+        background: CalicataSurface {
             // Hoja de vidrio real (primaria); sus controles usan el tratamiento anidado.
             dark: root.darkMode; accent: root.calGenBlue
             radius: root.__dp(20)
@@ -3642,7 +3546,7 @@ Page {
 
                     Button {
                         id: btnCancel
-                        background: CalicataLiquidGlass { dark: root.darkMode; accent: root.calGenBlue; radius: root.__dp(12); tone: "glass"; pressed: btnCancel.down; enabledLook: btnCancel.enabled }
+                        background: CalicataSurface { dark: root.darkMode; accent: root.calGenBlue; radius: root.__dp(12); tone: "glass"; pressed: btnCancel.down; enabledLook: btnCancel.enabled }
                         Layout.fillWidth: true
                         text: "Cancelar"
                         contentItem: Text {
@@ -3664,7 +3568,7 @@ Page {
 
                     Button {
                         id: btnKeep
-                        background: CalicataLiquidGlass { dark: root.darkMode; accent: root.calGenBlue; radius: root.__dp(12); tone: "glass"; pressed: btnKeep.down; enabledLook: btnKeep.enabled }
+                        background: CalicataSurface { dark: root.darkMode; accent: root.calGenBlue; radius: root.__dp(12); tone: "glass"; pressed: btnKeep.down; enabledLook: btnKeep.enabled }
                         Layout.fillWidth: true
                         text: "Mantener nombre del archivo"
                         contentItem: Text {
@@ -3698,7 +3602,7 @@ Page {
 
                     Button {
                         id: btnRename
-                        background: CalicataLiquidGlass { dark: root.darkMode; accent: root.calGenBlue; radius: root.__dp(12); tone: "tinted"; pressed: btnRename.down; enabledLook: btnRename.enabled }
+                        background: CalicataSurface { dark: root.darkMode; accent: root.calGenBlue; radius: root.__dp(12); tone: "tinted"; pressed: btnRename.down; enabledLook: btnRename.enabled }
                         Layout.fillWidth: true
                         text: "Renombrar archivo al nombre interno"
                         contentItem: Text {
@@ -4003,8 +3907,7 @@ Page {
     Popup {
         id: confirmCloseTab
         // Fondo del peek "Información de la calicata" (captura 0.5x desenfocada + atenuación).
-        property Item glassBackdropItem: null
-        Overlay.modal: CalGlassScrim { popupItem: confirmCloseTab }
+        Overlay.modal: CalScrim { popupItem: confirmCloseTab }
         parent: Overlay.overlay
         modal: true
         focus: true
@@ -4014,8 +3917,7 @@ Page {
         x: (root.width - width) / 2
         y: (root.height - height) / 2
 
-        background: CalicataLiquidGlass {
-            backdrop: confirmCloseTab.glassBackdropItem
+        background: CalicataSurface {
             // Hoja de vidrio real (primaria); sus controles usan el tratamiento anidado.
             dark: root.darkMode; accent: root.calGenBlue
             radius: root.__dp(20)
@@ -4040,7 +3942,7 @@ Page {
 
                 Button {
                     id: calGlassButton3904
-                    background: CalicataLiquidGlass { dark: root.darkMode; accent: root.calGenBlue; radius: root.__dp(12); tone: "glass"; pressed: calGlassButton3904.down; enabledLook: calGlassButton3904.enabled }
+                    background: CalicataSurface { dark: root.darkMode; accent: root.calGenBlue; radius: root.__dp(12); tone: "glass"; pressed: calGlassButton3904.down; enabledLook: calGlassButton3904.enabled }
                     Layout.fillWidth: true
                     text: "Cancelar"
                     onClicked: {
@@ -4052,7 +3954,7 @@ Page {
 
                 Button {
                     id: calGlassButton3914
-                    background: CalicataLiquidGlass { dark: root.darkMode; accent: root.calGenBlue; radius: root.__dp(12); tone: "danger"; pressed: calGlassButton3914.down; enabledLook: calGlassButton3914.enabled }
+                    background: CalicataSurface { dark: root.darkMode; accent: root.calGenBlue; radius: root.__dp(12); tone: "danger"; pressed: calGlassButton3914.down; enabledLook: calGlassButton3914.enabled }
                     Layout.fillWidth: true
                     text: "No guardar"
                     onClicked: {
@@ -4070,7 +3972,7 @@ Page {
 
                 Button {
                     id: calGlassButton3930
-                    background: CalicataLiquidGlass { dark: root.darkMode; accent: root.calGenBlue; radius: root.__dp(12); tone: "tinted"; pressed: calGlassButton3930.down; enabledLook: calGlassButton3930.enabled }
+                    background: CalicataSurface { dark: root.darkMode; accent: root.calGenBlue; radius: root.__dp(12); tone: "tinted"; pressed: calGlassButton3930.down; enabledLook: calGlassButton3930.enabled }
                     Layout.fillWidth: true
                     text: "Guardar"
                     onClicked: {
@@ -4195,8 +4097,7 @@ Page {
     Popup {
         id: overflowPopup
         // Fondo del peek "Información de la calicata" (captura 0.5x desenfocada + atenuación).
-        property Item glassBackdropItem: null
-        Overlay.modal: CalGlassScrim { popupItem: overflowPopup }
+        Overlay.modal: CalScrim { popupItem: overflowPopup }
         parent: Overlay.overlay
         modal: true
         focus: true
@@ -4210,8 +4111,7 @@ Page {
             overflowReveal.play()
         }
 
-        background: CalicataLiquidGlass {
-            backdrop: overflowPopup.glassBackdropItem
+        background: CalicataSurface {
             // Hoja de vidrio real (primaria); sus botones usan el tratamiento anidado.
             dark: root.darkMode; accent: root.calGenBlue
             radius: root.__dp(16)
@@ -4391,7 +4291,6 @@ Page {
         y: 0
         background: Rectangle {
             // Ambiente de pantalla completa que refractan los controles de vidrio.
-            objectName: "calicataGlassBackdrop"
             color: root.calBgColor()
             gradient: Gradient {
                 GradientStop { position: 0.0; color: root.darkMode ? "#182440" : Mobile.InGeCoreFlow.colors.ingemaBlueWash }
@@ -4630,8 +4529,7 @@ Page {
     Popup {
         id: sectionsPopup
         // Fondo del peek "Información de la calicata" (captura 0.5x desenfocada + atenuación).
-        property Item glassBackdropItem: null
-        Overlay.modal: CalGlassScrim { popupItem: sectionsPopup }
+        Overlay.modal: CalScrim { popupItem: sectionsPopup }
         parent: Overlay.overlay
         modal: true
         focus: true
@@ -4643,8 +4541,7 @@ Page {
         x: Math.round((parent.width - width) / 2)
         y: Math.round((parent.height - height) / 2)
 
-        background: CalicataLiquidGlass {
-            backdrop: sectionsPopup.glassBackdropItem
+        background: CalicataSurface {
             // Hoja de vidrio real (primaria); sus botones usan el tratamiento anidado.
             dark: root.darkMode; accent: root.calGenBlue
             radius: root.__dp(20)
@@ -4697,8 +4594,7 @@ Page {
     Popup {
         id: exportPopup
         // Fondo del peek "Información de la calicata" (captura 0.5x desenfocada + atenuación).
-        property Item glassBackdropItem: null
-        Overlay.modal: CalGlassScrim { popupItem: exportPopup }
+        Overlay.modal: CalScrim { popupItem: exportPopup }
         parent: Overlay.overlay
         modal: true
         focus: true
@@ -4706,8 +4602,7 @@ Page {
         padding: root.__dp(10)
         height: exportPopupContent.implicitHeight + root.__dp(20)
 
-        background: CalicataLiquidGlass {
-            backdrop: exportPopup.glassBackdropItem
+        background: CalicataSurface {
             // Hoja de vidrio real (primaria); sus botones usan el tratamiento anidado.
             dark: root.darkMode; accent: root.calGenBlue
             radius: root.__dp(20)
@@ -4764,6 +4659,7 @@ Page {
 
 
     Component.onCompleted: {
+        __armUpdateLayoutSize()
         autoSaveEnabled = calicatasSettingsM09.autoSave
         _workspaceInitialized = true
         // Paint the shell first; drafts, filesystem probing and CalicataFormPage
@@ -4801,7 +4697,6 @@ Page {
         closePolicy: Popup.CloseOnEscape
         background: Rectangle {
             // Ambiente de pantalla completa que refractan los controles de vidrio.
-            objectName: "calicataGlassBackdrop"
             color: root.calBgColor()
             gradient: Gradient {
                 GradientStop { position: 0.0; color: root.darkMode ? "#182440" : Mobile.InGeCoreFlow.colors.ingemaBlueWash }
@@ -4890,7 +4785,7 @@ Page {
                 radius: root.__dp(22)
                 color: "transparent"
                 // Hoja inferior: el mismo vidrio real de los emergentes (con su velo de lectura).
-                CalicataLiquidGlass { dark: root.darkMode; accent: root.calGenBlue; anchors.fill: parent; radius: parent.radius; level: "sheet" }
+                CalicataSurface { dark: root.darkMode; accent: root.calGenBlue; anchors.fill: parent; radius: parent.radius; level: "sheet" }
                 // Esquinas inferiores rectas (la hoja apoya en el borde de la pantalla).
                 Rectangle {
                     anchors.left: parent.left
@@ -4927,7 +4822,7 @@ Page {
                             focusPolicy: Qt.NoFocus
                             Accessible.name: "Cancelar"
                             onClicked: coordinatePicker.close()
-                            background: CalicataLiquidGlass { dark: root.darkMode; accent: root.calGenBlue; radius: width / 2; pressed: coordinateCloseButton.down }
+                            background: CalicataSurface { dark: root.darkMode; accent: root.calGenBlue; radius: width / 2; pressed: coordinateCloseButton.down }
                             contentItem: Item {
                                 Components.FlowIcon {
                                     anchors.centerIn: parent
@@ -5062,6 +4957,10 @@ Page {
             CalPopup {
                 id: distantPointConfirm
                 property real distanceKm: 0
+                // El mapa Cesium es una vista nativa sobre Qt: se oculta mientras
+                // este diálogo lo cubre y vuelve intacto al cerrarlo.
+                onOpened: if (coordinateMap.item) coordinateMap.item.mapSuspended = true
+                onClosed: if (coordinateMap.item) coordinateMap.item.mapSuspended = false
                 width: Math.min(root.width - root.__dp(48), root.__dp(380))
                 x: (root.width - width) / 2
                 baseY: (root.height - height) / 2
@@ -5287,8 +5186,7 @@ Page {
     Popup {
         id: exportProgressPopup
         // Fondo del peek "Información de la calicata" (captura 0.5x desenfocada + atenuación).
-        property Item glassBackdropItem: null
-        Overlay.modal: CalGlassScrim { popupItem: exportProgressPopup }
+        Overlay.modal: CalScrim { popupItem: exportProgressPopup }
         parent: Overlay.overlay
         modal: true
         focus: true
@@ -5298,8 +5196,7 @@ Page {
         width: Math.min(root.width - 32, 360)
         height: 240
 
-        background: CalicataLiquidGlass {
-            backdrop: exportProgressPopup.glassBackdropItem
+        background: CalicataSurface {
             // Hoja de vidrio real (primaria); sus controles usan el tratamiento anidado.
             dark: root.darkMode; accent: root.calGenBlue
             radius: root.__dp(22)
@@ -5350,8 +5247,7 @@ Page {
     Popup {
         id: exportResultPopup
         // Fondo del peek "Información de la calicata" (captura 0.5x desenfocada + atenuación).
-        property Item glassBackdropItem: null
-        Overlay.modal: CalGlassScrim { popupItem: exportResultPopup }
+        Overlay.modal: CalScrim { popupItem: exportResultPopup }
         parent: Overlay.overlay
         modal: true
         focus: true
@@ -5361,8 +5257,7 @@ Page {
         width: Math.min(root.width - 32, 390)
         height: 306
 
-        background: CalicataLiquidGlass {
-            backdrop: exportResultPopup.glassBackdropItem
+        background: CalicataSurface {
             // Hoja de vidrio real (primaria); sus controles usan el tratamiento anidado.
             dark: root.darkMode; accent: root.calGenBlue
             radius: root.__dp(22)
@@ -5423,8 +5318,7 @@ Page {
     Popup {
         id: exportErrorPopup
         // Fondo del peek "Información de la calicata" (captura 0.5x desenfocada + atenuación).
-        property Item glassBackdropItem: null
-        Overlay.modal: CalGlassScrim { popupItem: exportErrorPopup }
+        Overlay.modal: CalScrim { popupItem: exportErrorPopup }
         parent: Overlay.overlay
         modal: true
         focus: true
@@ -5434,8 +5328,7 @@ Page {
         width: Math.min(root.width - 32, 390)
         height: 260
 
-        background: CalicataLiquidGlass {
-            backdrop: exportErrorPopup.glassBackdropItem
+        background: CalicataSurface {
             // Hoja de vidrio real (primaria); sus controles usan el tratamiento anidado.
             dark: root.darkMode; accent: root.calGenBlue
             radius: root.__dp(22)
@@ -5476,7 +5369,7 @@ Page {
 
             Button {
                 id: calGlassButton5231
-                background: CalicataLiquidGlass { dark: root.darkMode; accent: root.calGenBlue; radius: root.__dp(12); tone: "glass"; pressed: calGlassButton5231.down; enabledLook: calGlassButton5231.enabled }
+                background: CalicataSurface { dark: root.darkMode; accent: root.calGenBlue; radius: root.__dp(12); tone: "glass"; pressed: calGlassButton5231.down; enabledLook: calGlassButton5231.enabled }
                 Layout.fillWidth: true
                 text: "Cerrar"
                 onClicked: exportErrorPopup.close()
@@ -5486,7 +5379,6 @@ Page {
     // ===== TAB SWITCHER (Popup) =====
     CalPopup {
         id: tabsPopup
-        glass: true
         width: Math.min(root.width - 28, root.__dp(380))
         height: Math.min((parent ? parent.height : root.height) * 0.7, switcherBody.implicitHeight + topPadding + bottomPadding)
         x: ((parent ? parent.width : root.width) - width) / 2
@@ -5558,7 +5450,7 @@ Page {
                         focusPolicy: Qt.NoFocus
                         Accessible.name: "Cerrar " + tabRow.title
                         onClicked: root.tryCloseTab(tabRow.index)
-                        background: CalicataLiquidGlass { dark: root.darkMode; accent: root.calGenBlue; radius: width / 2; pressed: tabCloseButton.down }
+                        background: CalicataSurface { dark: root.darkMode; accent: root.calGenBlue; radius: width / 2; pressed: tabCloseButton.down }
                         contentItem: Item {
                             Components.FlowIcon {
                                 anchors.centerIn: parent
@@ -5889,212 +5781,29 @@ Page {
     // captura congelada 0.5x del contenido de la ventana (hermano del Overlay, nunca
     // incluye el emergente), desenfocada una vez con parámetros fijos, y una atenuación
     // ligera. Sigue la opacidad del emergente y se libera al cerrarlo.
-    component CalGlassScrim: Item {
-        id: calScrim
-        // Fondo opaco y ya desenfocado: lo refractan los controles del emergente.
-        objectName: "calicataGlassBackdrop"
+    component CalScrim: Rectangle {
         property var popupItem: null
-        // Capa estable (no hereda la animación de opacidad de la raíz) para capturar.
-        property Item glassLayer: null
-        opacity: calScrim.popupItem ? calScrim.popupItem.opacity : 1
-        Loader {
-            anchors.fill: parent
-            active: !!calScrim.popupItem && calScrim.popupItem.visible === true
-            sourceComponent: Item {
-                id: calScrimBlurLayer
-                Rectangle { anchors.fill: parent; color: root.calBgColor() }
-                Component.onCompleted: {
-                    calScrim.glassLayer = calScrimBlurLayer
-                    if (calScrim.popupItem && calScrim.popupItem.glassBackdropItem !== undefined)
-                        calScrim.popupItem.glassBackdropItem = calScrimBlurLayer
-                }
-                Component.onDestruction: {
-                    if (calScrim.glassLayer === calScrimBlurLayer) calScrim.glassLayer = null
-                    if (calScrim.popupItem && calScrim.popupItem.glassBackdropItem === calScrimBlurLayer)
-                        calScrim.popupItem.glassBackdropItem = null
-                }
-                ShaderEffectSource {
-                    id: calScrimCapture
-                    anchors.fill: parent
-                    sourceItem: root._peekBackdropSource
-                    textureSize: Qt.size(Math.max(1, Math.round(width * 0.5)), Math.max(1, Math.round(height * 0.5)))
-                    live: false
-                    hideSource: false
-                    visible: false
-                    Component.onCompleted: scheduleUpdate()
-                }
-                MultiEffect {
-                    anchors.fill: parent
-                    source: calScrimCapture
-                    autoPaddingEnabled: false
-                    blurEnabled: true
-                    blurMax: 48
-                    blur: 0.62
-                    saturation: 0.30
-                }
-            }
-        }
-        Rectangle {
-            anchors.fill: parent
-            color: root.darkMode ? Mobile.InGeCoreFlow.colors.ingemaDeepShade : Mobile.InGeCoreFlow.colors.ingemaDeep
-            opacity: root.darkMode ? 0.20 : 0.07
-        }
+        color: root.darkMode ? Qt.rgba(0, 0, 0, 0.50) : Qt.rgba(0.0824, 0.102, 0.1882, 0.32)
     }
 
     component CalPopup: Popup {
         id: calPopup
-        // Capa ya desenfocada que refracta el vidrio del panel (la registra su modal).
-        property Item glassBackdropItem: null
         property real baseY: 0
-        property real slideY: 0
-        // Liquid Glass para todos los emergentes de Calicatas (mismo preset del peek).
-        property bool glass: true
-        readonly property int openMs: root.flow && root.flow.motionAllowed === false ? 0 : 200
-        readonly property int closeMs: root.flow && root.flow.motionAllowed === false ? 0 : 150
         parent: Overlay.overlay
         modal: true
         focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        y: baseY + slideY
+        y: baseY
         padding: root.__dp(16)
 
-        // Flat popups: plain dim. Glass popup (multiarchivo): the info peek's
-        // backdrop — one frozen 0.5x grab, fixed blur, light dim — faded with the popup.
-        Overlay.modal: Item {
-            // Fondo ya desenfocado: lo refractan los controles del emergente (su capa
-            // estable, que no hereda la animación de opacidad de este modal).
-            objectName: "calicataGlassBackdrop"
-            readonly property Item glassLayer: calPopup.glassBackdropItem
-            opacity: calPopup.opacity
-            Loader {
-                anchors.fill: parent
-                active: calPopup.glass && calPopup.visible
-                sourceComponent: Item {
-                    id: calPopupBlurLayer
-                    Rectangle { anchors.fill: parent; color: root.calBgColor() }
-                    Component.onCompleted: calPopup.glassBackdropItem = calPopupBlurLayer
-                    Component.onDestruction: if (calPopup.glassBackdropItem === calPopupBlurLayer) calPopup.glassBackdropItem = null
-                    ShaderEffectSource {
-                        id: calBackdropCapture
-                        anchors.fill: parent
-                        sourceItem: root._peekBackdropSource
-                        textureSize: Qt.size(Math.max(1, Math.round(width * 0.5)),
-                                             Math.max(1, Math.round(height * 0.5)))
-                        live: false
-                        hideSource: false
-                        visible: false
-                        Component.onCompleted: scheduleUpdate()
-                    }
-                    MultiEffect {
-                        anchors.fill: parent
-                        source: calBackdropCapture
-                        autoPaddingEnabled: false
-                        blurEnabled: true
-                        blurMax: 48
-                        blur: 0.62
-                        saturation: 0.30
-                    }
-                }
-            }
-            Rectangle {
-                anchors.fill: parent
-                color: calPopup.glass ? (infoPeek.dark ? Mobile.InGeCoreFlow.colors.ingemaDeepShade : Mobile.InGeCoreFlow.colors.ingemaDeep)
-                                      : (root.darkMode ? Qt.rgba(0, 0, 0, 0.50) : Qt.rgba(0.0824, 0.102, 0.1882, 0.32))
-                opacity: calPopup.glass ? (infoPeek.dark ? 0.22 : 0.10) : 1
-            }
+        Overlay.modal: Rectangle {
+            color: root.darkMode ? Qt.rgba(0, 0, 0, 0.50) : Qt.rgba(0.0824, 0.102, 0.1882, 0.32)
         }
-        enter: Transition {
-            ParallelAnimation {
-                NumberAnimation { target: calPopup; property: "opacity"; from: 0; to: 1; duration: calPopup.openMs; easing.type: Easing.OutCubic }
-                NumberAnimation { target: calPopup; property: "scale"; from: 0.975; to: 1; duration: calPopup.openMs; easing.type: Easing.OutCubic }
-                NumberAnimation { target: calPopup; property: "slideY"; from: root.__dp(10); to: 0; duration: calPopup.openMs; easing.type: Easing.OutCubic }
-            }
-        }
-        exit: Transition {
-            ParallelAnimation {
-                NumberAnimation { target: calPopup; property: "opacity"; to: 0; duration: calPopup.closeMs; easing.type: Easing.InCubic }
-                NumberAnimation { target: calPopup; property: "scale"; to: 0.98; duration: calPopup.closeMs; easing.type: Easing.InCubic }
-                NumberAnimation { target: calPopup; property: "slideY"; to: root.__dp(6); duration: calPopup.closeMs; easing.type: Easing.InCubic }
-            }
-        }
-
-        background: Item {
-            // Superficie primaria del emergente: lo anidado no la vuelve a capturar.
-            objectName: "calicataGlassPrimary"
-            RectangularShadow {
-                anchors.fill: parent
-                visible: !calPopup.glass
-                radius: root.__dp(20)
-                offset: Qt.vector2d(0, 4)
-                blur: 18
-                spread: -4
-                color: Qt.rgba(0.0824, 0.102, 0.1882, root.darkMode ? 0.30 : 0.12)
-            }
-            Loader {
-                anchors.fill: parent
-                active: calPopup.glass
-                sourceComponent: Component {
-                    Item {
-                        // Same material as the info peek: its tokens (shared with the
-                        // Dock menu), its surface preset and its veil. Only the
-                        // visibility/backdrop binding is this popup's.
-                        QtObject {
-                            id: calGlassTokens
-                            readonly property bool shown: calPopup.visible
-                            readonly property Item glassBackdrop: calPopup.visible
-                                ? (calPopup.glassBackdropItem ? calPopup.glassBackdropItem : root._peekBackdropSource) : null
-                            readonly property real materialPosition: 0
-                            readonly property bool lowCostGlass: peekGlassTokens.lowCostGlass
-                            readonly property color glassTint: peekGlassTokens.glassTint
-                            // Opaco: Qt premultiplica los colores de un ShaderEffect; translúcido se pintaría gris.
-                            readonly property color fallbackGlass: infoPeek.dark ? Qt.rgba(0.14, 0.16, 0.20, 1.0) : Qt.rgba(0.985, 0.99, 1.0, 1.0)
-                            readonly property real rimLight: peekGlassTokens.rimLight
-                            readonly property real rimShade: peekGlassTokens.rimShade
-                            readonly property real rimSheen: peekGlassTokens.rimSheen
-                            readonly property real edgeContrast: peekGlassTokens.edgeContrast
-                            readonly property real glassSaturation: peekGlassTokens.glassSaturation
-                            readonly property color shadowColor: peekGlassTokens.shadowColor
-                        }
-                        FlowCore.LiquidGlassSurface {
-                            anchors.fill: parent
-                            tokens: calGlassTokens
-                            cornerRadius: root.__dp(30)
-                            surfaceName: "calicata-tabs"
-                            lens: 0.3
-                            frost: 8
-                            frostTaps: 6
-                            magnify: 0
-                            bevel: root.__dp(14)
-                            elevation: true
-                            // Captura viva justificada: fondo registrado estático (imagen congelada
-                            // desenfocada); dirigida por eventos, se rehace solo al registrarse.
-                            liveCapture: true
-                            // Rect final sin transformar, recortado dentro del fondo.
-                            captureRect: {
-                                var b = calGlassTokens.glassBackdrop
-                                if (!b || !calPopup.parent) return Qt.rect(0, 0, 0, 0)
-                                var r = calPopup.parent.mapToItem(b, calPopup.x, calPopup.baseY, calPopup.width, calPopup.height)
-                                var m = 6
-                                var w = Math.min(r.width, b.width - 2 * m), h = Math.min(r.height, b.height - 2 * m)
-                                return Qt.rect(Math.max(m, Math.min(r.x, b.width - w - m)), Math.max(m, Math.min(r.y, b.height - h - m)),
-                                               Math.max(1, w), Math.max(1, h))
-                            }
-                        }
-                    }
-                }
-            }
-            Rectangle {
-                anchors.fill: parent
-                radius: root.__dp(calPopup.glass ? 30 : 20)
-                // Glass: the info peek's legibility veil and hairline, verbatim.
-                color: calPopup.glass
-                       ? (infoPeek.dark ? Qt.rgba(0.0824, 0.102, 0.1882, 0.26) : Qt.rgba(0.98, 0.99, 1.0, 0.24))
-                       : root.calSolidSurface()
-                border.width: 1
-                border.color: calPopup.glass
-                              ? (infoPeek.dark ? Qt.rgba(1, 1, 1, 0.06) : Qt.rgba(1, 1, 1, 0.30))
-                              : root.calBorderColor()
-            }
+        background: Rectangle {
+            radius: root.__dp(20)
+            color: root.calSolidSurface()
+            border.width: 1
+            border.color: root.calBorderColor()
         }
     }
 
@@ -6113,7 +5822,7 @@ Page {
         font.weight: Font.DemiBold
         scale: calBtn.down ? 0.985 : 1
         Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-        background: CalicataLiquidGlass {
+        background: CalicataSurface {
             dark: root.darkMode; accent: root.calGenBlue
             radius: root.__dp(12)
             tone: calBtn.tone === "primary" ? "primary" : calBtn.tone === "soft" ? "tinted" : "glass"
@@ -6171,7 +5880,7 @@ Page {
         Accessible.name: calRow.title
         Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
 
-        CalicataLiquidGlass {
+        CalicataSurface {
             dark: root.darkMode; accent: root.calGenBlue
             anchors.fill: parent
             radius: calRow.radius
@@ -6333,7 +6042,7 @@ Page {
             }
         }
 
-        background: CalicataLiquidGlass {
+        background: CalicataSurface {
             dark: root.darkMode
             accent: root.calAccentColor()
             radius: root.__dp(12)
@@ -6381,7 +6090,7 @@ Page {
             }
         }
 
-        background: CalicataLiquidGlass {
+        background: CalicataSurface {
             dark: root.darkMode; accent: root.calGenBlue
             radius: root.__dp(12)
             pressed: navFichaButton.down

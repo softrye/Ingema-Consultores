@@ -62,7 +62,6 @@ flutter:
   assets:
     - assets/home_final/approved_reference.png
     - assets/branding/
-    - assets/auth/ingema_auth_background.png
     - assets/auth/ingema_auth_video.mp4
     - assets/auth/ingema_auth_video_poster.jpg
 

@@ -1,4 +1,5 @@
 import QtQuick 2.15
+import QtQuick.Window
 import QtQuick.Effects
 
 Item {
@@ -60,6 +61,14 @@ Item {
             fillMode: Image.PreserveAspectCrop
             horizontalAlignment: Image.AlignHCenter
             verticalAlignment: Image.AlignVCenter
+            // Decode only what is shown: the profile preview may be the
+            // original 12-50 MP camera file, and each avatar (cache: false)
+            // decodes its own copy. With PreserveAspectCrop the reader scales
+            // to cover this box, so the crop stays sharp.
+            sourceSize.width: Math.ceil(Math.max(1, width) * Screen.devicePixelRatio
+                                        * Math.max(1, root.imageScale))
+            sourceSize.height: Math.ceil(Math.max(1, height) * Screen.devicePixelRatio
+                                         * Math.max(1, root.imageScale))
             asynchronous: true
             cache: false
             smooth: true

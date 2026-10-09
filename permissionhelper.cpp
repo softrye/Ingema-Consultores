@@ -14,6 +14,7 @@
 #include <QPermission>
 #include <QPointer>
 #include <QSaveFile>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QUuid>
 #include <QVariant>
@@ -43,6 +44,7 @@ void startActivity(const QJniObject &intent, int receiverRequestCode,
 
 namespace {
 constexpr int kContinuousIntervalMs = 1500;
+const QString kPendingCaptureGroup = QStringLiteral("photoCapture/pending");
 constexpr int kImmediateTimeoutMs = 20000;
 constexpr int kWatchdogIntervalMs = 20000;
 constexpr qint64 kMaximumFixAgeMs = 5 * 60 * 1000;
@@ -663,6 +665,7 @@ void PermissionHelper::launchCamera(int targetIdx)
 
     const QString cameraUri = m_pendingCameraUri;
     QPointer<PermissionHelper> guard(this);
+    persistPendingCapture(targetIdx);
     emit externalPhotoActivityStarted();
     QtAndroidPrivate::startActivity(
                 intent, kCameraActivityRequestCode,
@@ -787,6 +790,9 @@ void PermissionHelper::finishPhotoActivity(int targetIdx, const QString &sourceK
     m_photoRequestInFlight = false;
     emit externalPhotoActivityFinished();
     const bool fromCamera = sourceKind == QStringLiteral("camera");
+    // The process survived: the in-memory callback owns this result.
+    if (fromCamera)
+        clearPersistedPendingCapture();
 
     auto cleanupCamera = [this, fromCamera, contentUri]() {
 #ifdef Q_OS_ANDROID
@@ -849,6 +855,93 @@ void PermissionHelper::finishPhotoActivity(int targetIdx, const QString &sourceK
     Q_UNUSED(sourceKind)
     emit photoSelectionError(targetIdx, QStringLiteral("photo_import_error"),
                              QStringLiteral("No se pudo importar la imagen."));
+#endif
+}
+
+void PermissionHelper::setPhotoCaptureContext(const QString &contextKey)
+{
+    m_photoCaptureContext = contextKey;
+}
+
+void PermissionHelper::persistPendingCapture(int targetIdx)
+{
+    if (m_photoCaptureContext.isEmpty() || m_pendingCameraFilePath.isEmpty())
+        return;
+    QSettings settings;
+    settings.beginGroup(kPendingCaptureGroup);
+    settings.setValue(QStringLiteral("context"), m_photoCaptureContext);
+    settings.setValue(QStringLiteral("slot"), targetIdx);
+    settings.setValue(QStringLiteral("file"), m_pendingCameraFilePath);
+    settings.setValue(QStringLiteral("uri"), m_pendingCameraUri);
+    settings.setValue(QStringLiteral("createdMs"), QDateTime::currentMSecsSinceEpoch());
+    settings.endGroup();
+    settings.sync();
+}
+
+void PermissionHelper::clearPersistedPendingCapture()
+{
+    QSettings settings;
+    settings.remove(kPendingCaptureGroup);
+    settings.sync();
+}
+
+int PermissionHelper::pendingCaptureSlot(const QString &contextKey) const
+{
+    if (contextKey.isEmpty() || m_photoRequestInFlight)
+        return -1;
+    QSettings settings;
+    settings.beginGroup(kPendingCaptureGroup);
+    if (settings.value(QStringLiteral("context")).toString() != contextKey)
+        return -1;
+    bool ok = false;
+    const int slot = settings.value(QStringLiteral("slot")).toInt(&ok);
+    return ok && validPhotoTarget(slot) ? slot : -1;
+}
+
+bool PermissionHelper::recoverPendingCapture(const QString &contextKey)
+{
+    const int slot = pendingCaptureSlot(contextKey);
+    if (slot < 0)
+        return false;
+    QSettings settings;
+    settings.beginGroup(kPendingCaptureGroup);
+    const QString filePath = settings.value(QStringLiteral("file")).toString();
+    const QString uri = settings.value(QStringLiteral("uri")).toString();
+    settings.endGroup();
+    // One attempt per capture: a failed recovery must not loop on every open.
+    clearPersistedPendingCapture();
+
+    const QFileInfo captured(filePath);
+    qInfo().noquote() << "INGE_CAMERA_CAPTURE_RECOVERY slot=" << slot
+                      << " bytes=" << (captured.exists() ? captured.size() : -1);
+    if (filePath.isEmpty() || !captured.exists() || captured.size() <= 0) {
+        // Only the empty placeholder created before launching the camera.
+        if (captured.exists())
+            QFile::remove(filePath);
+        emit photoSelectionError(slot, QStringLiteral("camera_recovery_empty"),
+                                 QStringLiteral("La cámara no llegó a guardar la fotografía antes de que Android cerrara InGe+."));
+        return false;
+    }
+    QImageReader probe(filePath);
+    if (!probe.canRead()) {
+        emit photoSelectionError(slot, QStringLiteral("camera_recovery_invalid"),
+                                 QStringLiteral("La fotografía recuperada no es una imagen válida."));
+        return false;
+    }
+#ifdef Q_OS_ANDROID
+    QString error;
+    const QUrl localUrl = copyContentUriToPrivateCache(uri, &error);
+    if (!localUrl.isValid()) {
+        // The capture stays on disk: never delete a photo we could not import.
+        emit photoSelectionError(slot, QStringLiteral("photo_import_error"), error);
+        return false;
+    }
+    QFile::remove(filePath);
+    emit photoSelected(slot, localUrl, QStringLiteral("camera"));
+    return true;
+#else
+    Q_UNUSED(uri)
+    return false;
 #endif
 }
 

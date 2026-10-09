@@ -11,8 +11,6 @@
     <file alias="qml/Mobile/flowcore/FlowProgressRing.qml">qml/Mobile/flowcore/FlowProgressRing.qml</file>
     <file alias="qml/Mobile/flowcore/FlowFocusRing.qml">qml/Mobile/flowcore/FlowFocusRing.qml</file>
     <file alias="qml/Mobile/flowcore/FlowGlassSurface.qml">qml/Mobile/flowcore/FlowGlassSurface.qml</file>
-    <file alias="qml/Mobile/flowcore/LiquidGlassSurface.qml">qml/Mobile/flowcore/LiquidGlassSurface.qml</file>
-    <file alias="qml/Mobile/flowcore/GlobalContextDock.qml">qml/Mobile/flowcore/GlobalContextDock.qml</file>
     <file alias="qml/Mobile/flowcore/ContextPublisher.qml">qml/Mobile/flowcore/ContextPublisher.qml</file>
     <file alias="qml/Mobile/flowcore/FlowDeepPressArea.qml">qml/Mobile/flowcore/FlowDeepPressArea.qml</file>
     <file alias="qml/Mobile/flowcore/FlowQuickBubble.qml">qml/Mobile/flowcore/FlowQuickBubble.qml</file>
@@ -159,7 +157,7 @@
     <file alias="qml/Mobile/pages/CalicatasEditorPage.qml">qml/Mobile/pages/CalicatasEditorPage.qml</file>
     <file alias="qml/Mobile/pages/CalicataFormPage.qml">qml/Mobile/pages/CalicataFormPage.qml</file>
     <file alias="qml/Mobile/pages/CalicataReview.qml">qml/Mobile/pages/CalicataReview.qml</file>
-    <file alias="qml/Mobile/pages/CalicataLiquidGlass.qml">qml/Mobile/pages/CalicataLiquidGlass.qml</file>
+    <file alias="qml/Mobile/pages/CalicataSurface.qml">qml/Mobile/pages/CalicataSurface.qml</file>
     <file alias="qml/Mobile/pages/CalicataProfile.qml">qml/Mobile/pages/CalicataProfile.qml</file>
     <file alias="qml/Mobile/pages/CalicataPointPicker.qml">qml/Mobile/pages/CalicataPointPicker.qml</file>
     <file alias="qml/Mobile/pages/CalicataPhotoEditor.qml">qml/Mobile/pages/CalicataPhotoEditor.qml</file>

@@ -26,11 +26,14 @@ const photoEditor = read('qml/Mobile/pages/CalicataPhotoEditor.qml');
   const apply = between(picker, 'function applyGpsFix()', 'function gpsDiagnostic');
   assert.ok(apply.includes('if (!awaitingGps || !gpsFixIsFresh())'), 'un fix solo se acepta tras solicitud explícita');
   assert.ok(!apply.includes('var live'), 'sin seguimiento continuo del punto');
-  assert.ok(apply.includes('requestGpsEnabled(false)') && apply.includes('_startedTracking'), 'one-shot: apaga el tracking que encendió');
+  const stop = between(picker, 'function _stopGpsSearch()', 'function applyGpsFix()');
+  assert.ok(apply.includes('_stopGpsSearch()') && stop.includes('requestGpsEnabled(false)') && stop.includes('_startedTracking'),
+            'one-shot: apaga el tracking que encendió');
   const center = between(picker, 'function centerGps()', 'Timer {');
   assert.ok(center.includes('requestGpsEnabled(true)') && center.includes('requestFreshFix()'), 'la captura GPS se solicita explícitamente');
-  assert.ok(picker.includes('"Actualizar ubicación GPS"'));
-  assert.ok(!/TapHandler\s*\{/.test(picker), 'sin selección cartográfica duplicada dentro de Calicatas');
+  assert.ok(picker.includes('"Mi ubicación"') && picker.includes('onTapped: root.centerGps()'), 'GPS explícito');
+  assert.ok(picker.includes('GraphicsCore.openEarthPicker(') && !/\bMap\s*\{|MapLibre|QtLocation/.test(picker),
+            'sin selección cartográfica duplicada dentro de Calicatas');
   const loaded = between(editor, 'onLoaded: {\n                    var map = item', 'Label {');
   assert.ok(loaded.includes('map.selectCoordinate(') && loaded.includes('"Punto de la ficha"') && !loaded.includes('centerGps'),
             'el host conserva el punto técnico de la ficha como candidato');
@@ -93,8 +96,9 @@ const photoEditor = read('qml/Mobile/pages/CalicataPhotoEditor.qml');
   const titleKeys = between(exporter, 'QString exportProjectName(const QVariantMap &header', '\n}\n');
   assert.ok(titleKeys.includes('QStringLiteral("projectName")') && titleKeys.includes('"project_full_name"'),
             'Excel = projects.name (nombre antiguo solo sin proyecto)');
-  assert.ok(!form.includes('headerKey: "project_short_name"') && !form.includes('label: "Nombre corto del proyecto"'),
-            'sin nombre corto duplicado por ficha');
+  assert.ok(form.includes('headerKey: "project_short_name"') && form.includes('headerKey: "project_full_name"')
+            && form.includes('readonly property var sheetTypes: ["FICHA DE CALICATA", "FICHA DE CANTERA"]'),
+            'nombre largo, nombre corto y tipo de ficha (2 opciones) separados');
   pass('Foto: altitud = cota de la ficha con origen, proyecto = projects.name, fecha de ficha + hora manual/fijada');
 }
 

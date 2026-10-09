@@ -69,9 +69,11 @@ test('B · Z manual 718: abrir/explorar/cancelar el mapa no la toca', () => {
     // Cancelar = cerrar (cero persistencia).
     const sheet = block(editor, 'text: "Cancelar"\n                            onClicked: coordinatePicker.close()', '}');
     assert.ok(sheet.includes('coordinatePicker.close()'));
-    // El selector ya no mantiene un motor cartográfico propio: conserva
-    // el punto técnico y la captura GPS, mientras la cartografía vive en InGe Earth.
-    assert.ok(!/TapHandler\s*\{/.test(picker), 'sin selección cartográfica duplicada dentro de Calicatas');
+    // Un solo motor cartográfico: el selector usa el WebView Cesium de InGe
+    // Earth (modo selector); Calicatas no instancia un mapa propio.
+    assert.ok(picker.includes('GraphicsCore.openEarthPicker(') && !/\bMap\s*\{|MapLibre|QtLocation/.test(picker),
+              'sin selección cartográfica duplicada dentro de Calicatas');
+    assert.ok(picker.includes('function onEarthPickerPointSelected(latitude, longitude)'), 'el toque llega desde Cesium');
     assert.ok(picker.includes('function centerOn(lat, lon)'), 'el host puede restaurar el punto de la ficha');
     // Abrir el selector no pide GPS.
     const opened = block(picker, 'Component.onCompleted: {', 'Component.onDestruction');
@@ -160,7 +162,10 @@ test('Ubicación: ningún Timer QML del flujo usa intervalo negativo', () => {
     }
 });
 test('Punto distante: solo al confirmar, con fix real reciente, diálogo Calicatas Cancelar/Confirmar', () => {
-    assert.ok(!/TapHandler\s*\{/.test(picker), 'Calicatas ya no selecciona coordenadas por toque');
+    // El toque de selección solo llega desde el mapa Cesium (no hay superficie QML que lo simule).
+    assert.ok(picker.includes('selectCoordinate(lat, lon, NaN, NaN, mapSourceLabel, true)')
+              && picker.includes('readonly property string mapSourceLabel: "Punto fijado en mapa"'),
+              'toque en el mapa = candidato sin persistir');
     assert.ok(!/standardButtons|Dialog \{/.test(picker), 'sin diálogo Qt plano');
     assert.ok(/function distanceToRecentFix\(lat, lon\)/.test(picker));
     const confirm = block(editor, 'id: distantPointConfirm', 'Connections {');

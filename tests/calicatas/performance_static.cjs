@@ -88,12 +88,10 @@ check("stage change: no synchronous save inside the tap; deferred after the 220 
     assert.ok(/id: deferredFlush[\s\S]{0,260}interval: 260/.test(form));
 });
 
-check("stage reveal animates one viewport texture, not the stage tree", () => {
-    assert.ok(/id: stageMotionSnapshot[\s\S]{0,700}sourceItem: active \? vFlick : null[\s\S]{0,80}hideSource: active/.test(form));
-    const reveal = form.slice(form.indexOf("id: stageRevealAnimation"), form.indexOf("id: finalPageCol"));
-    assert.ok(reveal.includes("target: stageMotionSnapshot") && reveal.includes("target: stageMotionTranslate"));
-    assert.ok(!reveal.includes("target: finalPageCol") && !reveal.includes("target: stageSlideTranslate"));
-    // Las alturas que dependen del ancho no se animan mientras la etapa entra.
+check("stage change is immediate: no snapshot texture or reveal animation", () => {
+    for (const t of ["stageMotionSnapshot", "stageRevealAnimation", "stageMotionTranslate"]) assert.ok(!form.includes(t), t);
+    assert.ok(form.includes("readonly property bool _stageSettling: stageSettleAnimation.running"));
+    // Las alturas que dependen del ancho no se animan mientras la etapa se asienta (swipe).
     assert.strictEqual((form.match(/enabled: !root\._stageSettling; NumberAnimation/g) || []).length, 3);
 });
 
@@ -103,19 +101,19 @@ check("Ubicación map: created once (async), not recreated on every stage entry"
     assert.ok(/onStageIndexChanged: \{\s*\n\s*if \(stageIndex === 1\) _locationMapWarm = true/.test(form));
 });
 
-check("popup controls capture the stable blurred layer (not the animating scrim root)", () => {
-    const glass = read("qml/Mobile/pages/CalicataLiquidGlass.qml");
-    assert.ok(glass.includes('found = k.glassLayer ? k.glassLayer : k'));
-    assert.ok(form.includes("glassScrim.glassLayer = scrimBlurLayer") && editor.includes("calScrim.glassLayer = calScrimBlurLayer"));
-    assert.ok(editor.includes("readonly property Item glassLayer: calPopup.glassBackdropItem"));
+check("popups: flat dim + solid surface, no capture plumbing", () => {
+    assert.ok(/component GenScrim: Rectangle \{\n\s*property var popupItem: null\n\s*color: Qt\.rgba/.test(form));
+    assert.ok(/component CalScrim: Rectangle \{\n\s*property var popupItem: null\n\s*color: /.test(editor));
+    for (const t of ["glassLayer", "glassBackdropItem", "ShaderEffectSource", "MultiEffect"]) {
+        assert.ok(!form.includes(t), "form " + t);
+        assert.ok(!editor.includes(t), "editor " + t);
+    }
 });
 
 // ---------------------------------------------------------------- P0: Lab / Fotos / Revisión
-check("lab detail window: blurred registered backdrop, full-width sections, no stacked glass", () => {
-    assert.ok(/id: stratumSheet\s*\n\s*parent: Overlay\.overlay[\s\S]{0,120}property Item glassBackdropItem: null/.test(form));
-    const bd = form.slice(form.indexOf("id: labDetailBackdrop"), form.indexOf("id: labDetailScrim"));
-    assert.ok(bd.includes("active: stratumSheet.visible && stratumSheet.floating") && bd.includes("sourceItem: vFlick")
-              && bd.includes("live: false") && bd.includes("stratumSheet.glassBackdropItem = labBlurLayer"));
+check("lab detail window: plain dim scrim, full-width sections", () => {
+    assert.ok(!form.includes("labDetailBackdrop") && !form.includes("labBlurLayer"));
+    assert.ok(/id: labDetailScrim[\s\S]{0,200}color: "#000000"/.test(form));
     for (const id of ["mobileExcavationSection", "mobileSamplesSection"])
         assert.ok(new RegExp("id: " + id + "\\s*\\n\\s*Layout\\.fillWidth: true\\s*\\n\\s*glassPanel: !stratumSheet\\.floating").test(form), id);
 });

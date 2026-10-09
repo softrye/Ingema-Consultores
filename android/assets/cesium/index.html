@@ -563,7 +563,7 @@
           movingGoogleSse, movingFoveatedDelay, 'USER_INPUT');
       };
       const scheduleQualityRecovery = (settlingTrigger) => {
-        if (!photorealisticTileset || userInteracting)
+        if (!photorealisticTileset || !photorealisticTileset.show || userInteracting)
           return;
         const generation = qualityGeneration;
         clearQualityTimers();
@@ -610,6 +610,9 @@
       });
       viewer.camera.moveEnd.addEventListener(() => {
         if (window.InGeEarthPageVisible === false)
+          return;
+        if (lastQualityState === 'REFINED'
+            && performance.now() - lastUserInputAt >= REFINED_INPUT_QUIET_MS)
           return;
         scheduleQualityRecovery('CAMERA_QUIET');
       });
@@ -1201,5 +1204,7 @@
   <script src="ui/inge-earth-ui.js"></script>
   <script src="ui/inge-earth-projects.js"></script>
   <script src="ui/inge-earth-map-details.js"></script>
+  <script src="ui/inge-earth-picker.js"></script>
+  <script src="ui/inge-map-loading.js"></script>
 </body>
 </html>

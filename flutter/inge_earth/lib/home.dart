@@ -1014,7 +1014,7 @@ class _InGeAuthScreenState extends State<InGeAuthScreen> {
         name: 'auth',
         // Fondo animado (video INGEMA) con póster inmediato y tinte Deep/Navy.
         background: AuthVideoBackground(
-          animate: widget.tokens.motionScale > 0 && !widget.tokens.lowPerformance,
+          animate: !MediaQuery.disableAnimationsOf(context),
         ),
         child: SafeArea(
             child: LayoutBuilder(

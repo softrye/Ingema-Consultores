@@ -51,7 +51,7 @@ check("QXlsx shares encoded image media across repeated sheet anchors", () => {
 check("dedicated Dock review is disabled while field interpretation keeps the global AI", () => {
     assert.ok(!review.includes("review.aiRequested()") && !review.includes('Accessible.name: "Analizar con InGe AI"'));
     assert.ok(review.includes("review.aiText") && review.includes("review.aiFindings"));
-    assert.ok(read("qml/Mobile/flowcore/GlobalContextDock.qml").includes('root.router.dispatchGlobal("inge.core")'), "Dock AI capability preserved");
+    assert.ok(read("qml/Mobile/Main.qml").includes('dockCommandRouter.dispatchGlobal("inge.core")'), "global AI capability preserved in the action bar");
     assert.ok(!form.includes("function onGlobalCapabilityRequested(capabilityId)"), "ficha cannot consume the dedicated assistant action");
     assert.ok(form.includes("CoreRemote.interpretCalicata(state)"), "field interpretation uses the existing global AI");
     const host = read("main_mobile.cpp");

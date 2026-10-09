@@ -513,6 +513,7 @@
     dockBackdropWanted = false;
   };
   const requestDockBackdrop = (delaysMs) => {
+    if (document.body.classList.contains('bare-ui')) return;
     cancelDockBackdrop();
     dockBackdropTimers = delaysMs.map((delay) => setTimeout(() => {
       if (!earthContextVisible || dockBackdropMoving) return;

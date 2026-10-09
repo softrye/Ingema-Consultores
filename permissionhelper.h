@@ -86,6 +86,13 @@ public:
     Q_INVOKABLE void capturePhoto(int targetIdx);
     Q_INVOKABLE void pickPhoto(int targetIdx);
     Q_INVOKABLE void releaseImportedPhoto(const QUrl &localUrl);
+    // Android puede matar el proceso mientras la camara externa esta delante
+    // (habitual en equipos de 2-4 GB). La captura pendiente se guarda en
+    // QSettings con la ficha que la pidio; al reabrir esa ficha se recupera
+    // por el mismo camino (photoSelected) y no se pierde la foto.
+    Q_INVOKABLE void setPhotoCaptureContext(const QString &contextKey);
+    Q_INVOKABLE int pendingCaptureSlot(const QString &contextKey) const;
+    Q_INVOKABLE bool recoverPendingCapture(const QString &contextKey);
 
     bool nativeLocationSupported() const;
     bool nativePermissionGranted() const { return hasLocationPermission(); }
@@ -130,6 +137,8 @@ private:
     void launchGallery(int targetIdx);
     void finishPhotoActivity(int targetIdx, const QString &sourceKind,
                              int resultCode, const QString &contentUri);
+    void persistPendingCapture(int targetIdx);
+    void clearPersistedPendingCapture();
 
     QGeoPositionInfoSource *m_positionSource = nullptr;
     QTimer m_watchdogTimer;
@@ -153,4 +162,5 @@ private:
     bool m_photoRequestInFlight = false;
     QString m_pendingCameraUri;
     QString m_pendingCameraFilePath;
+    QString m_photoCaptureContext;
 };

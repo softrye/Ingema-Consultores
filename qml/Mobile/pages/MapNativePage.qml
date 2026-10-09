@@ -49,37 +49,10 @@ Page {
         anchors.fill: parent
         visible: root.pageActive && root.earthHostWasOpened
 
+        // Mismo tono que la pantalla de carga única del host Android.
         Rectangle {
             anchors.fill: parent
-            color: "#07111C"
-        }
-
-        Column {
-            anchors.centerIn: parent
-            spacing: 10
-
-            // Mismo anillo que el HTML (FluentUI FluProgressRing, MIT).
-            FlowCore.FlowProgressRing {
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: 48; height: 48
-                strokeWidth: 3
-                running: root.pageActive && root.earthHostWasOpened
-                color: "#CFE3F5"
-                backgroundColor: "#1FFFFFFF"
-            }
-            Label {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "Preparando InGe Earth"
-                color: "#F4F8FC"
-                font.pixelSize: 17
-                font.weight: Font.DemiBold
-            }
-            Label {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "Preparando interfaz…"
-                color: "#8FA3B8"
-                font.pixelSize: 13
-            }
+            color: "#EEF3F8"
         }
     }
 
@@ -119,13 +92,23 @@ Page {
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
         }
+        // Estado real: Earth no pudo abrirse (sin host Android o fallo del WebView).
         Label {
             width: parent.width
-            text: "Próximamente"
+            visible: root.pageActive
+            text: root.graphicsCore.earthAvailable
+                  ? "No se pudo abrir InGe Earth."
+                  : "InGe Earth requiere el host Android (Cesium sobre WebView)."
             color: "#B9C7D6"
             font.pixelSize: 14
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
+        }
+        Button {
+            anchors.horizontalCenter: parent.horizontalCenter
+            visible: root.pageActive && root.graphicsCore.earthAvailable
+            text: "Reintentar"
+            onClicked: root.syncGraphicsLifecycle()
         }
     }
 

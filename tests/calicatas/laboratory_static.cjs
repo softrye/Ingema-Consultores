@@ -149,7 +149,7 @@ check("migraciones Android-only fuera del flujo de migraciones", () => {
 });
 // Final pass: header, Dock context, single handlers, origin mapping.
 const editor = fs.readFileSync(path.join(root, "qml/Mobile/pages/CalicatasEditorPage.qml"), "utf8").replace(/\r\n/g, "\n");
-const dock = fs.readFileSync(path.join(root, "qml/Mobile/flowcore/GlobalContextDock.qml"), "utf8");
+const mainQml = fs.readFileSync(path.join(root, "qml/Mobile/Main.qml"), "utf8").replace(/\r\n/g, "\n");
 check("H1-H6: Laboratorio uses the shared GenStageHeader (blue dot + icon tile)", () => {
     // P0-C: una sola cabecera para todas las etapas (Revisión ya no usa la legacy).
     assert.strictEqual((form.match(/GenStageHeader \{/g) || []).length, 2);   // ficha + vista previa del swipe
@@ -169,10 +169,8 @@ check("D1-D14: Dock publishes a real Laboratorio context with long-press childre
     assert.ok(/if \(strata === 0\)[\s\S]{0,300}calicatas\.lab\.profile/.test(action), "0 strata: no dead Nueva muestra");
     assert.ok(!/confirmLab/.test(action), "no classification change from the Dock");
     assert.ok(editor.includes('root.formValue(form, "runLabCommand")'));
-    // Shared Dock mechanics (not reimplemented): hold -> haptic -> LiquidGlassSurface menu.
-    assert.ok(/onPressAndHold[\s\S]{0,200}root\.openMenu\(slot\.actionId, slot\)/.test(dock));
-    assert.ok(/function openMenu[\s\S]{0,600}haptic\("medium"\)/.test(dock));
-    assert.ok(/LiquidGlassSurface/.test(dock.slice(dock.indexOf("id: menuPanel") - 2000)));
+    // Submenús (Laboratorio/Fotos) llegan a la barra de acciones por el árbol publicado.
+    assert.ok(mainQml.includes("function hasChildren(action)") && mainQml.includes("actionMenuV1.openFor(modelData)"));
 });
 check("single handlers: Nueva muestra / filter shared by screen and Dock", () => {
     assert.strictEqual((form.match(/onClicked: root\.labNewSample\(\)/g) || []).length, 1);
@@ -270,10 +268,9 @@ check("state does not depend on profileMode", () => {
     assert.ok(!/labDetailOpen:[^\n]*profileMode/.test(form));
     assert.ok(!/floating: [^\n]*profileMode/.test(sheet));
 });
-check("A9/A10: tabs animate (indicator + content)", () => {
-    assert.ok(/id: labTabBar[\s\S]{0,1500}Behavior on x \{ NumberAnimation/.test(form));
-    assert.ok(form.includes("id: labTabSwitch") && body("setLabTab").includes("labTabSwitch.restart()"));
-    assert.ok(form.includes("opacity: root.labSheetActive ? root.labTabFade : 1"));
+check("A9/A10: tabs switch immediately (same commands)", () => {
+    assert.ok(/function setLabTab\(key\) \{\n\s*if \(\["lab", "context", "history"\]\.indexOf\(key\) < 0 \|\| key === root\.labTab\) return\n\s*root\.labTab = key/.test(form));
+    assert.ok(!form.includes("labTabSwitch") && !form.includes("labTabFade"));
     assert.ok(body("runLabCommand").includes("root.setLabTab("));
 });
 check("A11: sin gradación avanzada D10/D30/D60 (Web no la registra)", () => {
