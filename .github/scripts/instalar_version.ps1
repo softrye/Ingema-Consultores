@@ -1,4 +1,4 @@
-# InGe+ DELTA installer. Run from extracted ZIP; no Git installation required.
+# InGe+ VERSION installer. Run from extracted ZIP; no Git installation required.
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$ProjectPath,[switch]$CheckOnly)
 Set-StrictMode -Version Latest
@@ -45,7 +45,7 @@ foreach($f in @($data.changes)){
     $plan+= [pscustomobject]@{Rel=$native;Target=$target;Source=$source;Op=$f.operation;Done=$done;Exists=$exists}
 }
 if($errors.Count -gt 0){
-    Write-Warning 'DELTA NOT APPLIED: local changes would be overwritten or ZIP is incomplete.'
+    Write-Warning 'VERSION NOT APPLIED: local changes would be overwritten or ZIP is incomplete.'
     $errors | ForEach-Object {Write-Warning $_}
     exit 2
 }
@@ -53,7 +53,7 @@ $todo=@($plan | Where-Object {!$_.Done})
 Write-Host "Preflight OK: $($plan.Count) entries, $($todo.Count) pending."
 if($CheckOnly){Write-Host 'Check-only: nothing changed.';exit 0}
 if($todo.Count -eq 0){Write-Host 'Already applied.';exit 0}
-$backup=Join-Path (Split-Path $root -Parent) ('_InGePlus_DELTA_backup_'+$data.head_commit.Substring(0,12)+'_'+(Get-Date -Format 'yyyyMMdd_HHmmss'))
+$backup=Join-Path (Split-Path $root -Parent) ('_InGePlus_VERSION_backup_'+$data.head_commit.Substring(0,12)+'_'+(Get-Date -Format 'yyyyMMdd_HHmmss'))
 New-Item -ItemType Directory -Path $backup -Force | Out-Null
 foreach($f in $todo){
     if($f.Exists){
@@ -69,4 +69,4 @@ foreach($f in $todo){
         Copy-Item -LiteralPath $f.Source -Destination $f.Target -Force
     }
 }
-Write-Host "DELTA applied ($($todo.Count) files). Backup: $backup"
+Write-Host "VERSION applied ($($todo.Count) files). Backup: $backup"

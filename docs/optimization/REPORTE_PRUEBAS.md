@@ -1,4 +1,4 @@
-# REPORTE DE PRUEBAS — DELTA optimización InGe+
+# REPORTE DE PRUEBAS — VERSIÓN optimización InGe+
 
 ## Verificaciones de esta continuación
 

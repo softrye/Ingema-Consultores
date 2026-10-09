@@ -1,4 +1,4 @@
-# CHANGELOG COMPLETO — Optimización Android InGe+
+# CHANGELOG COMPLETO — InGe+ Android v1.1.9-beta.1
 
 Incluye los siete arreglos iniciales y fases A, B, C y D. Rama: `claude/awesome-davinci-egn3wo`.
 
@@ -16,7 +16,7 @@ No hay mediciones definitivas de FPS, RAM o tiempo de inicio en Android; cifras 
 
 ### `730aa97542` — chore(releases): add SHA-256 safe incremental updater
 
-Archivos: `.github/scripts/apply_delta.ps1`.
+Archivos: `.github/scripts/instalar_version.ps1`.
 
 ### `d486b29cc2` — chore(releases): package only changed paths with deletion manifest
 
@@ -528,7 +528,7 @@ Archivos: `qml/Mobile/flowcore/FlowGlassSurface.qml`.
 ### `2055694be1` — merge: integrar origin/main (herramientas de release delta) en la rama de optimizacion
 
 Trae .github/workflows/release-delta.yml y .github/scripts/ para que la
-punta de esta rama pueda empaquetarse con el mismo flujo de Release DELTA.
+punta de esta rama pueda empaquetarse con el mismo flujo de Release VERSIÓN.
 Sin conflictos: main solo cambio archivos de .github.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

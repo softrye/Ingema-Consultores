@@ -23,7 +23,7 @@ Además se identificaron 16 archivos equivalentes a la base y 7 archivos nuevos/
 ## Protocolo seguro
 
 1. Respaldar el proyecto local completo. Su directorio `.git` está incompleto.
-2. Extraer DELTA a una carpeta temporal; ejecutar `apply_delta.ps1 -CheckOnly`.
+2. Extraer VERSIÓN a una carpeta temporal; ejecutar `instalar_version.ps1 -CheckOnly`.
 3. Si reporta CONFLICT, no usar el instalador y no forzar sobrescrituras.
 4. Realizar merge manual por archivo comparando base, Claude Cloud y el proyecto local. Preservar el visor Cesium, capturas satelitales, modo selector, testificación y nombre corto/largo.
 5. Validar después con Qt Creator arm64-v8a, Galaxy A12, GPS, fotos, Excel, sincronización y estados de revisión documental.

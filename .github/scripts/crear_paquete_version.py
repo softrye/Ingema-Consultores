@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create an InGe+ DELTA ZIP with changed files, deletion records and preimage SHA256."""
+"""Create a versioned InGe+ update ZIP with changed files, deletion records and preimage SHA256."""
 import argparse
 import hashlib
 import json
@@ -49,7 +49,11 @@ def main():
     p.add_argument("--base", required=True)
     p.add_argument("--head", required=True)
     p.add_argument("--output", required=True)
+    p.add_argument("--version", required=True)
     args = p.parse_args()
+    import re
+    if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+-(?:beta|build)\.[0-9]+", args.version):
+        raise ValueError("Invalid version tag: " + args.version)
     base = git("rev-parse", "--verify", args.base + "^{commit}").decode().strip()
     head = git("rev-parse", "--verify", args.head + "^{commit}").decode().strip()
     current = git("rev-parse", "HEAD").decode().strip()
@@ -84,25 +88,26 @@ def main():
                         "before_sha256": before, "after_sha256": sha256_file(f), "size": f.stat().st_size})
 
     target = Path(args.output)
-    script = Path(".github/scripts/apply_delta.ps1")
+    script = Path(".github/scripts/instalar_version.ps1")
     manifest = {"format_version": 1, "project": "InGe+ Android", "base_commit": base, "head_commit": head,
-                "created_utc": datetime.now(timezone.utc).isoformat(), "changes": changes}
+                "created_utc": datetime.now(timezone.utc).isoformat(), "version": args.version, "changes": changes}
     howto = (
-        "InGe+ DELTA ZIP (not the complete GitHub repository)\n"
-        f"BASE={base}\nHEAD={head}\n\n"
+        "InGe+ VERSION ZIP (not the complete GitHub repository)\n"
+        f"VERSION={args.version}\nBASE={base}\nHEAD={head}\n\n"
         "1. Extract ZIP to a temporary directory.\n"
         "2. First check (no changes):\n"
-        "   powershell -ExecutionPolicy Bypass -File .\\apply_delta.ps1 -ProjectPath 'C:\\Users\\PC-02\\Documents\\InGePlus\\AppCalicatasDemo' -CheckOnly\n"
+        "   powershell -ExecutionPolicy Bypass -File .\\instalar_version.ps1 -ProjectPath 'C:\\Users\\PC-02\\Documents\\InGePlus\\AppCalicatasDemo' -CheckOnly\n"
         "3. Only if preflight passes, apply:\n"
-        "   powershell -ExecutionPolicy Bypass -File .\\apply_delta.ps1 -ProjectPath 'C:\\Users\\PC-02\\Documents\\InGePlus\\AppCalicatasDemo'\n"
+        "   powershell -ExecutionPolicy Bypass -File .\\instalar_version.ps1 -ProjectPath 'C:\\Users\\PC-02\\Documents\\InGePlus\\AppCalicatasDemo'\n"
         "Divergent local edits block the update. A backup is made beside the project.\n"
         "Deleted files are recorded in manifest.json and removed only after preflight.\n"
-        "Download this DELTA asset, not GitHub's automatic Source code (zip).\n"
+        "Download this versioned update ZIP, not GitHub's automatic Source code (zip).\n"
     )
     with ZipFile(target, "w", compression=ZIP_DEFLATED, compresslevel=6) as archive:
         archive.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
-        archive.write(script, "apply_delta.ps1")
+        archive.write(script, "instalar_version.ps1")
         archive.writestr("INSTRUCCIONES.txt", howto)
+        archive.writestr("VERSION.txt", args.version + "\n")
         # Additional optimization reports at ZIP root for immediate review.
         # Other release pipelines may not have them; keep tool generic.
         for report_name in ("CHANGELOG_COMPLETO.md", "REPORTE_PRUEBAS.md",
@@ -117,10 +122,10 @@ def main():
     replacements = sum(c["operation"] == "replace" for c in changes)
     deletions = sum(c["operation"] == "delete" for c in changes)
     target.with_suffix(".md").write_text(
-        f"**InGe+ DELTA**: download the asset {target.name}, NOT Source code (zip).\n\n"
+        f"**InGe+ version**: download {target.name}, NOT Source code (zip).\n\n"
         f"Base: {base}\n\nHead: {head}\n\n"
         f"Files: {additions} added, {replacements} modified, {deletions} deleted.\n\n"
-        "Extract and run apply_delta.ps1 with -CheckOnly before applying; divergent local files are never overwritten.\n",
+        "Extract and run instalar_version.ps1 with -CheckOnly before applying; divergent local files are never overwritten.\n",
         encoding="utf-8")
     print(f"Created {target}: {target.stat().st_size} bytes, {len(changes)} changed paths")
 
