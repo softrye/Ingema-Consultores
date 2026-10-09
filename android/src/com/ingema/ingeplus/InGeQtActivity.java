@@ -2236,6 +2236,7 @@ public final class InGeQtActivity extends QtActivity
     private void finishEarthLocationSearch() {
         locationHandler.removeCallbacks(locationPoll);
         if (bestLocationFix.isEmpty()) {
+            InGeNativeLocation.stop();
             emitLocationStatus("error", "No se obtuvo un fix de ubicación en 8 s");
             return;
         }
@@ -2260,8 +2261,11 @@ public final class InGeQtActivity extends QtActivity
 
     private void pollEarthLocationRefinement() {
         final long nowElapsed = SystemClock.elapsedRealtime();
-        if (nowElapsed > locationRefineUntilMs)
+        if (nowElapsed > locationRefineUntilMs) {
+            // Nothing is emitted after refinement: release GPS/fused/network.
+            InGeNativeLocation.stop();
             return;
+        }
         if (InGeNativeLocation.hasFix()) {
             final long timestamp = InGeNativeLocation.timestampMs();
             final double accuracy = InGeNativeLocation.accuracy();
