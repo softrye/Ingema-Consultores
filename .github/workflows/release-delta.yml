@@ -1,0 +1,85 @@
+name: InGePlus DELTA releases
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      base_sha:
+        description: 'Commit SHA de la version base (opcional)'
+        required: false
+        type: string
+      head_sha:
+        description: 'Commit SHA de destino (opcional)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: inge-delta-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  create-delta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout only nearby history (no LFS binaries)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          lfs: false
+          persist-credentials: false
+
+      - name: Determine the exact base and target commits
+        id: refs
+        shell: bash
+        env:
+          EVENT_BEFORE: ${{ github.event.before }}
+          EVENT_HEAD: ${{ github.sha }}
+          INPUT_BASE: ${{ inputs.base_sha }}
+          INPUT_HEAD: ${{ inputs.head_sha }}
+        run: |
+          set -euo pipefail
+          head="${INPUT_HEAD:-$EVENT_HEAD}"
+          base="${INPUT_BASE:-$EVENT_BEFORE}"
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            base="$(git rev-parse "$head^" 2>/dev/null || true)"
+          fi
+          [[ -n "$base" ]] || { echo 'Missing base SHA'; exit 1; }
+          git cat-file -e "$head^{commit}" || git fetch --no-tags origin "$head" --depth=1
+          git cat-file -e "$base^{commit}" || git fetch --no-tags origin "$base" --depth=1
+          echo "head=$(git rev-parse "$head^{commit}")" >> "$GITHUB_OUTPUT"
+          echo "base=$(git rev-parse "$base^{commit}")" >> "$GITHUB_OUTPUT"
+          short="$(git rev-parse --short=12 "$head")"
+          echo "tag=delta-$short-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "file=InGePlus_DELTA_${short}.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Package changed files, manifest, safe Windows installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --detach '${{ steps.refs.outputs.head }}'
+          python3 .github/scripts/make_delta_release.py \
+            --base '${{ steps.refs.outputs.base }}' \
+            --head '${{ steps.refs.outputs.head }}' \
+            --output '${{ steps.refs.outputs.file }}'
+
+      - name: Publish incremental ZIP to GitHub Releases Assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.refs.outputs.tag }}
+          HEAD_SHA: ${{ steps.refs.outputs.head }}
+          DELTA_FILE: ${{ steps.refs.outputs.file }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" "$DELTA_FILE" \
+            --target "$HEAD_SHA" \
+            --title "InGe+ DELTA · ${HEAD_SHA:0:12}" \
+            --notes-file "${DELTA_FILE%.zip}.md" \
+            --latest=false
