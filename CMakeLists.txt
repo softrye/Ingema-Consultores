@@ -31,13 +31,29 @@ if(ANDROID)
 
     # Qt 6.9 solo reconoce Debug o Release aqui: con RelWithDebInfo o
     # MinSizeRel no pasa --release a androiddeployqt y el APK sale
-    # debuggable, con Flutter en JIT aunque el C++ este optimizado.
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    # debuggable, con Flutter en JIT aunque el C++ este optimizado. Afecta
+    # al target apk/aab de CMake; el paso "Build Android APK" de Qt Creator
+    # decide por su cuenta (Profile/RelWithDebInfo sigue siendo debug alli).
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" _INGE_BUILD_TYPE_UPPER)
+    if(_INGE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
         set(_INGE_ANDROID_DEPLOYMENT_TYPE "Debug")
         message(NOTICE "InGe+ Android Debug: APK debuggable, C++ sin optimizar "
             "y Flutter en JIT. No usar este build para medir rendimiento.")
     else()
         set(_INGE_ANDROID_DEPLOYMENT_TYPE "Release")
+        # Release ya generaba un APK release; RelWithDebInfo/MinSizeRel lo
+        # hacen desde este cambio y antes salian firmados con la clave debug.
+        if(NOT QT_ANDROID_SIGN_APK AND NOT _INGE_BUILD_TYPE_UPPER STREQUAL "RELEASE")
+            message(WARNING "InGe+ Android ${CMAKE_BUILD_TYPE}: el APK del target "
+                "apk de CMake sale release SIN firmar y adb install lo rechaza. "
+                "Activar QT_ANDROID_SIGN_APK con QT_ANDROID_KEYSTORE_* en el "
+                "entorno o firmar desde Qt Creator (configuracion Release).")
+        endif()
+        if(_INGE_BUILD_TYPE_UPPER STREQUAL "RELWITHDEBINFO")
+            message(NOTICE "InGe+ Android RelWithDebInfo: en Qt Creator la "
+                "configuracion Profile instala un APK debug (Flutter en JIT). "
+                "Para medir rendimiento usar Release.")
+        endif()
     endif()
     set(QT_ANDROID_DEPLOYMENT_TYPE "${_INGE_ANDROID_DEPLOYMENT_TYPE}" CACHE STRING
         "Tipo de despliegue Android" FORCE)
