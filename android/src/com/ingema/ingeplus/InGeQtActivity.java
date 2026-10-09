@@ -35,6 +35,7 @@ import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 import android.webkit.ConsoleMessage;
 import android.webkit.JavascriptInterface;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -182,6 +183,7 @@ public final class InGeQtActivity extends QtActivity
     private String pendingEarthFocusJson = "";
     private volatile boolean earthBackTransitionInProgress;
     private volatile boolean earthHomeNavigationRequested;
+    private long earthRendererLostAtMs;
     private boolean activityResumed;
     private Configuration lastConfiguration;
     private float preferredRefreshRateHz;
@@ -1405,6 +1407,15 @@ public final class InGeQtActivity extends QtActivity
                 android.util.Log.i("InGeEarthDirect",
                         "INGE_EARTH_DIRECT_PAGE_LOADED url=" + url);
             }
+
+            @Override
+            public boolean onRenderProcessGone(WebView view,
+                                               RenderProcessGoneDetail detail) {
+                // Unhandled, Android 8+ kills the whole app with the renderer.
+                recoverEarthRendererGone(view,
+                        detail != null && detail.didCrash());
+                return true;
+            }
         });
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
@@ -1550,6 +1561,52 @@ public final class InGeQtActivity extends QtActivity
         if (parent instanceof ViewGroup)
             ((ViewGroup) parent).removeView(webView);
         try { webView.destroy(); } catch (Throwable ignored) {}
+    }
+
+    // Android (or the OEM) kills a hidden Cesium renderer to reclaim memory; a
+    // dead WebView is unusable. Hidden Earth is released and recreated by the
+    // next open. Visible Earth is recreated once; a second loss within 30 s
+    // returns Home through the normal Back bridge instead of looping.
+    private void recoverEarthRendererGone(WebView view, boolean crashed) {
+        final boolean current = view == earthWebView;
+        final boolean wasVisible = current && earthRequested
+                && !earthBackTransitionInProgress
+                && view.getVisibility() == View.VISIBLE;
+        final long nowElapsed = SystemClock.elapsedRealtime();
+        final boolean repeated = earthRendererLostAtMs > 0L
+                && nowElapsed - earthRendererLostAtMs < 30_000L;
+        earthRendererLostAtMs = nowElapsed;
+        android.util.Log.e("InGeEarthDirect",
+                "INGE_EARTH_RENDERER_GONE crashed=" + crashed
+                        + " current=" + current + " visible=" + wasVisible
+                        + " repeated=" + repeated);
+        if (!current) {
+            final ViewParent parent = view.getParent();
+            if (parent instanceof ViewGroup)
+                ((ViewGroup) parent).removeView(view);
+            try { view.destroy(); } catch (Throwable ignored) {}
+            return;
+        }
+        stopEarthLocationSearch();
+        destroyDirectEarthWebView();
+        if (!wasVisible)
+            return;
+        if (repeated) {
+            earthBackTransitionInProgress = true;
+            earthHomeNavigationRequested = false;
+            boolean bridgeAccepted = false;
+            try {
+                bridgeAccepted = nativeRequestEarthBackToHome();
+            } catch (Throwable error) {
+                android.util.Log.e("InGeNavigation",
+                        "INGE_EARTH_HOME_BRIDGE_FAILED", error);
+            }
+            if (bridgeAccepted)
+                return;
+            earthBackTransitionInProgress = false;
+            earthHomeNavigationRequested = false;
+        }
+        applyDirectEarthVisibility(true);
     }
 
     private final class EarthTelemetryBridge {

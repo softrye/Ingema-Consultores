@@ -66,6 +66,21 @@ final class InGeAssistantWebHost {
                         v.loadData("<p>Faltan los recursos de InGe+ IA. Genera el proyecto web antes de empaquetar Android.</p>", "text/html", "UTF-8");
                     }
                 }
+                // Without this override Android kills the whole app when the
+                // renderer dies (OOM kill or crash). The dead WebView is unusable:
+                // close the assistant through the normal path and keep InGe+ alive.
+                @Override public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail detail) {
+                    android.util.Log.e("InGeAssistant", "INGE_ASSISTANT_RENDERER_GONE crashed="
+                        + (detail != null && detail.didCrash()));
+                    if (v == view) {
+                        closeFromUser();
+                    } else {
+                        android.view.ViewParent parent = v.getParent();
+                        if (parent instanceof android.view.ViewGroup) ((android.view.ViewGroup) parent).removeView(v);
+                        v.destroy();
+                    }
+                    return true;
+                }
             });
             view.setWebChromeClient(new WebChromeClient() {
                 @Override public void onPermissionRequest(PermissionRequest request) {
