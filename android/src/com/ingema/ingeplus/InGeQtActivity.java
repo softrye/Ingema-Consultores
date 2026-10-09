@@ -98,6 +98,11 @@ public final class InGeQtActivity extends QtActivity
     private static final int BIOMETRIC_AUTH_REQUEST = 8107;
     private static final int RENDITION_ATTACHMENT_REQUEST = 8108;
     private static final long LOCATION_TIMEBOX_MS = 8_000L;
+    // A GNSS cold start without assistance needs 18-30 s of continuous
+    // tracking. While the best fix is coarse the chip keeps tracking up to
+    // this bound from the start of the search, then it is always released.
+    private static final long LOCATION_SESSION_MAX_MS = 90_000L;
+    private static final double LOCATION_PRECISE_M = 20.0;
 
     private static WeakReference<InGeQtActivity> current = new WeakReference<>(null);
     private static String pendingHomeAction = "";
@@ -953,10 +958,12 @@ public final class InGeQtActivity extends QtActivity
     // (adaptive/LTPO, the user's smooth-display setting) keeps deciding; when it
     // is lower (LOW tier on a 90/120 Hz panel) the window is capped to it. The
     // rate read at onCreate is not used: it pinned flagships idling at 60 Hz.
+    // preferredRefreshRate (not a mode id): the system maps it to a mode of the
+    // default resolution of whichever display hosts the window, so folding or
+    // moving to another display keeps the cap without recomputing ids.
     private void configureAdaptiveRefreshRate() {
         try {
             float requestHz = 0.0f;
-            int requestModeId = 0;
             if (performanceRuntime != null) {
                 final float[] supported =
                         performanceRuntime.capabilities().supportedRefreshRates;
@@ -964,21 +971,17 @@ public final class InGeQtActivity extends QtActivity
                         ? 0.0f : supported[supported.length - 1];
                 final float budgetHz =
                         performanceRuntime.budget().sustainableRefreshHz;
-                if (panelMaxHz > 0.0f && budgetHz + 0.5f < panelMaxHz) {
+                if (panelMaxHz > 0.0f && budgetHz + 0.5f < panelMaxHz)
                     requestHz = budgetHz;
-                    requestModeId = findDisplayModeId(budgetHz);
-                }
             }
             preferredRefreshRateHz = requestHz;
             final android.view.WindowManager.LayoutParams params =
                     getWindow().getAttributes();
-            params.preferredDisplayModeId = requestModeId;
-            params.preferredRefreshRate = requestModeId == 0 ? requestHz : 0.0f;
+            params.preferredRefreshRate = requestHz;
             getWindow().setAttributes(params);
 
             android.util.Log.i("InGePerformance",
                     "INGE_REFRESH_REQUEST_HZ=" + requestHz
-                            + " modeId=" + requestModeId
                             + (requestHz > 0.0f ? "" : " owner=system"));
 
             getWindow().getDecorView().post(
@@ -988,22 +991,6 @@ public final class InGeQtActivity extends QtActivity
             android.util.Log.w("InGePerformance",
                     "INGE_REFRESH_REQUEST_FAILED", error);
         }
-    }
-
-    // Same resolution as the active mode: a refresh cap must never switch the
-    // panel resolution. 0 means "no mode", and the caller falls back to rate.
-    private int findDisplayModeId(float refreshHz) {
-        final android.view.Display display = getWindowManager().getDefaultDisplay();
-        if (display == null)
-            return 0;
-        final android.view.Display.Mode active = display.getMode();
-        for (android.view.Display.Mode mode : display.getSupportedModes()) {
-            if (mode.getPhysicalWidth() == active.getPhysicalWidth()
-                    && mode.getPhysicalHeight() == active.getPhysicalHeight()
-                    && Math.abs(mode.getRefreshRate() - refreshHz) <= 0.5f)
-                return mode.getModeId();
-        }
-        return 0;
     }
 
     private void applyPreferredFrameRateToSurfaces(View view) {
@@ -1350,10 +1337,13 @@ public final class InGeQtActivity extends QtActivity
         if (earthWebView != null)
             return;
 
-        earthAssetLoader = new WebViewAssetLoader.Builder()
+        // Each WebView keeps its own loader: requests already queued by a
+        // WebView whose renderer died may still arrive after the field is reset.
+        final WebViewAssetLoader assetLoader = new WebViewAssetLoader.Builder()
                 .addPathHandler("/assets/",
                         new WebViewAssetLoader.AssetsPathHandler(this))
                 .build();
+        earthAssetLoader = assetLoader;
 
         final WebView webView = new WebView(this) {
             private boolean dockGesture;
@@ -1395,7 +1385,7 @@ public final class InGeQtActivity extends QtActivity
             @Override
             public WebResourceResponse shouldInterceptRequest(
                     WebView view, WebResourceRequest request) {
-                return earthAssetLoader.shouldInterceptRequest(request.getUrl());
+                return assetLoader.shouldInterceptRequest(request.getUrl());
             }
 
             @Override
@@ -1564,22 +1554,33 @@ public final class InGeQtActivity extends QtActivity
     }
 
     // Android (or the OEM) kills a hidden Cesium renderer to reclaim memory; a
-    // dead WebView is unusable. Hidden Earth is released and recreated by the
-    // next open. Visible Earth is recreated once; a second loss within 30 s
-    // returns Home through the normal Back bridge instead of looping.
+    // dead WebView is unusable. Hidden or backgrounded Earth is released and
+    // recreated by the next open or by onResume (earthRequested stays true).
+    // Visible foreground Earth is recreated once; a second visible loss within
+    // 30 s returns Home through the normal Back bridge instead of looping.
     private void recoverEarthRendererGone(WebView view, boolean crashed) {
         final boolean current = view == earthWebView;
-        final boolean wasVisible = current && earthRequested
+        final boolean wasVisible = current && activityResumed && earthRequested
                 && !earthBackTransitionInProgress
                 && view.getVisibility() == View.VISIBLE;
         final long nowElapsed = SystemClock.elapsedRealtime();
-        final boolean repeated = earthRendererLostAtMs > 0L
+        final boolean repeated = wasVisible && earthRendererLostAtMs > 0L
                 && nowElapsed - earthRendererLostAtMs < 30_000L;
-        earthRendererLostAtMs = nowElapsed;
+        if (wasVisible)
+            earthRendererLostAtMs = nowElapsed;
         android.util.Log.e("InGeEarthDirect",
                 "INGE_EARTH_RENDERER_GONE crashed=" + crashed
                         + " current=" + current + " visible=" + wasVisible
+                        + " foreground=" + activityResumed
                         + " repeated=" + repeated);
+        final JSONObject context = new JSONObject();
+        try {
+            context.put("current", current);
+            context.put("visible", wasVisible);
+            context.put("foreground", activityResumed);
+            context.put("repeated", repeated);
+        } catch (org.json.JSONException ignored) {}
+        reportWebViewRendererGone("EARTH", crashed, context);
         if (!current) {
             final ViewParent parent = view.getParent();
             if (parent instanceof ViewGroup)
@@ -1607,6 +1608,14 @@ public final class InGeQtActivity extends QtActivity
             earthHomeNavigationRequested = false;
         }
         applyDirectEarthVisibility(true);
+    }
+
+    // Renderer loss is recovered silently for the user, never for diagnostics
+    // (AGENTS.md rule 2). didCrash=true is a real renderer/GPU crash.
+    static void reportWebViewRendererGone(String surface, boolean crashed,
+                                          JSONObject context) {
+        emitBetaDiagnostic("ERROR", crashed ? "ERROR" : "WARNING",
+                surface + "_RENDERER_GONE", null, null, context);
     }
 
     private final class EarthTelemetryBridge {
@@ -2236,8 +2245,11 @@ public final class InGeQtActivity extends QtActivity
     private void finishEarthLocationSearch() {
         locationHandler.removeCallbacks(locationPoll);
         if (bestLocationFix.isEmpty()) {
-            InGeNativeLocation.stop();
             emitLocationStatus("error", "No se obtuvo un fix de ubicación en 8 s");
+            // Keep tracking so a late cold-start fix still arrives; the
+            // refinement poll releases GPS at the session bound.
+            locationRefineUntilMs = locationSearchStartedMs + LOCATION_SESSION_MAX_MS;
+            locationHandler.postDelayed(locationRefinePoll, 1_000L);
             return;
         }
         final Map<String, Object> result = new HashMap<>(bestLocationFix);
@@ -2262,9 +2274,16 @@ public final class InGeQtActivity extends QtActivity
     private void pollEarthLocationRefinement() {
         final long nowElapsed = SystemClock.elapsedRealtime();
         if (nowElapsed > locationRefineUntilMs) {
-            // Nothing is emitted after refinement: release GPS/fused/network.
-            InGeNativeLocation.stop();
-            return;
+            final long sessionEnd = locationSearchStartedMs + LOCATION_SESSION_MAX_MS;
+            if (locationBestScore > LOCATION_PRECISE_M && nowElapsed < sessionEnd) {
+                // Coarse (network) fix: let GNSS converge instead of restarting
+                // it from zero on the next search.
+                locationRefineUntilMs = sessionEnd;
+            } else {
+                // Nothing is emitted after refinement: release GPS/fused/network.
+                InGeNativeLocation.stop();
+                return;
+            }
         }
         if (InGeNativeLocation.hasFix()) {
             final long timestamp = InGeNativeLocation.timestampMs();
@@ -2292,6 +2311,9 @@ public final class InGeQtActivity extends QtActivity
                 bestLocationFix.clear();
                 bestLocationFix.putAll(refined);
                 emitLocationFix(refined);
+                if (accuracy <= LOCATION_PRECISE_M)
+                    locationRefineUntilMs = Math.min(locationRefineUntilMs,
+                            nowElapsed + 15_000L);
             }
         }
         locationHandler.postDelayed(locationRefinePoll, 1_000L);

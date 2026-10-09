@@ -70,8 +70,12 @@ final class InGeAssistantWebHost {
                 // renderer dies (OOM kill or crash). The dead WebView is unusable:
                 // close the assistant through the normal path and keep InGe+ alive.
                 @Override public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail detail) {
-                    android.util.Log.e("InGeAssistant", "INGE_ASSISTANT_RENDERER_GONE crashed="
-                        + (detail != null && detail.didCrash()));
+                    final boolean crashed = detail != null && detail.didCrash();
+                    android.util.Log.e("InGeAssistant", "INGE_ASSISTANT_RENDERER_GONE crashed=" + crashed);
+                    JSONObject context = new JSONObject();
+                    try { context.put("active", active); context.put("current", v == view); }
+                    catch (org.json.JSONException ignored) {}
+                    InGeQtActivity.reportWebViewRendererGone("ASSISTANT", crashed, context);
                     if (v == view) {
                         closeFromUser();
                     } else {

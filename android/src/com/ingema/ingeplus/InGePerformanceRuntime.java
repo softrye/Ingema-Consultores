@@ -308,8 +308,13 @@ public final class InGePerformanceRuntime {
         final float refreshCeiling = tier == DeviceTier.ULTRA_LOW
                 || tier == DeviceTier.LOW ? 60.0f
                 : (tier == DeviceTier.MEDIUM ? 90.0f : maxRefresh);
-        final float sustainable = chooseRefresh(c.supportedRefreshRates,
+        float sustainable = chooseRefresh(c.supportedRefreshRates,
                 Math.min(maxRefresh, refreshCeiling), c.currentRefreshHz);
+        // MEDIUM targets up to 90 Hz. Common 60/120 Hz panels expose no mode in
+        // between: do not drop a mid-range device to 60 Hz, let the system pick.
+        if (tier == DeviceTier.MEDIUM && sustainable <= 60.5f
+                && maxRefresh > 60.5f)
+            sustainable = maxRefresh;
         // A 3.x GiB device may report eight cores and a 256 MB heap, but it
         // still cannot sustain two embedded renderers at full resolution.
         final int cacheMb = Math.max(24, Math.min(128, c.memoryClassMb / 3));
