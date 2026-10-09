@@ -24,8 +24,24 @@ Page {
 
 
     // === ARM HYBRID PHONE/TABLET HELPERS ===
+    // Alto sin teclado: el IME (adjustResize) solo encoge el alto. Mismo
+    // criterio que _layoutHeight de CalicataFormPage; abrir el teclado ya no
+    // cambia __armPhone ni __armScale. Un cambio de ancho lo reinicia.
+    property real __armLayoutWidth: 0
+    property real __armLayoutHeight: 0
+    function __armUpdateLayoutSize() {
+        if (Math.abs(width - __armLayoutWidth) > 0.5) {
+            __armLayoutWidth = width
+            __armLayoutHeight = height
+        } else if (height > __armLayoutHeight) {
+            __armLayoutHeight = height
+        }
+    }
+    onWidthChanged: Qt.callLater(__armUpdateLayoutSize)
+    onHeightChanged: Qt.callLater(__armUpdateLayoutSize)
     readonly property real __armWidth:  width  > 0 ? width  : 420
-    readonly property real __armHeight: height > 0 ? height : 820
+    readonly property real __armHeight: __armLayoutHeight > 0 ? __armLayoutHeight
+                                                              : (height > 0 ? height : 820)
     readonly property real __armMinSide: Math.min(__armWidth, __armHeight)
     readonly property bool __armPhone: __armMinSide < 600
     readonly property bool __armTablet: !__armPhone
@@ -4764,6 +4780,7 @@ Page {
 
 
     Component.onCompleted: {
+        __armUpdateLayoutSize()
         autoSaveEnabled = calicatasSettingsM09.autoSave
         _workspaceInitialized = true
         // Paint the shell first; drafts, filesystem probing and CalicataFormPage

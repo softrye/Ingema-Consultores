@@ -690,11 +690,31 @@ Item {
     // =========================================================
     // Modo híbrido táctil: phone / tablet / desktop-kit
     // =========================================================
-    readonly property bool isPhone: root.width > 0 && Math.min(root.width, root.height) < 600
-    readonly property bool isTablet: root.width > 0 && Math.min(root.width, root.height) >= 600
+    // El teclado (adjustResize) solo encoge el alto; nunca el ancho. El alto
+    // de referencia es el maximo visto con el ancho actual: abrir el IME ya no
+    // cambia phone/tablet ni uiScale (re-maquetaba toda la ficha con el campo
+    // enfocado en tablets, plegables y landscape). Rotar o cambiar de ventana
+    // cambia el ancho y lo reinicia; callLater espera a que ancho y alto se
+    // asienten en la misma pasada.
+    property real _layoutWidth: 0
+    property real _layoutHeight: 0
+    function _updateLayoutSize() {
+        if (Math.abs(root.width - root._layoutWidth) > 0.5) {
+            root._layoutWidth = root.width
+            root._layoutHeight = root.height
+        } else if (root.height > root._layoutHeight) {
+            root._layoutHeight = root.height
+        }
+    }
+    onWidthChanged: Qt.callLater(root._updateLayoutSize)
+    onHeightChanged: Qt.callLater(root._updateLayoutSize)
+    readonly property real _layoutMinSide: Math.min(root.width,
+        root._layoutHeight > 0 ? root._layoutHeight : root.height)
+    readonly property bool isPhone: root.width > 0 && root._layoutMinSide < 600
+    readonly property bool isTablet: root.width > 0 && root._layoutMinSide >= 600
     readonly property real uiScale: root.isPhone
-                                    ? Math.max(0.82, Math.min(1.00, Math.min(root.width, root.height) / 430.0))
-                                    : Math.max(0.92, Math.min(1.12, Math.min(root.width, root.height) / 760.0))
+                                    ? Math.max(0.82, Math.min(1.00, root._layoutMinSide / 430.0))
+                                    : Math.max(0.92, Math.min(1.12, root._layoutMinSide / 760.0))
     function dp(v) { return Math.round(v * root.uiScale) }
     // Texto: misma regla que __sp() de CalicatasEditorPage. En telefonos de
     // 360 dp uiScale baja a 0.84 y dp(11) quedaba en 9 px; ninguna fuente de
@@ -6291,6 +6311,7 @@ Item {
     }
 
     Component.onCompleted: {
+        root._updateLayoutSize()
         _ready = true
         ensureDocsRoots()
 
