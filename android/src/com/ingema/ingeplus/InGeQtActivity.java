@@ -830,6 +830,10 @@ public final class InGeQtActivity extends QtActivity
                 buildBetaDeviceSnapshot());
         emitBetaDiagnostic("LIFECYCLE", "INFO", "ON_CREATE", null, null, null);
         configureAdaptiveRefreshRate();
+        // Battery saver / thermal changes move the live tier: re-apply the
+        // refresh cap and publish the state to Qt (GraphicsCore).
+        performanceRuntime.setBudgetListener(this::configureAdaptiveRefreshRate);
+        performanceRuntime.startMonitoring();
         android.util.Log.i("InGePerformance",
                 "INGE_FLUTTER_PREWARM=SELECTIVE_IDLE");
         flutterLifecycle.handleLifecycleEvent(Lifecycle.Event.ON_CREATE);
@@ -909,6 +913,8 @@ public final class InGeQtActivity extends QtActivity
                         + " instance=" + System.identityHashCode(this));
         lastConfiguration = new Configuration(newConfig);
         super.onConfigurationChanged(newConfig);
+        if (performanceRuntime != null)
+            performanceRuntime.updateFontScale(newConfig.fontScale);
     }
 
     private void resumeFlutterViewAfterActivityResume(final FlutterView view) {
@@ -2781,6 +2787,8 @@ public final class InGeQtActivity extends QtActivity
         }
         emitBetaDiagnostic("LIFECYCLE", "INFO", "ON_DESTROY", null, null, null);
         performanceHandler.removeCallbacks(betaPerformanceSample);
+        if (performanceRuntime != null)
+            performanceRuntime.setBudgetListener(null);
         android.util.Log.i("InGeLifecycle",
                 "INGE_ACTIVITY_ON_DESTROY instance=" + System.identityHashCode(this));
         // Relaunch (config/core settings) vs real exit: process-global Qt state is

@@ -4552,7 +4552,8 @@ Item {
             readonly property bool shown: !!popupGlass.popupItem && popupGlass.popupItem.visible === true
             readonly property Item glassBackdrop: shown ? popupGlass.activeBackdrop : null
             readonly property real materialPosition: 0
-            readonly property bool lowCostGlass: false
+            readonly property bool lowCostGlass: Mobile.InGeCoreFlow.lowMemoryMode
+                || Mobile.InGeCoreFlow.performance.profile >= Mobile.InGeCoreFlow.performance.safe
             readonly property color glassTint: root.darkMode ? Qt.rgba(0.0824, 0.102, 0.1882, 0.10) : Qt.rgba(0.95, 0.97, 1.0, 0.02)
             // Opaco: Qt premultiplica los colores de un ShaderEffect; translúcido se pintaría gris.
             readonly property color fallbackGlass: root.darkMode ? Qt.rgba(0.14, 0.16, 0.20, 1.0) : Qt.rgba(0.985, 0.99, 1.0, 1.0)
@@ -10824,7 +10825,8 @@ Item {
                         readonly property bool shown: locationMapCard.visible && locationPreview.status === Loader.Ready
                         readonly property Item glassBackdrop: locationPreview.status === Loader.Ready ? locationPreview : null
                         readonly property real materialPosition: 0
-                        readonly property bool lowCostGlass: false
+                        readonly property bool lowCostGlass: Mobile.InGeCoreFlow.lowMemoryMode
+                            || Mobile.InGeCoreFlow.performance.profile >= Mobile.InGeCoreFlow.performance.safe
                         readonly property color glassTint: root.darkMode ? Qt.rgba(0.0824, 0.102, 0.1882, 0.10) : Qt.rgba(0.95, 0.97, 1.0, 0.02)
                         // Opaco: Qt premultiplica los colores de un ShaderEffect; translúcido se pintaría gris.
                         readonly property color fallbackGlass: root.darkMode ? Qt.rgba(0.14, 0.16, 0.20, 1.0) : Qt.rgba(0.985, 0.99, 1.0, 1.0)

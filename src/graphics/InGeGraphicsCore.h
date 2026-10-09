@@ -19,6 +19,17 @@ class InGeGraphicsCore final : public QObject
     Q_PROPERTY(bool earthActive READ earthActive NOTIFY stateChanged)
     Q_PROPERTY(QString earthState READ earthState NOTIFY stateChanged)
     Q_PROPERTY(QString renderProfile READ renderProfile NOTIFY stateChanged)
+    // Live device state computed by InGePerformanceRuntime (Android). One
+    // source for InGeCoreFlow, Flutter (via the QML profile) and Cesium.
+    Q_PROPERTY(QString deviceTier READ deviceTier NOTIFY deviceStateChanged)
+    Q_PROPERTY(QString baseDeviceTier READ baseDeviceTier NOTIFY deviceStateChanged)
+    Q_PROPERTY(bool lowRamDevice READ lowRamDevice NOTIFY deviceStateChanged)
+    Q_PROPERTY(int totalMemoryMb READ totalMemoryMb NOTIFY deviceStateChanged)
+    Q_PROPERTY(bool powerSaveMode READ powerSaveMode NOTIFY deviceStateChanged)
+    Q_PROPERTY(int thermalStatus READ thermalStatus NOTIFY deviceStateChanged)
+    Q_PROPERTY(bool systemAnimationsEnabled READ systemAnimationsEnabled NOTIFY deviceStateChanged)
+    Q_PROPERTY(qreal systemFontScale READ systemFontScale NOTIFY deviceStateChanged)
+    Q_PROPERTY(int memoryTrimLevel READ memoryTrimLevel NOTIFY deviceStateChanged)
 
 public:
     explicit InGeGraphicsCore(QObject *parent = nullptr);
@@ -30,6 +41,18 @@ public:
     bool earthActive() const;
     QString earthState() const;
     QString renderProfile() const;
+    QString deviceTier() const;
+    QString baseDeviceTier() const;
+    bool lowRamDevice() const;
+    int totalMemoryMb() const;
+    bool powerSaveMode() const;
+    int thermalStatus() const;
+    bool systemAnimationsEnabled() const;
+    qreal systemFontScale() const;
+    int memoryTrimLevel() const;
+
+    // JSON from InGePerformanceRuntime.stateJson(); GUI thread only.
+    void applyDevicePerformanceState(const QString &json);
 
     void attachWindow(QQuickWindow *window);
     void setEarthHostController(InGeEarthHostController *controller);
@@ -45,6 +68,7 @@ public:
 
 signals:
     void stateChanged();
+    void deviceStateChanged();
 
 private:
     void inspectRuntime(QQuickWindow *window);
@@ -53,6 +77,7 @@ private:
     void setEarthState(const QString &state, bool active);
     void setQtRenderingSuspended(bool suspended);
     void restoreAfterExternalActivityIfReady();
+    void readInitialDeviceState();
 
     QString m_graphicsBackend = QStringLiteral("PENDING_RUNTIME_INSPECTION");
     QString m_gpuName = QStringLiteral("PENDING");
@@ -62,6 +87,15 @@ private:
     bool m_earthExitPending = false;
     QString m_earthState = QStringLiteral("UNINITIALIZED");
     QString m_renderProfile = QStringLiteral("BALANCED");
+    QString m_deviceTier = QStringLiteral("UNKNOWN");
+    QString m_baseDeviceTier = QStringLiteral("UNKNOWN");
+    bool m_lowRamDevice = false;
+    int m_totalMemoryMb = 0;
+    bool m_powerSaveMode = false;
+    int m_thermalStatus = -1;
+    bool m_systemAnimationsEnabled = true;
+    qreal m_systemFontScale = 1.0;
+    int m_memoryTrimLevel = 0;
     InGeEarthHostController *m_earthHostController = nullptr;
     QPointer<QQuickWindow> m_window;
     bool m_qtRenderingSuspended = false;

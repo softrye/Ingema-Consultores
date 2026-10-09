@@ -3164,7 +3164,8 @@ Page {
             readonly property Item glassBackdrop: infoPeek.visible ? root._peekBackdropSource : null
             // Static: the panel grabs its backdrop once, not per animation frame.
             readonly property real materialPosition: 0
-            readonly property bool lowCostGlass: false
+            readonly property bool lowCostGlass: Mobile.InGeCoreFlow.lowMemoryMode
+                || Mobile.InGeCoreFlow.performance.profile >= Mobile.InGeCoreFlow.performance.safe
             // Same material as the Dock's first 3D Touch menu (Dock tokens,
             // near-zero tint); legibility comes from one light veil, not tint.
             readonly property color glassTint: infoPeek.dark ? Qt.rgba(0.0824, 0.102, 0.1882, 0.10) : Qt.rgba(0.95, 0.97, 1.0, 0.02)

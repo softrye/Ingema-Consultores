@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Controls
 import "../flowcore" as FlowCore
+import InGe.CoreFlow 3.0 as Mobile
 
 // Liquid Glass REAL de Calicatas: FlowCore.LiquidGlassSurface (el material del Dock
 // extraído tal cual, liquidglass.frag) con los TOKENS DEL DOCK. No hay otro shader
@@ -49,6 +50,11 @@ Item {
     property Item _resolvedBackdrop: null
     property bool _nested: false
     readonly property bool primarySurface: glass.level !== "control" && !glass._nested
+    // Same rule as the Dock: the safe profile (LOW/ULTRA_LOW devices, battery
+    // saver, heat or a user pick) and low-RAM devices use 2 frost taps and no
+    // soft shadow pass on every field, chip and button of the ficha.
+    readonly property bool deviceLowCostGlass: Mobile.InGeCoreFlow.lowMemoryMode
+        || Mobile.InGeCoreFlow.performance.profile >= Mobile.InGeCoreFlow.performance.safe
     // Una captura más alta que esto (px físicos, 4096 = límite seguro en GLES de gama baja) no se pide: no cabe con
     // seguridad en GPUs de gama baja; la superficie queda con el material base.
     readonly property bool _captureFits: glass.width * Screen.devicePixelRatio <= 4096
@@ -101,7 +107,7 @@ Item {
         readonly property bool shown: glass.visible && glass.opacity > 0 && glass.width > 1 && glass.height > 1
         readonly property Item glassBackdrop: shown ? glass.effectiveBackdrop : null
         readonly property real materialPosition: 0
-        readonly property bool lowCostGlass: false
+        readonly property bool lowCostGlass: glass.deviceLowCostGlass
         readonly property color glassTint: glass.dark ? Qt.rgba(0.0824, 0.102, 0.1882, 0.10) : Qt.rgba(0.95, 0.97, 1.0, 0.02)
         // Qt PREMULTIPLICA los colores que pasa a un ShaderEffect (Qt.rgba(r,g,b,a) llega
         // como (r*a, g*a, b*a, a)) y liquidglass.frag vuelve a multiplicar por alpha: un
@@ -124,7 +130,7 @@ Item {
         readonly property bool shown: dockTokens.shown
         readonly property Item glassBackdrop: dockTokens.glassBackdrop
         readonly property real materialPosition: 0
-        readonly property bool lowCostGlass: false
+        readonly property bool lowCostGlass: glass.deviceLowCostGlass
         readonly property color glassTint: glass.dark ? Qt.rgba(0.0824, 0.102, 0.1882, 0.10) : Qt.rgba(0.95, 0.97, 1.0, 0.02)
         // Qt PREMULTIPLICA los colores que pasa a un ShaderEffect (Qt.rgba(r,g,b,a) llega
         // como (r*a, g*a, b*a, a)) y liquidglass.frag vuelve a multiplicar por alpha: un

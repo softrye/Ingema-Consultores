@@ -5,13 +5,29 @@
 
 #include <QDebug>
 #include <QGuiApplication>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMetaObject>
+#include <QPointer>
 #include <QQuickWindow>
 #include <QTimer>
+
+#ifdef Q_OS_ANDROID
+#include <QJniEnvironment>
+#include <QJniObject>
+#include <jni.h>
+#endif
+
+namespace {
+constexpr auto kPerformanceRuntimeClass = "com/ingema/ingeplus/InGePerformanceRuntime";
+QPointer<InGeGraphicsCore> g_graphicsCore;
+}
 
 InGeGraphicsCore::InGeGraphicsCore(QObject *parent)
     : QObject(parent)
 {
+    g_graphicsCore = this;
+    readInitialDeviceState();
     if (qGuiApp) {
         connect(qGuiApp, &QGuiApplication::applicationStateChanged, this,
                 [this](Qt::ApplicationState state) {
@@ -28,6 +44,89 @@ bool InGeGraphicsCore::earthAvailable() const { return m_earthAvailable; }
 bool InGeGraphicsCore::earthActive() const { return m_earthActive; }
 QString InGeGraphicsCore::earthState() const { return m_earthState; }
 QString InGeGraphicsCore::renderProfile() const { return m_renderProfile; }
+QString InGeGraphicsCore::deviceTier() const { return m_deviceTier; }
+QString InGeGraphicsCore::baseDeviceTier() const { return m_baseDeviceTier; }
+bool InGeGraphicsCore::lowRamDevice() const { return m_lowRamDevice; }
+int InGeGraphicsCore::totalMemoryMb() const { return m_totalMemoryMb; }
+bool InGeGraphicsCore::powerSaveMode() const { return m_powerSaveMode; }
+int InGeGraphicsCore::thermalStatus() const { return m_thermalStatus; }
+bool InGeGraphicsCore::systemAnimationsEnabled() const { return m_systemAnimationsEnabled; }
+qreal InGeGraphicsCore::systemFontScale() const { return m_systemFontScale; }
+int InGeGraphicsCore::memoryTrimLevel() const { return m_memoryTrimLevel; }
+
+// The Activity may initialize the runtime before or after Qt creates this
+// object: read it here, and the runtime pushes every later change.
+void InGeGraphicsCore::readInitialDeviceState()
+{
+#ifdef Q_OS_ANDROID
+    const QJniObject json = QJniObject::callStaticObjectMethod(
+        kPerformanceRuntimeClass, "stateJson", "()Ljava/lang/String;");
+    QJniEnvironment env;
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return;
+    }
+    if (json.isValid())
+        applyDevicePerformanceState(json.toString());
+#endif
+}
+
+void InGeGraphicsCore::applyDevicePerformanceState(const QString &json)
+{
+    const QJsonObject state = QJsonDocument::fromJson(json.toUtf8()).object();
+    if (state.isEmpty())
+        return;
+    const QString tier = state.value(QStringLiteral("tier")).toString(m_deviceTier);
+    const QString baseTier = state.value(QStringLiteral("baseTier")).toString(m_baseDeviceTier);
+    const bool lowRam = state.value(QStringLiteral("lowRam")).toBool(m_lowRamDevice);
+    const int totalMemoryMb = state.value(QStringLiteral("totalMemoryMb")).toInt(m_totalMemoryMb);
+    const bool powerSave = state.value(QStringLiteral("powerSave")).toBool(m_powerSaveMode);
+    const int thermal = state.value(QStringLiteral("thermal")).toInt(m_thermalStatus);
+    const bool animators = state.value(QStringLiteral("animatorsEnabled"))
+                               .toBool(m_systemAnimationsEnabled);
+    const qreal fontScale = state.value(QStringLiteral("fontScale")).toDouble(m_systemFontScale);
+    const int trimLevel = state.value(QStringLiteral("trimLevel")).toInt(m_memoryTrimLevel);
+    if (tier == m_deviceTier && baseTier == m_baseDeviceTier && lowRam == m_lowRamDevice
+        && totalMemoryMb == m_totalMemoryMb && powerSave == m_powerSaveMode
+        && thermal == m_thermalStatus && animators == m_systemAnimationsEnabled
+        && qFuzzyCompare(fontScale, m_systemFontScale) && trimLevel == m_memoryTrimLevel)
+        return;
+    m_deviceTier = tier;
+    m_baseDeviceTier = baseTier;
+    m_lowRamDevice = lowRam;
+    m_totalMemoryMb = totalMemoryMb;
+    m_powerSaveMode = powerSave;
+    m_thermalStatus = thermal;
+    m_systemAnimationsEnabled = animators;
+    m_systemFontScale = fontScale > 0.0 ? fontScale : 1.0;
+    m_memoryTrimLevel = trimLevel;
+    qInfo().noquote() << "INGE_DEVICE_PERFORMANCE tier=" << m_deviceTier
+                      << " base=" << m_baseDeviceTier << " lowRam=" << m_lowRamDevice
+                      << " ramMb=" << m_totalMemoryMb << " powerSave=" << m_powerSaveMode
+                      << " thermal=" << m_thermalStatus
+                      << " animators=" << m_systemAnimationsEnabled
+                      << " fontScale=" << m_systemFontScale
+                      << " trim=" << m_memoryTrimLevel;
+    emit deviceStateChanged();
+}
+
+#ifdef Q_OS_ANDROID
+extern "C" JNIEXPORT void JNICALL
+Java_com_ingema_ingeplus_InGePerformanceRuntime_nativePerformanceStateChanged(
+    JNIEnv *, jclass, jstring json)
+{
+    const QPointer<InGeGraphicsCore> core = g_graphicsCore;
+    if (!core || !json)
+        return;
+    const QString payload = QJniObject(json).toString();
+    if (payload.size() > 4096)
+        return;
+    QMetaObject::invokeMethod(core, [core, payload]() {
+        if (core)
+            core->applyDevicePerformanceState(payload);
+    }, Qt::QueuedConnection);
+}
+#endif
 
 void InGeGraphicsCore::setEarthHostController(
     InGeEarthHostController *controller)

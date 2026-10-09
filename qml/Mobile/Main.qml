@@ -1717,6 +1717,9 @@ Settings {
     property real lastFontScale: 1.0
     property bool lastReduceMotion: false
     property int lastPerformanceLevel: -1
+    // "auto": the level follows the device tier; "user": lastPerformanceLevel
+    // was picked in Ajustes. Empty only on installs before this key existed.
+    property string performanceSource: ""
 }
 
 property bool appActiveV41: Qt.application.state === Qt.ApplicationActive
@@ -1725,7 +1728,71 @@ property double lastBackPressEpochV41: 0
 function persistUiStateV41() {
     appSettingsV41.lastFontScale = fontScale
     appSettingsV41.lastReduceMotion = reduceMotion
-    appSettingsV41.lastPerformanceLevel = flowPerformanceLevel
+    if (!performanceAutomaticV90)
+        appSettingsV41.lastPerformanceLevel = flowPerformanceLevel
+}
+
+// =============================================================
+// V90 — Perfil de rendimiento automatico por dispositivo
+// =============================================================
+// Until the user picks a level in Ajustes it follows the device tier that
+// Android computes (InGeCoreFlow.automaticPerformanceLevel), live: battery
+// saver or heat lower it and it comes back on its own. A picked level is
+// kept and persisted. Severe thermal throttling caps any level.
+readonly property bool performanceAutomaticV90: appSettingsV41.performanceSource !== "user"
+readonly property int effectivePerformanceLevelV90:
+    Math.min(flowPerformanceLevel, Mobile.InGeCoreFlow.systemPerformanceCap)
+
+// Installs before performanceSource persisted the old default (2) on their
+// own, indistinguishable from a picked "Alto". Keep a stored level, except on
+// LOW/ULTRA_LOW devices, where that default is what overloaded the GPU.
+function resolvePerformanceSourceV90() {
+    if (appSettingsV41.performanceSource !== "")
+        return
+    if (Qt.platform.os === "android" && Mobile.InGeCoreFlow.deviceTier === "UNKNOWN")
+        return
+    var legacyLevel = appSettingsV41.lastPerformanceLevel
+    var source = legacyLevel >= 0 && Mobile.InGeCoreFlow.automaticPerformanceLevel > 0
+            ? "user" : "auto"
+    appSettingsV41.performanceSource = source
+    if (source === "user")
+        flowPerformanceLevel = Math.max(0, Math.min(2, legacyLevel))
+    console.info("INGE_PERFORMANCE_SOURCE_MIGRATED source=" + source
+                 + " legacyLevel=" + legacyLevel
+                 + " tier=" + Mobile.InGeCoreFlow.deviceTier)
+}
+
+Binding {
+    target: app
+    property: "flowPerformanceLevel"
+    value: Mobile.InGeCoreFlow.automaticPerformanceLevel
+    when: app.performanceAutomaticV90
+    restoreMode: Binding.RestoreNone
+}
+
+Connections {
+    target: Mobile.InGeCoreFlow
+    function onDeviceTierChanged() { app.resolvePerformanceSourceV90() }
+}
+
+function cyclePerformanceLevelV90() {
+    // Automatico -> Ahorro -> Balance -> Alto -> Automatico
+    if (performanceAutomaticV90) {
+        appSettingsV41.performanceSource = "user"
+        flowPerformanceLevel = 0
+    } else if (flowPerformanceLevel < 2) {
+        flowPerformanceLevel = flowPerformanceLevel + 1
+    } else {
+        appSettingsV41.performanceSource = "auto"
+    }
+    if (!performanceAutomaticV90) {
+        appSettingsV41.lastPerformanceLevel = flowPerformanceLevel
+        try { firstExperience.performanceLevel = flowPerformanceLevel } catch(e) {}
+    }
+}
+
+function performanceLevelNameV90(level) {
+    return level <= 0 ? "Ahorro" : (level >= 2 ? "Alto" : "Balance")
 }
 
 function clearPersistedGuestV41() {
@@ -2031,7 +2098,7 @@ Binding {
 Binding {
     target: Mobile.InGeCoreFlow
     property: "performanceLevel"
-    value: app.flowPerformanceLevel
+    value: app.effectivePerformanceLevelV90
 }
 
 Binding {
@@ -2043,9 +2110,9 @@ Binding {
 Binding {
     target: Mobile.InGeCoreFlow.performance
     property: "profile"
-    value: app.flowPerformanceLevel >= 2
+    value: app.effectivePerformanceLevelV90 >= 2
            ? Mobile.InGeCoreFlow.performance.high
-           : (app.flowPerformanceLevel <= 0
+           : (app.effectivePerformanceLevelV90 <= 0
               ? Mobile.InGeCoreFlow.performance.safe
               : Mobile.InGeCoreFlow.performance.balanced)
 }
@@ -2274,7 +2341,7 @@ onReduceMotionChanged: {
 }
 
 onFlowPerformanceLevelChanged: {
-    if (appSettingsV41)
+    if (appSettingsV41 && !performanceAutomaticV90)
         appSettingsV41.lastPerformanceLevel = flowPerformanceLevel
 }
 
@@ -3740,20 +3807,20 @@ Component.onCompleted: {
     try {
         languageCode = firstExperience.languageCode
         flowMotionLevel = firstExperience.motionLevel
-        var selectedPerformance = appSettingsV41.lastPerformanceLevel >= 0
-                ? appSettingsV41.lastPerformanceLevel
-                : Number(firstExperience.performanceLevel)
-        flowPerformanceLevel = isFinite(selectedPerformance)
-                               ? Math.max(0, Math.min(2, Math.round(selectedPerformance)))
-                               : 1
+        // V90: automatic levels come from the Binding on flowPerformanceLevel;
+        // only a level picked in Ajustes is restored here.
+        resolvePerformanceSourceV90()
+        if (!performanceAutomaticV90)
+            flowPerformanceLevel = Math.max(0, Math.min(2, appSettingsV41.lastPerformanceLevel))
         reduceMotion = firstExperience.motionLevel === 0
         fontScale = appSettingsV41.lastFontScale > 0
                     ? appSettingsV41.lastFontScale : 1.0
         setVisualThemeMode(0, false)
     } catch (experienceError) {
         reduceMotion = appSettingsV41.lastReduceMotion
-        flowPerformanceLevel = appSettingsV41.lastPerformanceLevel >= 0
-                ? Math.max(0, Math.min(2, appSettingsV41.lastPerformanceLevel)) : 1
+        resolvePerformanceSourceV90()
+        if (!performanceAutomaticV90)
+            flowPerformanceLevel = Math.max(0, Math.min(2, appSettingsV41.lastPerformanceLevel))
         fontScale = appSettingsV41.lastFontScale > 0
                     ? appSettingsV41.lastFontScale : 1.0
         setVisualThemeMode(0, false)
@@ -3835,7 +3902,8 @@ Connections {
         languageCode = selectedLanguage
         reduceMotion = selectedMotion === 0
         flowMotionLevel = selectedMotion
-        flowPerformanceLevel = Math.max(0, Math.min(2, Math.round(Number(selectedPerformance) || 1)))
+        // The onboarding has no performance choice (it always reports 2):
+        // the level stays automatic or the one picked in Ajustes.
         setVisualThemeMode(0, false)
         persistUiStateV41()
         forceFirstExperiencePreview = false
@@ -5009,6 +5077,18 @@ Component {
             function onAuthFlowStateV800Changed() {
                 homeRoot.syncFlutterHomeVisibilityV60()
             }
+            // V90: live profile (device tier, battery saver, heat, user pick).
+            // callLater: the profile Binding on InGeCoreFlow settles first.
+            function onEffectivePerformanceLevelV90Changed() {
+                Qt.callLater(homeRoot.syncFlutterHomeVisibilityV60)
+            }
+        }
+
+        Connections {
+            target: Mobile.InGeCoreFlow
+            function onMotionAllowedChanged() {
+                Qt.callLater(homeRoot.syncFlutterHomeVisibilityV60)
+            }
         }
 
         Connections {
@@ -5464,16 +5544,20 @@ Component {
                         SettingsActionRow {
                             width: parent.width
                             title: "Perfil visual"
-                            subtitle: flowPerformanceLevel <= 0 ? "Ahorro y máxima compatibilidad"
-                                      : (flowPerformanceLevel >= 2 ? "Alta fluidez" : "Equilibrado")
+                            subtitle: app.performanceAutomaticV90
+                                      ? "Según este dispositivo"
+                                      : (flowPerformanceLevel <= 0 ? "Ahorro y máxima compatibilidad"
+                                         : (flowPerformanceLevel >= 2 ? "Alta fluidez" : "Equilibrado"))
                             iconName: "nav.settings"
-                            trailingText: flowPerformanceLevel <= 0 ? "Ahorro"
-                                          : (flowPerformanceLevel >= 2 ? "Alto" : "Balance")
+                            trailingText: app.performanceAutomaticV90
+                                          ? "Auto · " + app.performanceLevelNameV90(flowPerformanceLevel)
+                                          : app.performanceLevelNameV90(flowPerformanceLevel)
                             onClicked: {
-                                flowPerformanceLevel = (flowPerformanceLevel + 1) % 3
-                                try { firstExperience.performanceLevel = flowPerformanceLevel } catch(e) {}
-                                showToast(flowPerformanceLevel <= 0 ? "Perfil de ahorro"
-                                          : (flowPerformanceLevel >= 2 ? "Rendimiento alto" : "Rendimiento equilibrado"))
+                                app.cyclePerformanceLevelV90()
+                                showToast(app.performanceAutomaticV90
+                                          ? "Perfil automático: " + app.performanceLevelNameV90(flowPerformanceLevel)
+                                          : (flowPerformanceLevel <= 0 ? "Perfil de ahorro"
+                                             : (flowPerformanceLevel >= 2 ? "Rendimiento alto" : "Rendimiento equilibrado")))
                             }
                         }
                     }
@@ -5662,6 +5746,9 @@ Component {
             }
             function onProfileOverlayOpenV18Changed() {
                 flutterRenditionsRootV70.syncFlutterRenditionsV70()
+            }
+            function onEffectivePerformanceLevelV90Changed() {
+                Qt.callLater(flutterRenditionsRootV70.syncFlutterRenditionsV70)
             }
         }
 

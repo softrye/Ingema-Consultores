@@ -93,11 +93,17 @@ Item {
     }
     readonly property bool transitionPending: !!controller && controller.transitionPending
     // Earth (the only dark native surface) shares the GPU with Cesium: same
-    // material, fewer frost samples. Every other surface keeps full quality.
-    readonly property bool lowCostGlass: nativeSurface && darkBackdrop
+    // material, fewer frost samples and no soft shadow pass. The safe profile
+    // (LOW/ULTRA_LOW devices, battery saver, heat or a user pick) and Android
+    // low-RAM devices get the same on every surface.
+    readonly property bool deviceLowCostGlass: !!flow
+        && (flow.lowMemoryMode || flow.performance.profile >= flow.performance.safe)
+    readonly property bool lowCostGlass: (nativeSurface && darkBackdrop) || deviceLowCostGlass
     onLowCostGlassChanged: {
         if (lowCostGlass)
-            console.info("INGE_EARTH_GLASS_PROFILE profile=low mainTaps=4 selectedTaps=2 searchTaps=2 aiTaps=2")
+            console.info("INGE_DOCK_GLASS_PROFILE profile=low reason="
+                         + (deviceLowCostGlass ? "device" : "earth")
+                         + " mainTaps=4 selectedTaps=2 searchTaps=2 aiTaps=2")
     }
 
     readonly property var visibleActions: {

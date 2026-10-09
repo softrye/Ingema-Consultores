@@ -2,14 +2,21 @@ package com.ingema.ingeplus;
 
 import android.app.ActivityManager;
 import android.app.Application;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.ConfigurationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Point;
+import android.database.ContentObserver;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.Display;
 import android.view.Window;
@@ -18,6 +25,9 @@ import android.view.WindowManager;
 import androidx.core.performance.DefaultDevicePerformance;
 import androidx.metrics.performance.FrameData;
 import androidx.metrics.performance.JankStats;
+
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -109,10 +119,22 @@ public final class InGePerformanceRuntime {
     private static volatile InGePerformanceRuntime instance;
 
     private final Capabilities capabilities;
-    private final DeviceTier deviceTier;
+    private final OverrideMode overrideMode;
+    // Hardware only (RAM, cores, pixels, performance class). Never changes.
+    private final DeviceTier baseTier;
+    // Hardware plus the live battery saver and thermal state. Earth, the
+    // refresh budget and the QML automatic profile all read this one value.
+    private volatile DeviceTier deviceTier;
     private final Context appContext;
     private final InGePerformanceBudget baseBudget;
     private volatile InGePerformanceBudget budget;
+    private volatile boolean livePowerSave;
+    private volatile int liveThermal;
+    private volatile boolean animatorsEnabled = true;
+    private volatile float fontScale = 1.0f;
+    private boolean monitoring;
+    private Runnable budgetListener;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final double[] recentFrameMs = new double[FRAME_WINDOW];
     private final boolean[] recentJank = new boolean[FRAME_WINDOW];
     private int recentCursor;
@@ -125,8 +147,15 @@ public final class InGePerformanceRuntime {
 
     private InGePerformanceRuntime(Window window, OverrideMode overrideMode) {
         appContext = window.getContext().getApplicationContext();
+        this.overrideMode = overrideMode;
         capabilities = detect(window);
-        deviceTier = classifyTier(capabilities, overrideMode);
+        livePowerSave = capabilities.powerSaveMode;
+        liveThermal = capabilities.thermalStatus;
+        animatorsEnabled = readAnimatorsEnabled(appContext);
+        fontScale = window.getContext().getResources().getConfiguration().fontScale;
+        baseTier = classifyTier(capabilities, overrideMode, false, -1);
+        deviceTier = classifyTier(capabilities, overrideMode,
+                livePowerSave, liveThermal);
         baseBudget = deriveBudget(capabilities, deviceTier);
         budget = baseBudget;
         Log.i("InGePerformance", "INGE_ADAPTIVE_RUNTIME sdk=" + capabilities.sdk
@@ -176,8 +205,132 @@ public final class InGePerformanceRuntime {
 
     public Capabilities capabilities() { return capabilities; }
     public DeviceTier deviceTier() { return deviceTier; }
+    public DeviceTier baseTier() { return baseTier; }
     public InGePerformanceBudget budget() { return budget; }
     public long budgetVersion() { return budgetVersion; }
+
+    // Published to Qt (GraphicsCore) and, through InGeCoreFlow, to Flutter.
+    // Static so the Qt side can read it before or after the Activity runs.
+    public static String stateJson() {
+        final InGePerformanceRuntime runtime = instance;
+        if (runtime == null)
+            return "";
+        final JSONObject state = new JSONObject();
+        try {
+            state.put("tier", runtime.deviceTier.name());
+            state.put("baseTier", runtime.baseTier.name());
+            state.put("lowRam", runtime.capabilities.lowRamDevice);
+            state.put("totalMemoryMb",
+                    runtime.capabilities.totalMemoryBytes / (1024L * 1024L));
+            state.put("memoryClassMb", runtime.capabilities.memoryClassMb);
+            state.put("powerSave", runtime.livePowerSave);
+            state.put("thermal", runtime.liveThermal);
+            state.put("animatorsEnabled", runtime.animatorsEnabled);
+            state.put("fontScale", (double) runtime.fontScale);
+            state.put("refreshHz", (double) runtime.budget.sustainableRefreshHz);
+        } catch (JSONException ignored) {
+            return "";
+        }
+        return state.toString();
+    }
+
+    private static native void nativePerformanceStateChanged(String json);
+
+    private void publish() {
+        try {
+            nativePerformanceStateChanged(stateJson());
+        } catch (UnsatisfiedLinkError notLoaded) {
+            // Qt reads stateJson() itself when GraphicsCore is created.
+        }
+    }
+
+    // The Activity re-applies its refresh request when the live tier moves.
+    public void setBudgetListener(Runnable listener) {
+        budgetListener = listener;
+    }
+
+    // Process-wide listeners on the application context: registered once,
+    // they live as long as this singleton. Callbacks arrive on the main
+    // thread, where the Activity applies window changes.
+    public void startMonitoring() {
+        if (monitoring)
+            return;
+        monitoring = true;
+        try {
+            appContext.registerReceiver(new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    refreshLiveConditions("power_save");
+                }
+            }, new IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED));
+        } catch (RuntimeException error) {
+            Log.w("InGePerformance", "INGE_POWER_SAVE_MONITOR_UNAVAILABLE", error);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                final PowerManager powerManager = (PowerManager)
+                        appContext.getSystemService(Context.POWER_SERVICE);
+                powerManager.addThermalStatusListener(appContext.getMainExecutor(),
+                        status -> refreshLiveConditions("thermal"));
+            } catch (RuntimeException error) {
+                Log.w("InGePerformance", "INGE_THERMAL_MONITOR_UNAVAILABLE", error);
+            }
+        }
+        try {
+            appContext.getContentResolver().registerContentObserver(
+                    Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE),
+                    false, new ContentObserver(mainHandler) {
+                        @Override
+                        public void onChange(boolean selfChange) {
+                            refreshLiveConditions("animator_scale");
+                        }
+                    });
+        } catch (RuntimeException error) {
+            Log.w("InGePerformance", "INGE_ANIMATOR_MONITOR_UNAVAILABLE", error);
+        }
+        publish();
+    }
+
+    public void updateFontScale(float value) {
+        if (!(value > 0.0f) || Math.abs(value - fontScale) < 0.001f)
+            return;
+        fontScale = value;
+        publish();
+    }
+
+    private void refreshLiveConditions(String reason) {
+        final PowerManager powerManager = (PowerManager)
+                appContext.getSystemService(Context.POWER_SERVICE);
+        livePowerSave = powerManager != null && powerManager.isPowerSaveMode();
+        liveThermal = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                && powerManager != null ? powerManager.getCurrentThermalStatus() : -1;
+        animatorsEnabled = readAnimatorsEnabled(appContext);
+        final DeviceTier next = classifyTier(capabilities, overrideMode,
+                livePowerSave, liveThermal);
+        if (next != deviceTier) {
+            deviceTier = next;
+            budget = deriveBudget(capabilities, next);
+            synchronized (this) { ++budgetVersion; }
+            final Runnable listener = budgetListener;
+            if (listener != null)
+                listener.run();
+        }
+        Log.i("InGePerformance", "INGE_LIVE_CONDITIONS reason=" + reason
+                + " tier=" + deviceTier + " base=" + baseTier
+                + " powerSave=" + livePowerSave + " thermal=" + liveThermal
+                + " animators=" + animatorsEnabled
+                + " refreshHz=" + budget.sustainableRefreshHz);
+        publish();
+    }
+
+    private static boolean readAnimatorsEnabled(Context context) {
+        try {
+            return Settings.Global.getFloat(context.getContentResolver(),
+                    Settings.Global.ANIMATOR_DURATION_SCALE, 1.0f) > 0.0f;
+        } catch (RuntimeException error) {
+            return true;
+        }
+    }
 
     public void setState(State nextState) {
         if (nextState != null) state = nextState;
@@ -267,7 +420,9 @@ public final class InGePerformanceRuntime {
     }
 
     private static DeviceTier classifyTier(Capabilities c,
-                                             OverrideMode overrideMode) {
+                                             OverrideMode overrideMode,
+                                             boolean powerSaveMode,
+                                             int thermalStatus) {
         double score = 0.0;
         final long memoryGiB = c.totalMemoryBytes / (1024L * 1024L * 1024L);
         if (c.lowRamDevice) score -= 3.0;
@@ -283,8 +438,8 @@ public final class InGePerformanceRuntime {
         else if (c.pixelCount > 2_500_000L) score -= 0.5;
         if (c.mediaPerformanceClass >= Build.VERSION_CODES.TIRAMISU) score += 2.0;
         else if (c.mediaPerformanceClass >= Build.VERSION_CODES.R) score += 1.0;
-        if (c.powerSaveMode) score -= 2.0;
-        if (c.thermalStatus >= PowerManager.THERMAL_STATUS_MODERATE) score -= 2.0;
+        if (powerSaveMode) score -= 2.0;
+        if (thermalStatus >= PowerManager.THERMAL_STATUS_MODERATE) score -= 2.0;
 
         if (overrideMode == OverrideMode.FORCE_CONSERVATIVE) score = -4.0;
         else if (overrideMode == OverrideMode.FORCE_BALANCED) score = 0.5;
