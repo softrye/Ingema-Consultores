@@ -103,6 +103,13 @@ def main():
         archive.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
         archive.write(script, "apply_delta.ps1")
         archive.writestr("INSTRUCCIONES.txt", howto)
+        # Additional optimization reports at ZIP root for immediate review.
+        # Other release pipelines may not have them; keep tool generic.
+        for report_name in ("CHANGELOG_COMPLETO.md", "REPORTE_PRUEBAS.md",
+                            "CONFLICTOS_CESIUM.md", "ESTADO_HALLAZGOS.md"):
+            report = Path("docs/optimization") / report_name
+            if report.is_file():
+                archive.write(report, report_name)
         for c in changes:
             if c["operation"] != "delete":
                 archive.write(c["path"], "files/" + c["path"])

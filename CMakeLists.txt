@@ -85,10 +85,10 @@ endif()
 # Qt base
 # ----------------------------
 find_package(QT NAMES Qt6 Qt5 REQUIRED
-    COMPONENTS Core Network Positioning Location Quick Qml Xml Concurrent
+    COMPONENTS Core Network Positioning Quick Qml Xml Concurrent
 )
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED
-    COMPONENTS Core Network Positioning Location Quick Qml Xml Concurrent
+    COMPONENTS Core Network Positioning Quick Qml Xml Concurrent
 )
 
 # Si vamos a compilar Mobile, necesitamos QuickControls2
@@ -110,7 +110,7 @@ endif()
 
 # Desktop usa Widgets/QuickWidgets/Pdf (solo si NO es Android/iOS)
 if(NOT ANDROID AND NOT IOS AND NOT INGE_BUILD_MOBILE)
-    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets QuickWidgets Pdf PdfWidgets)
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets QuickWidgets Pdf PdfWidgets Location)
 endif()
 
 # ----------------------------
@@ -241,6 +241,13 @@ if(INGE_BUILD_MOBILE)
 
     # Cartography is provided by InGe Earth/Cesium; no native map provider dependency.
 
+    # Android packages only the brand resources used by Calicatas/export.
+    # Windows Mobile retains the legacy QRC to avoid desktop regressions.
+    set(INGE_MOBILE_BRAND_QRC "${INGE_PROJECT_ROOT}/resources.qrc")
+    if(ANDROID)
+        set(INGE_MOBILE_BRAND_QRC "${INGE_PROJECT_ROOT}/resources_mobile_brand.qrc")
+    endif()
+
     set(MOBILE_SOURCES
         "${INGE_PROJECT_ROOT}/main_mobile.cpp"
         "${INGE_PROJECT_ROOT}/src/core/InGeCore.h"
@@ -252,7 +259,7 @@ if(INGE_BUILD_MOBILE)
         "${INGE_PROJECT_ROOT}/src/core/InGeCoreContext.h"
         "${INGE_PROJECT_ROOT}/src/core/InGeCoreTypes.h"
         "${INGE_PROJECT_ROOT}/src/core/InGeCoreSkill.h"
-        "${INGE_PROJECT_ROOT}/resources.qrc"
+        ${INGE_MOBILE_BRAND_QRC}
 
         # AUTH compartido con Desktop
         "${INGE_PROJECT_ROOT}/appcontext.h"
@@ -527,7 +534,6 @@ if(INGE_BUILD_MOBILE)
             Qt${QT_VERSION_MAJOR}::Quick
             Qt${QT_VERSION_MAJOR}::QuickControls2
             Qt${QT_VERSION_MAJOR}::QuickDialogs2
-            Qt${QT_VERSION_MAJOR}::Location
             Qt${QT_VERSION_MAJOR}::Positioning
             Qt${QT_VERSION_MAJOR}::Concurrent
             Qt${QT_VERSION_MAJOR}::Xml

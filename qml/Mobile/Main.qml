@@ -5,7 +5,6 @@ import QtQuick.Effects
 import QtQuick.Layouts 1.15
 import QtQuick.Shapes 1.15
 import QtPositioning
-import QtLocation
 import QtCore
 import QtQuick.Dialogs
 import QtQml 2.15

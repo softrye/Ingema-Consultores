@@ -10,7 +10,7 @@ $errors=@()
 foreach($f in @($data.changes)){
     $rel=[string]$f.path
     if(!$rel -or $rel.StartsWith('/') -or $rel.Contains('\') -or $rel.Contains(':') -or
-       (($rel -split '/') | Where-Object {$_ -in @('','.','..')}).Count -gt 0 -or
+       @(($rel -split '/') | Where-Object {$_ -in @('','.','..')}).Count -gt 0 -or
        $rel -eq '.git' -or $rel.StartsWith('.git/')) {throw "Unsafe path: $rel"}
     $native=$rel.Replace('/','\')
     $target=Join-Path $root $native

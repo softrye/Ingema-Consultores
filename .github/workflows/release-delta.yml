@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+      # Pre-release de optimizaciones sin integrar en main.
+      - claude/awesome-davinci-egn3wo
   workflow_dispatch:
     inputs:
       base_sha:
@@ -46,6 +48,10 @@ jobs:
           set -euo pipefail
           head="${INPUT_HEAD:-$EVENT_HEAD}"
           base="${INPUT_BASE:-$EVENT_BEFORE}"
+          if [[ "${GITHUB_REF_NAME:-}" == "claude/awesome-davinci-egn3wo" && -z "$INPUT_BASE" ]]; then
+            # Entire set of optimizations, not just one push.
+            base="9a1ba8c7db22d807dfe500aeec85b73838e3d110"
+          fi
           if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
             base="$(git rev-parse "$head^" 2>/dev/null || true)"
           fi
@@ -78,7 +84,11 @@ jobs:
           DELTA_FILE: ${{ steps.refs.outputs.file }}
         run: |
           set -euo pipefail
-          gh release create "$TAG" "$DELTA_FILE" \
+          options=()
+          if [[ "${GITHUB_REF_NAME:-}" != "main" ]]; then
+            options+=(--prerelease)
+          fi
+          gh release create "$TAG" "$DELTA_FILE" "${options[@]}" \
             --target "$HEAD_SHA" \
             --title "InGe+ DELTA · ${HEAD_SHA:0:12}" \
             --notes-file "${DELTA_FILE%.zip}.md" \
