@@ -946,20 +946,38 @@ public final class InGeQtActivity extends QtActivity
     }
 
     // Capability-derived request: never clamp every device to one global rate.
+    // The budget already picks a physical panel rate for the device tier. When
+    // it reaches the panel's top rate there is no request at all, so the system
+    // (adaptive/LTPO, the user's smooth-display setting) keeps deciding; when it
+    // is lower (LOW tier on a 90/120 Hz panel) the window is capped to it. The
+    // rate read at onCreate is not used: it pinned flagships idling at 60 Hz.
     private void configureAdaptiveRefreshRate() {
         try {
-            // Keep the compositor on a physical display mode. Governor values
-            // describe sustainable content cost and may be fractional; asking
-            // SurfaceFlinger for ~40.9 Hz on a 60 Hz A12 creates uneven pacing.
-            preferredRefreshRateHz = performanceRuntime == null
-                    ? 0.0f : performanceRuntime.capabilities().currentRefreshHz;
+            float requestHz = 0.0f;
+            int requestModeId = 0;
+            if (performanceRuntime != null) {
+                final float[] supported =
+                        performanceRuntime.capabilities().supportedRefreshRates;
+                final float panelMaxHz = supported.length == 0
+                        ? 0.0f : supported[supported.length - 1];
+                final float budgetHz =
+                        performanceRuntime.budget().sustainableRefreshHz;
+                if (panelMaxHz > 0.0f && budgetHz + 0.5f < panelMaxHz) {
+                    requestHz = budgetHz;
+                    requestModeId = findDisplayModeId(budgetHz);
+                }
+            }
+            preferredRefreshRateHz = requestHz;
             final android.view.WindowManager.LayoutParams params =
                     getWindow().getAttributes();
-            params.preferredRefreshRate = preferredRefreshRateHz;
+            params.preferredDisplayModeId = requestModeId;
+            params.preferredRefreshRate = requestModeId == 0 ? requestHz : 0.0f;
             getWindow().setAttributes(params);
 
             android.util.Log.i("InGePerformance",
-                    "INGE_REFRESH_REQUEST_HZ=" + preferredRefreshRateHz);
+                    "INGE_REFRESH_REQUEST_HZ=" + requestHz
+                            + " modeId=" + requestModeId
+                            + (requestHz > 0.0f ? "" : " owner=system"));
 
             getWindow().getDecorView().post(
                     () -> applyPreferredFrameRateToSurfaces(
@@ -968,6 +986,22 @@ public final class InGeQtActivity extends QtActivity
             android.util.Log.w("InGePerformance",
                     "INGE_REFRESH_REQUEST_FAILED", error);
         }
+    }
+
+    // Same resolution as the active mode: a refresh cap must never switch the
+    // panel resolution. 0 means "no mode", and the caller falls back to rate.
+    private int findDisplayModeId(float refreshHz) {
+        final android.view.Display display = getWindowManager().getDefaultDisplay();
+        if (display == null)
+            return 0;
+        final android.view.Display.Mode active = display.getMode();
+        for (android.view.Display.Mode mode : display.getSupportedModes()) {
+            if (mode.getPhysicalWidth() == active.getPhysicalWidth()
+                    && mode.getPhysicalHeight() == active.getPhysicalHeight()
+                    && Math.abs(mode.getRefreshRate() - refreshHz) <= 0.5f)
+                return mode.getModeId();
+        }
+        return 0;
     }
 
     private void applyPreferredFrameRateToSurfaces(View view) {
