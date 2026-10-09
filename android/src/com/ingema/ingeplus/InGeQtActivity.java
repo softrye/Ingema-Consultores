@@ -840,8 +840,20 @@ public final class InGeQtActivity extends QtActivity
         // refresh cap and publish the state to Qt (GraphicsCore).
         performanceRuntime.setBudgetListener(this::configureAdaptiveRefreshRate);
         performanceRuntime.startMonitoring();
-        android.util.Log.i("InGePerformance",
-                "INGE_FLUTTER_PREWARM=SELECTIVE_IDLE");
+        // Flutter (Auth/Home) is the first surface after Qt loads Main.qml.
+        // startInitialization only queues libflutter/libapp loading on
+        // Flutter's own background executor; the later entrypoint() then
+        // waits on the UI thread only for what is still pending, overlapping
+        // it with Qt's startup. Idempotent: entrypoint() calls it again.
+        try {
+            FlutterInjector.instance().flutterLoader()
+                    .startInitialization(getApplicationContext());
+            android.util.Log.i("InGePerformance",
+                    "INGE_FLUTTER_PREWARM=LOADER_STARTED");
+        } catch (Throwable error) {
+            android.util.Log.w("InGePerformance",
+                    "INGE_FLUTTER_PREWARM=FAILED", error);
+        }
         flutterLifecycle.handleLifecycleEvent(Lifecycle.Event.ON_CREATE);
     }
 
