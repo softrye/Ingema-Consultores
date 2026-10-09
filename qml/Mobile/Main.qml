@@ -1060,7 +1060,12 @@ Rectangle {
         color: profileOverlayV18.color
         Image {
             anchors.fill: parent
-            source: "qrc:/ui/v2/backgrounds/bg_topographic_lines.svg"
+            // Decoracion solo del tema Glass (liquidGlass es hoy la constante
+            // false). opacity 0 no evita decodificar el SVG de 1080x2400 (~10 MB
+            // RGBA residentes desde el arranque): sin Glass no se carga.
+            source: liquidGlass ? "qrc:/ui/v2/backgrounds/bg_topographic_lines.svg" : ""
+            sourceSize: Qt.size(Math.max(1, width), Math.max(1, height))
+            asynchronous: true
             fillMode: Image.PreserveAspectCrop
             opacity: liquidGlass ? 0.13 : 0.0
         }
@@ -5140,7 +5145,9 @@ Component {
             anchors.fill: parent
             visible: app.liquidGlass
                      && !app.flutterHomeActiveV60
-            source: "qrc:/ui/v2/backgrounds/bg_topographic_lines.svg"
+            source: app.liquidGlass ? "qrc:/ui/v2/backgrounds/bg_topographic_lines.svg" : ""
+            sourceSize: Qt.size(Math.max(1, width), Math.max(1, height))
+            asynchronous: true
             fillMode: Image.PreserveAspectCrop
             opacity: 0.34
             smooth: true
@@ -5428,7 +5435,9 @@ Component {
             }
             Image {
                 anchors.fill: parent
-                source: "qrc:/ui/v2/backgrounds/bg_topographic_lines.svg"
+                source: liquidGlass ? "qrc:/ui/v2/backgrounds/bg_topographic_lines.svg" : ""
+                sourceSize: Qt.size(Math.max(1, width), Math.max(1, height))
+                asynchronous: true
                 fillMode: Image.PreserveAspectCrop
                 opacity: liquidGlass ? 0.34 : 0.0
             }
