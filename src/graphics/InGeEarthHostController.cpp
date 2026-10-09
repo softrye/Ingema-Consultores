@@ -92,7 +92,151 @@ void InGeEarthHostController::closeEarth()
     emit stateChanged();
 }
 
+QString InGeEarthHostController::defaultMapUrl() const
+{
 #ifdef Q_OS_ANDROID
+    const QJniObject url = QJniObject::callStaticObjectMethod(
+        kQtActivityClass, "getEarthDefaultMapUrl", "()Ljava/lang/String;");
+    QJniEnvironment env;
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return {};
+    }
+    return url.isValid() ? url.toString().trimmed() : QString();
+#else
+    return {};
+#endif
+}
+
+bool InGeEarthHostController::showPicker(const QString &json, int left, int top,
+                                         int width, int height)
+{
+#ifdef Q_OS_ANDROID
+    const QJniObject payload = QJniObject::fromString(json);
+    const bool accepted = QJniObject::callStaticMethod<jboolean>(
+        kQtActivityClass, "showEarthPicker", "(Ljava/lang/String;IIII)Z",
+        payload.object<jstring>(), jint(left), jint(top), jint(width), jint(height));
+    QJniEnvironment env;
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return false;
+    }
+    return accepted;
+#else
+    Q_UNUSED(json);
+    Q_UNUSED(left);
+    Q_UNUSED(top);
+    Q_UNUSED(width);
+    Q_UNUSED(height);
+    return false;
+#endif
+}
+
+void InGeEarthHostController::updatePickerRect(int left, int top, int width, int height)
+{
+#ifdef Q_OS_ANDROID
+    QJniObject::callStaticMethod<void>(kQtActivityClass, "updateEarthPickerRect", "(IIII)V",
+                                       jint(left), jint(top), jint(width), jint(height));
+    QJniEnvironment env;
+    if (env->ExceptionCheck())
+        env->ExceptionClear();
+#else
+    Q_UNUSED(left);
+    Q_UNUSED(top);
+    Q_UNUSED(width);
+    Q_UNUSED(height);
+#endif
+}
+
+void InGeEarthHostController::setPickerPoint(const QString &json)
+{
+#ifdef Q_OS_ANDROID
+    const QJniObject payload = QJniObject::fromString(json);
+    QJniObject::callStaticMethod<void>(kQtActivityClass, "setEarthPickerPoint",
+                                       "(Ljava/lang/String;)V", payload.object<jstring>());
+    QJniEnvironment env;
+    if (env->ExceptionCheck())
+        env->ExceptionClear();
+#else
+    Q_UNUSED(json)
+#endif
+}
+
+void InGeEarthHostController::setPickerSuspended(bool suspended)
+{
+#ifdef Q_OS_ANDROID
+    QJniObject::callStaticMethod<void>(kQtActivityClass, "setEarthPickerSuspended", "(Z)V",
+                                       suspended ? JNI_TRUE : JNI_FALSE);
+    QJniEnvironment env;
+    if (env->ExceptionCheck())
+        env->ExceptionClear();
+#else
+    Q_UNUSED(suspended)
+#endif
+}
+
+void InGeEarthHostController::hidePicker()
+{
+#ifdef Q_OS_ANDROID
+    QJniObject::callStaticMethod<void>(kQtActivityClass, "hideEarthPicker", "()V");
+    QJniEnvironment env;
+    if (env->ExceptionCheck())
+        env->ExceptionClear();
+#endif
+}
+
+#ifdef Q_OS_ANDROID
+extern "C" JNIEXPORT void JNICALL
+Java_com_ingema_ingeplus_InGeQtActivity_nativeEarthPickerSelected(
+    JNIEnv *, jclass, jdouble latitude, jdouble longitude)
+{
+    const QPointer<InGeEarthHostController> controller = g_earthHostController;
+    if (!controller)
+        return;
+    QMetaObject::invokeMethod(
+        controller,
+        [controller, latitude, longitude]() {
+            if (controller)
+                emit controller->pickerPointSelected(latitude, longitude);
+        },
+        Qt::QueuedConnection);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_ingema_ingeplus_InGeQtActivity_nativeEarthPickerSnapshot(
+    JNIEnv *, jclass, jstring mapType, jdouble latitude, jdouble longitude, jstring dataUrl)
+{
+    const QPointer<InGeEarthHostController> controller = g_earthHostController;
+    if (!controller || !dataUrl)
+        return;
+    const QString type = mapType ? QJniObject(mapType).toString() : QStringLiteral("DEFAULT");
+    const QString url = QJniObject(dataUrl).toString();
+    QMetaObject::invokeMethod(
+        controller,
+        [controller, type, latitude, longitude, url]() {
+            if (controller)
+                emit controller->pickerSnapshot(type, latitude, longitude, url);
+        },
+        Qt::QueuedConnection);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_ingema_ingeplus_InGeQtActivity_nativeEarthPickerState(
+    JNIEnv *, jclass, jstring state)
+{
+    const QPointer<InGeEarthHostController> controller = g_earthHostController;
+    if (!controller)
+        return;
+    const QString text = state ? QJniObject(state).toString().left(48) : QString();
+    QMetaObject::invokeMethod(
+        controller,
+        [controller, text]() {
+            if (controller)
+                emit controller->pickerStateChanged(text);
+        },
+        Qt::QueuedConnection);
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_ingema_ingeplus_InGeQtActivity_nativeRequestEarthBackToHome(
     JNIEnv *, jclass)

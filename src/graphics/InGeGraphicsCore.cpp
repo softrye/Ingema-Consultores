@@ -151,8 +151,58 @@ void InGeGraphicsCore::setEarthHostController(
                     }
                     emit stateChanged();
                 });
+        connect(controller, &InGeEarthHostController::pickerPointSelected,
+                this, &InGeGraphicsCore::earthPickerPointSelected);
+        connect(controller, &InGeEarthHostController::pickerStateChanged,
+                this, &InGeGraphicsCore::earthPickerStateChanged);
+        connect(controller, &InGeEarthHostController::pickerSnapshot, this,
+                [this](const QString &mapType, double latitude, double longitude,
+                       const QString &dataUrl) {
+                    m_pickerMapType = mapType;
+                    m_pickerSnapshotUrl = dataUrl;
+                    m_pickerSnapshotLat = latitude;
+                    m_pickerSnapshotLon = longitude;
+                    emit earthPickerSnapshotChanged();
+                });
     }
     emit stateChanged();
+}
+
+bool InGeGraphicsCore::openEarthPicker(const QString &json, int left, int top,
+                                       int width, int height)
+{
+    if (!m_earthAvailable || !m_earthHostController || width <= 0 || height <= 0)
+        return false;
+    return m_earthHostController->showPicker(json, left, top, width, height);
+}
+
+void InGeGraphicsCore::updateEarthPickerRect(int left, int top, int width, int height)
+{
+    if (m_earthHostController && width > 0 && height > 0)
+        m_earthHostController->updatePickerRect(left, top, width, height);
+}
+
+void InGeGraphicsCore::setEarthPickerPoint(const QString &json)
+{
+    if (m_earthHostController)
+        m_earthHostController->setPickerPoint(json);
+}
+
+void InGeGraphicsCore::setEarthPickerSuspended(bool suspended)
+{
+    if (m_earthHostController)
+        m_earthHostController->setPickerSuspended(suspended);
+}
+
+QString InGeGraphicsCore::earthBaseMapUrl() const
+{
+    return m_earthHostController ? m_earthHostController->defaultMapUrl() : QString();
+}
+
+void InGeGraphicsCore::closeEarthPicker()
+{
+    if (m_earthHostController)
+        m_earthHostController->hidePicker();
 }
 
 void InGeGraphicsCore::attachWindow(QQuickWindow *window)

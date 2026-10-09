@@ -5093,6 +5093,10 @@ Page {
             CalPopup {
                 id: distantPointConfirm
                 property real distanceKm: 0
+                // El mapa Cesium es una vista nativa sobre Qt: se oculta mientras
+                // este diálogo lo cubre y vuelve intacto al cerrarlo.
+                onOpened: if (coordinateMap.item) coordinateMap.item.mapSuspended = true
+                onClosed: if (coordinateMap.item) coordinateMap.item.mapSuspended = false
                 width: Math.min(root.width - root.__dp(48), root.__dp(380))
                 x: (root.width - width) / 2
                 baseY: (root.height - height) / 2

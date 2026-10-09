@@ -43,9 +43,12 @@
     if (/\{z\}/i.test(baseUrl)) return baseUrl;
     return `${baseUrl.replace(/\/+$/, '')}/{z}/{x}/{y}.png`;
   };
+  // Mapa base sin claves: si no se configura DEFAULT_MAP_URL se usan las
+  // teselas públicas de OpenStreetMap (con su atribución). Producción puede
+  // apuntar DEFAULT_MAP_URL a un servidor de teselas propio o contratado.
+  const PUBLIC_OSM_TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
   const createDefaultImageryProvider = () => {
-    const url = normalizedXyzUrl(config.defaultMapUrl);
-    if (!url) throw new Error('DEFAULT_MAP_URL_NOT_CONFIGURED');
+    const url = normalizedXyzUrl(config.defaultMapUrl) || PUBLIC_OSM_TILES;
     return new Cesium.UrlTemplateImageryProvider({
       url,
       maximumLevel: 19,
@@ -354,9 +357,17 @@
     else if (action === 'recalculate') calculateRoute();
     else if (action === 'close') closeRoute();
   });
+  // Selector de Calicatas: usa la misma capa de calles y, al salir, devuelve
+  // a InGe Earth exactamente el tipo de mapa que tenía.
+  const restoreMapType = (mapType) => {
+    if (mapType === 'DEFAULT' || mapType === 'SATELLITE') state.mapType = mapType;
+    renderMapState();
+  };
   window.InGeEarthMapDetails = {
     state,
     setMapType,
+    restoreMapType,
+    ensureDefaultLayer: () => { try { return ensureDefaultMapLayer(); } catch (ignored) { return null; } },
     setRelief,
     startRoute,
     closeRoute,
@@ -367,7 +378,10 @@
       valhallaConfigured: Boolean(config.valhallaBaseUrl)
     })
   };
+  // Sin Cesium ion no hay imagen satelital detallada: InGe Earth arranca en el
+  // mapa de calles (sin claves) en lugar del globo de baja resolución.
+  if (!runtime.ionConfigured) setMapType('DEFAULT');
   renderMapState();
   renderRouteUi();
-  log(`DEFAULT_MAP=${config.defaultMapUrl ? 'CONFIGURED' : 'NOT_CONFIGURED'} TERRAIN=${config.terrainUrl || runtime.ionConfigured ? 'CONFIGURED' : 'NOT_CONFIGURED'} VALHALLA=${config.valhallaBaseUrl ? 'CONFIGURED' : 'NOT_CONFIGURED'}`);
+  log(`DEFAULT_MAP=${config.defaultMapUrl ? 'CONFIGURED' : 'PUBLIC_OSM'} TERRAIN=${config.terrainUrl || runtime.ionConfigured ? 'CONFIGURED' : 'NOT_CONFIGURED'} VALHALLA=${config.valhallaBaseUrl ? 'CONFIGURED' : 'NOT_CONFIGURED'}`);
 })();

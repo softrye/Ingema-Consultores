@@ -51,6 +51,9 @@ Q_LOGGING_CATEGORY(lcNet, "inge.net")
 #ifdef Q_OS_ANDROID
 #include <QJniObject>
 #include <QPointer>
+#include <QNetworkAccessManager>
+#include <QNetworkRequest>
+#include <QQmlNetworkAccessManagerFactory>
 static QPointer<QObject> globalBackRoot;
 
 extern "C" JNIEXPORT void JNICALL
@@ -221,6 +224,32 @@ int main(int argc, char *argv[])
 
     qInfo() << "INGE_STARTUP_STAGE SERVICES_READY";
     QQmlApplicationEngine engine;
+    {
+        class IdentifiedNetworkAccessManager final : public QNetworkAccessManager
+        {
+        public:
+            using QNetworkAccessManager::QNetworkAccessManager;
+        protected:
+            QNetworkReply *createRequest(Operation op, const QNetworkRequest &request,
+                                         QIODevice *data) override
+            {
+                QNetworkRequest identified(request);
+                identified.setHeader(QNetworkRequest::UserAgentHeader,
+                                     QStringLiteral("InGePlus-Android/1.0 (Ingema Consultores; com.ingema.ingeplus)"));
+                return QNetworkAccessManager::createRequest(op, identified, data);
+            }
+        };
+        class IdentifiedNetworkFactory final : public QQmlNetworkAccessManagerFactory
+        {
+        public:
+            QNetworkAccessManager *create(QObject *parent) override
+            {
+                return new IdentifiedNetworkAccessManager(parent);
+            }
+        };
+        static IdentifiedNetworkFactory identifiedNetworkFactory;
+        engine.setNetworkAccessManagerFactory(&identifiedNetworkFactory);
+    }
     engine.addImageProvider("nothingvideo",new NothingVideoProvider);
     // Al pasar a segundo plano (camara del OEM, otra app) Android decide que
     // proceso matar por su memoria. Qt bloquea su bucle poco despues de

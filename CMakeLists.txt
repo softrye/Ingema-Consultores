@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(AppCalicatasDemo VERSION 1.1.9 LANGUAGES CXX)
+project(AppCalicatasDemo VERSION 1.1.10 LANGUAGES CXX)
 
 # ---------------------------------------------------------
 # INGE+ ANDROID RELEASE â€” Qt 6.9.3 / arm64-v8a

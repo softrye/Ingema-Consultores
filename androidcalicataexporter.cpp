@@ -848,6 +848,10 @@ QString firstText(const QVariantMap &map, const QStringList &keys)
 // asignado usa el nombre antiguo guardado en su encabezado.
 QString exportProjectName(const QVariantMap &header, const QVariantMap &timestamp = {})
 {
+    // Denominación oficial escrita en la ficha (Nombre del proyecto) manda.
+    const QString official = firstText(header, {QStringLiteral("project_full_name")});
+    if (!official.isEmpty())
+        return official;
     if (!header.value(QStringLiteral("projectId")).toString().trimmed().isEmpty()) {
         const QString name = firstText(header, {QStringLiteral("projectName"), QStringLiteral("project_name")});
         if (!name.isEmpty()) return name;

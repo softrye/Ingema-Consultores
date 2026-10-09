@@ -159,6 +159,20 @@ public final class InGeQtActivity extends QtActivity
     private boolean earthViewAttached;
     private boolean earthRendererActive;
     private WebView earthWebView;
+    // Pantalla de carga cartográfica ÚNICA (InGe Earth y selector de Calicatas).
+    private static final long MAP_LOADING_TIMEOUT_MS = 20_000L;
+    private static final long MAP_LOADING_FADE_MS = 260L;
+    private final Handler mapLoadingHandler = new Handler(Looper.getMainLooper());
+    private final Runnable mapLoadingTimeout = this::onMapLoadingTimeout;
+    private FrameLayout mapLoadingOverlay;
+    private android.widget.ProgressBar mapLoadingSpinner;
+    private android.widget.TextView mapLoadingText;
+    private android.widget.TextView mapLoadingRetry;
+    private boolean mapLoadingActive;
+    private int mapLoadingSession = -1;
+    private String mapLoadingType = "DEFAULT";
+    private String mapLoadingReason = "";
+    private long mapLoadingStartedAt;
     private InGeAssistantWebHost assistantHost;
 
     public static boolean showAssistant(String visuals) {
@@ -185,6 +199,12 @@ public final class InGeQtActivity extends QtActivity
     }
     private WebViewAssetLoader earthAssetLoader;
     private boolean earthWebViewLoaded;
+    // Selector de coordenadas de Calicatas: el MISMO WebView/Cesium de Earth,
+    // colocado sobre el área de mapa del selector Qt (nunca un segundo motor).
+    private volatile boolean earthPickerActive;
+    private boolean earthPickerSuspended;
+    private String pendingEarthPickerJson = "";
+    private final int[] earthPickerRect = new int[4];
     private String pendingEarthFocusJson = "";
     private volatile boolean earthBackTransitionInProgress;
     private volatile boolean earthHomeNavigationRequested;
@@ -269,6 +289,11 @@ public final class InGeQtActivity extends QtActivity
     private void exitFromHome() {
         super.onBackPressed();
     }
+
+    private static native void nativeEarthPickerSelected(double latitude, double longitude);
+    private static native void nativeEarthPickerState(String state);
+    private static native void nativeEarthPickerSnapshot(String mapType, double latitude,
+            double longitude, String dataUrl);
 
     private static native boolean nativeUseEarthPointInCalicata(
             double latitude, double longitude, double altitude, double accuracy,
@@ -559,6 +584,13 @@ public final class InGeQtActivity extends QtActivity
         return flutterLifecycle;
     }
 
+    // Mapa base de InGe Earth (DEFAULT_MAP_URL): la vista previa Qt de
+    // Calicatas usa el mismo servidor de teselas que Cesium.
+    public static String getEarthDefaultMapUrl() {
+        final String url = BuildConfig.DEFAULT_MAP_URL;
+        return url == null ? "" : url.trim();
+    }
+
     public static boolean isEarthAvailable() {
         return current.get() != null;
     }
@@ -737,6 +769,347 @@ public final class InGeQtActivity extends QtActivity
         return true;
     }
 
+    // Rect en píxeles de pantalla (coordenadas globales de la ventana Qt).
+    public static boolean showEarthPicker(String json, int left, int top, int width, int height) {
+        final InGeQtActivity activity = current.get();
+        if (activity == null || width <= 0 || height <= 0)
+            return false;
+        final String payload = json == null ? "{}" : json;
+        activity.runOnUiThread(() -> activity.enterEarthPicker(payload, left, top, width, height));
+        return true;
+    }
+
+    public static void updateEarthPickerRect(int left, int top, int width, int height) {
+        final InGeQtActivity activity = current.get();
+        if (activity == null || width <= 0 || height <= 0)
+            return;
+        activity.runOnUiThread(() -> {
+            if (!activity.earthPickerActive)
+                return;
+            activity.earthPickerRect[0] = left;
+            activity.earthPickerRect[1] = top;
+            activity.earthPickerRect[2] = width;
+            activity.earthPickerRect[3] = height;
+            activity.applyEarthPickerLayout();
+        });
+    }
+
+    public static void setEarthPickerPoint(String json) {
+        final InGeQtActivity activity = current.get();
+        if (activity == null || json == null || json.length() > 2048)
+            return;
+        activity.runOnUiThread(() -> activity.runEarthPickerScript(
+                "window.InGeEarthPicker&&window.InGeEarthPicker.setPoint(" + JSONObject.quote(json) + ");"));
+    }
+
+    // Diálogos Qt que se superponen al mapa: el WebView se oculta sin perder estado.
+    public static void setEarthPickerSuspended(boolean suspended) {
+        final InGeQtActivity activity = current.get();
+        if (activity == null)
+            return;
+        activity.runOnUiThread(() -> {
+            activity.earthPickerSuspended = suspended;
+            if (activity.earthPickerActive && activity.earthWebView != null)
+                activity.earthWebView.setVisibility(suspended ? View.INVISIBLE : View.VISIBLE);
+                activity.syncMapLoadingLayout();
+        });
+    }
+
+    public static void hideEarthPicker() {
+        final InGeQtActivity activity = current.get();
+        if (activity == null)
+            return;
+        activity.runOnUiThread(activity::exitEarthPicker);
+    }
+
+    private void enterEarthPicker(String json, int left, int top, int width, int height) {
+        if (earthRequested) {
+            // InGe Earth a pantalla completa ya usa el viewer: no se comparte a la vez.
+            notifyEarthPickerState("ERROR_EARTH_ACTIVE");
+            return;
+        }
+        try {
+            ensureDirectEarthWebView();
+        } catch (Throwable error) {
+            android.util.Log.e("InGeEarthPicker", "INGE_EARTH_PICKER_WEBVIEW_FAILED", error);
+            notifyEarthPickerState("ERROR_WEBVIEW");
+            return;
+        }
+        earthPickerActive = true;
+        earthPickerSuspended = false;
+        earthPickerRect[0] = left;
+        earthPickerRect[1] = top;
+        earthPickerRect[2] = width;
+        earthPickerRect[3] = height;
+        pendingEarthPickerJson = json;
+        applyEarthPickerLayout();
+        earthWebView.animate().cancel();
+        earthWebView.setAlpha(1.0f);
+        earthWebView.onResume();
+        earthWebView.setEnabled(true);
+        earthWebView.setVisibility(View.VISIBLE);
+        earthWebView.bringToFront();
+        showMapLoading("picker");
+        notifyEarthPickerState(earthWebViewLoaded ? "LOADING_VIEW" : "LOADING_ENGINE");
+        deliverPendingEarthPicker();
+        android.util.Log.i("InGeEarthPicker", "INGE_EARTH_PICKER_SHOWN loaded=" + earthWebViewLoaded
+                + " rect=" + width + "x" + height);
+    }
+
+    private void applyEarthPickerLayout() {
+        final WebView webView = earthWebView;
+        if (webView == null || !earthPickerActive)
+            return;
+        final FrameLayout content = findViewById(android.R.id.content);
+        final int[] origin = new int[2];
+        if (content != null)
+            content.getLocationOnScreen(origin);
+        final FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                earthPickerRect[2], earthPickerRect[3], Gravity.TOP | Gravity.START);
+        params.leftMargin = Math.max(0, earthPickerRect[0] - origin[0]);
+        params.topMargin = Math.max(0, earthPickerRect[1] - origin[1]);
+        webView.setLayoutParams(params);
+        syncMapLoadingLayout();
+    }
+
+    private void deliverPendingEarthPicker() {
+        final WebView webView = earthWebView;
+        if (webView == null || !earthWebViewLoaded || !earthPickerActive
+                || pendingEarthPickerJson.isEmpty())
+            return;
+        final String json = pendingEarthPickerJson;
+        pendingEarthPickerJson = "";
+        webView.evaluateJavascript(
+                "(function(){return !!(window.InGeEarthPicker&&window.InGeEarthPicker.enter("
+                        + JSONObject.quote(json) + "));})();",
+                result -> notifyEarthPickerState("true".equals(result) ? "READY" : "ERROR_SCRIPT"));
+    }
+
+    private void runEarthPickerScript(String script) {
+        final WebView webView = earthWebView;
+        if (webView == null || !earthWebViewLoaded || !earthPickerActive)
+            return;
+        webView.evaluateJavascript(script, null);
+    }
+
+    private void exitEarthPicker() {
+        if (!earthPickerActive)
+            return;
+        earthPickerActive = false;
+        earthPickerSuspended = false;
+        pendingEarthPickerJson = "";
+        cancelMapLoading("picker_closed");
+        final WebView webView = earthWebView;
+        if (webView != null) {
+            if (earthWebViewLoaded)
+                webView.evaluateJavascript(
+                        "window.InGeEarthPicker&&window.InGeEarthPicker.exit();", null);
+            webView.setVisibility(View.GONE);
+            webView.setEnabled(false);
+            webView.setLayoutParams(new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    Gravity.TOP | Gravity.START));
+            applyContextDockBand(webView);
+            webView.onPause();
+        }
+        notifyEarthPickerState("CLOSED");
+        android.util.Log.i("InGeEarthPicker", "INGE_EARTH_PICKER_HIDDEN");
+    }
+
+    private void ensureMapLoadingOverlay() {
+        if (mapLoadingOverlay != null)
+            return;
+        final float dp = getResources().getDisplayMetrics().density;
+        final FrameLayout overlay = new FrameLayout(this);
+        overlay.setBackgroundColor(Color.rgb(0xEE, 0xF3, 0xF8));
+        overlay.setClickable(true);      // el mapa no recibe toques mientras carga
+        overlay.setFocusable(true);
+        overlay.setContentDescription("Cargando mapa");
+        final android.widget.LinearLayout column = new android.widget.LinearLayout(this);
+        column.setOrientation(android.widget.LinearLayout.VERTICAL);
+        column.setGravity(Gravity.CENTER_HORIZONTAL);
+        final android.widget.ProgressBar spinner = new android.widget.ProgressBar(this);
+        spinner.setIndeterminate(true);
+        spinner.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(
+                Color.rgb(0x1F, 0x6F, 0xB2)));
+        column.addView(spinner, new android.widget.LinearLayout.LayoutParams(
+                Math.round(40 * dp), Math.round(40 * dp)));
+        final android.widget.TextView text = new android.widget.TextView(this);
+        text.setText("Cargando mapa…");
+        text.setTextColor(Color.rgb(0x33, 0x41, 0x55));
+        text.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
+        text.setGravity(Gravity.CENTER);
+        final android.widget.LinearLayout.LayoutParams textParams =
+                new android.widget.LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        textParams.topMargin = Math.round(12 * dp);
+        column.addView(text, textParams);
+        final android.widget.TextView retry = new android.widget.TextView(this);
+        retry.setText("Reintentar");
+        retry.setTextColor(Color.WHITE);
+        retry.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
+        retry.setGravity(Gravity.CENTER);
+        final android.graphics.drawable.GradientDrawable pill =
+                new android.graphics.drawable.GradientDrawable();
+        pill.setColor(Color.rgb(0x1F, 0x6F, 0xB2));
+        pill.setCornerRadius(22 * dp);
+        retry.setBackground(pill);
+        retry.setPadding(Math.round(22 * dp), Math.round(10 * dp),
+                Math.round(22 * dp), Math.round(10 * dp));
+        retry.setVisibility(View.GONE);
+        retry.setOnClickListener(view -> retryMapLoading("user"));
+        final android.widget.LinearLayout.LayoutParams retryParams =
+                new android.widget.LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, Math.round(44 * dp));
+        retryParams.topMargin = Math.round(16 * dp);
+        column.addView(retry, retryParams);
+        overlay.addView(column, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER));
+        overlay.setVisibility(View.GONE);
+        final FrameLayout content = findViewById(android.R.id.content);
+        content.addView(overlay, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+                Gravity.TOP | Gravity.START));
+        mapLoadingOverlay = overlay;
+        mapLoadingSpinner = spinner;
+        mapLoadingText = text;
+        mapLoadingRetry = retry;
+    }
+
+    // Misma geometría y visibilidad que el WebView (selector: rectángulo; Earth: pantalla).
+    private void syncMapLoadingLayout() {
+        final FrameLayout overlay = mapLoadingOverlay;
+        final WebView webView = earthWebView;
+        if (overlay == null || !mapLoadingActive || webView == null)
+            return;
+        final ViewGroup.LayoutParams source = webView.getLayoutParams();
+        if (source instanceof FrameLayout.LayoutParams)
+            overlay.setLayoutParams(new FrameLayout.LayoutParams((FrameLayout.LayoutParams) source));
+        overlay.setVisibility(webView.getVisibility() == View.VISIBLE ? View.VISIBLE : View.INVISIBLE);
+        overlay.bringToFront();
+    }
+
+    private void showMapLoading(String reason) {
+        ensureMapLoadingOverlay();
+        final boolean restart = !mapLoadingActive;
+        mapLoadingActive = true;
+        mapLoadingSession = -1;          // acepta solo el BEGIN de la sesión nueva
+        mapLoadingReason = reason;
+        if (restart)
+            mapLoadingStartedAt = SystemClock.uptimeMillis();
+        mapLoadingOverlay.animate().cancel();
+        mapLoadingOverlay.setAlpha(1.0f);
+        mapLoadingSpinner.setVisibility(View.VISIBLE);
+        mapLoadingText.setText("Cargando mapa…");
+        mapLoadingRetry.setVisibility(View.GONE);
+        syncMapLoadingLayout();
+        mapLoadingHandler.removeCallbacks(mapLoadingTimeout);
+        mapLoadingHandler.postDelayed(mapLoadingTimeout, MAP_LOADING_TIMEOUT_MS);
+        if (restart)
+            android.util.Log.i("InGeMapLoading", "INGE_MAP_LOAD_BEGIN reason=" + reason);
+    }
+
+    private void onMapLoadingEvent(String state, int session, String type, int jsMs) {
+        if ("CANCELLED".equals(state))
+            return;                      // la cancelación la decide el host
+        if ("BEGIN".equals(state)) {
+            if (!mapLoadingActive)
+                showMapLoading("layer");  // Mapa <-> Satélite o salto programático
+            mapLoadingSession = session;
+            mapLoadingType = type;
+            return;
+        }
+        if (!mapLoadingActive || session != mapLoadingSession) {
+            android.util.Log.i("InGeMapLoading", "INGE_MAP_STALE_EVENT " + state + " session=" + session);
+            return;
+        }
+        final long ms = SystemClock.uptimeMillis() - mapLoadingStartedAt;
+        android.util.Log.i("InGeMapLoading", "INGE_MAP_" + state + " ms=" + ms + " sessionMs=" + jsMs
+                + " type=" + type + " reason=" + mapLoadingReason);
+        if ("VISUAL_READY".equals(state))
+            revealMapLoading();
+    }
+
+    private void revealMapLoading() {
+        mapLoadingActive = false;
+        mapLoadingHandler.removeCallbacks(mapLoadingTimeout);
+        final FrameLayout overlay = mapLoadingOverlay;
+        if (overlay == null)
+            return;
+        final long ms = SystemClock.uptimeMillis() - mapLoadingStartedAt;
+        final String type = mapLoadingType;
+        final Runnable revealed = () -> {
+            overlay.setVisibility(View.GONE);
+            android.util.Log.i("InGeMapLoading", "INGE_MAP_REVEALED ms=" + ms + " type=" + type);
+        };
+        overlay.animate().cancel();
+        // Movimiento reducido (escala de animación 0): retirada inmediata.
+        if (!android.animation.ValueAnimator.areAnimatorsEnabled()
+                || overlay.getVisibility() != View.VISIBLE) {
+            revealed.run();
+            return;
+        }
+        overlay.animate().alpha(0.0f).setDuration(MAP_LOADING_FADE_MS)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f))
+                .withEndAction(revealed).start();
+    }
+
+    private void onMapLoadingTimeout() {
+        if (!mapLoadingActive || mapLoadingOverlay == null)
+            return;
+        android.util.Log.w("InGeMapLoading", "INGE_MAP_LOAD_TIMEOUT ms="
+                + (SystemClock.uptimeMillis() - mapLoadingStartedAt) + " type=" + mapLoadingType
+                + " reason=" + mapLoadingReason);
+        mapLoadingSpinner.setVisibility(View.GONE);
+        mapLoadingText.setText("El mapa tarda en cargar. Revisa la conexión.");
+        mapLoadingRetry.setVisibility(View.VISIBLE);
+    }
+
+    private void retryMapLoading(String why) {
+        if (!mapLoadingActive)
+            return;
+        mapLoadingStartedAt = SystemClock.uptimeMillis();
+        showMapLoading(mapLoadingReason);
+        final WebView webView = earthWebView;
+        if (webView == null)
+            return;
+        if (!earthWebViewLoaded) {
+            if ("user".equals(why))
+                webView.reload();
+            return;
+        }
+        webView.evaluateJavascript("(window.InGeEarthPicker&&window.InGeEarthPicker.isActive()"
+                + "&&window.InGeEarthPicker.reload())"
+                + "||(window.InGeMapLoading&&window.InGeMapLoading.retry());", null);
+    }
+
+    private void cancelMapLoading(String reason) {
+        mapLoadingHandler.removeCallbacks(mapLoadingTimeout);
+        if (!mapLoadingActive)
+            return;
+        mapLoadingActive = false;
+        mapLoadingSession = -1;
+        if (mapLoadingOverlay != null) {
+            mapLoadingOverlay.animate().cancel();
+            mapLoadingOverlay.setVisibility(View.GONE);
+        }
+        android.util.Log.i("InGeMapLoading", "INGE_MAP_LOAD_CANCELLED ms="
+                + (SystemClock.uptimeMillis() - mapLoadingStartedAt) + " reason=" + reason);
+        final WebView webView = earthWebView;
+        if (webView != null && earthWebViewLoaded)
+            webView.evaluateJavascript("window.InGeMapLoading&&window.InGeMapLoading.cancel();", null);
+    }
+
+    private void notifyEarthPickerState(String state) {
+        try {
+            nativeEarthPickerState(state);
+        } catch (Throwable error) {
+            android.util.Log.e("InGeEarthPicker", "INGE_EARTH_PICKER_STATE_FAILED", error);
+        }
+    }
+
     public static boolean isFlutterHomeReady() {
         final InGeQtActivity activity = current.get();
         return activity != null && activity.homeReady && activity.homeView != null;
@@ -877,6 +1250,16 @@ public final class InGeQtActivity extends QtActivity
             homeEngine.getLifecycleChannel().appIsPaused();
         if (homeRequested && homeEngine != null && homeView != null)
             resumeFlutterViewAfterActivityResume(homeView);
+        if (mapLoadingActive) {
+            mapLoadingHandler.removeCallbacks(mapLoadingTimeout);
+            mapLoadingHandler.postDelayed(mapLoadingTimeout, MAP_LOADING_TIMEOUT_MS);
+            retryMapLoading("resume");
+        }
+        if (earthPickerActive && earthWebView != null) {
+            earthWebView.onResume();
+            earthWebView.setVisibility(earthPickerSuspended ? View.INVISIBLE : View.VISIBLE);
+            applyEarthPickerLayout();
+        }
         if (earthRequested)
             applyDirectEarthVisibility(true);
         else if (homeRequested && homeEngine == null)
@@ -889,6 +1272,7 @@ public final class InGeQtActivity extends QtActivity
         android.util.Log.i("InGeLifecycle",
                 "INGE_ACTIVITY_ON_PAUSE instance=" + System.identityHashCode(this));
         activityResumed = false;
+        mapLoadingHandler.removeCallbacks(mapLoadingTimeout);
         emitBetaPerformanceSample();
         performanceHandler.removeCallbacks(betaPerformanceSample);
         emitBetaDiagnostic("LIFECYCLE", "INFO", "ON_PAUSE", null, null, null);
@@ -908,6 +1292,8 @@ public final class InGeQtActivity extends QtActivity
         if (earthRequested && earthWebView != null) {
             emitEarthPageVisibility(false);
             stopEarthLocationSearch();
+            earthWebView.onPause();
+        } else if (earthPickerActive && earthWebView != null) {
             earthWebView.onPause();
         }
 
@@ -1369,6 +1755,8 @@ public final class InGeQtActivity extends QtActivity
             hideDirectEarthWebView(!earthBackTransitionInProgress);
             return;
         }
+        if (earthPickerActive)
+            exitEarthPicker();
         performanceHandler.removeCallbacks(releaseHiddenEarthRunnable);
         homeRequested = false;
         parkFlutterView(homeView);
@@ -1384,6 +1772,8 @@ public final class InGeQtActivity extends QtActivity
             earthWebView.setEnabled(true);
             earthWebView.bringToFront();
             earthWebView.requestFocus();
+            if (!earthWasShown || mapLoadingActive)
+                showMapLoading("earth");
             emitEarthPageVisibility(true);
             deliverPendingEarthFocus();
             android.util.Log.i("InGeEarthDirect",
@@ -1415,13 +1805,15 @@ public final class InGeQtActivity extends QtActivity
             private boolean dockGesture;
             @Override public void draw(Canvas canvas) {
                 final int save = canvas.save();
-                clipNativeDock(canvas, getWidth(), getHeight());
+                if (!earthPickerActive)
+                    clipNativeDock(canvas, getWidth(), getHeight());
                 super.draw(canvas);
                 canvas.restoreToCount(save);
             }
             @Override public boolean dispatchTouchEvent(MotionEvent event) {
                 if (event.getActionMasked() == MotionEvent.ACTION_DOWN)
-                    dockGesture = dockOwnsTouch(event, getWidth(), getHeight());
+                    dockGesture = !earthPickerActive
+                            && dockOwnsTouch(event, getWidth(), getHeight());
                 // Latch on DOWN so map gestures crossing the dock are intact.
                 return !dockGesture && super.dispatchTouchEvent(event);
             }
@@ -1457,9 +1849,11 @@ public final class InGeQtActivity extends QtActivity
             @Override
             public void onPageFinished(WebView view, String url) {
                 earthWebViewLoaded = true;
-                emitEarthPageVisibility(earthRequested
-                        && view.getVisibility() == View.VISIBLE);
+                if (!earthPickerActive)
+                    emitEarthPageVisibility(earthRequested
+                            && view.getVisibility() == View.VISIBLE);
                 deliverPendingEarthFocus();
+                deliverPendingEarthPicker();
                 android.util.Log.i("InGeEarthDirect",
                         "INGE_EARTH_DIRECT_PAGE_LOADED url=" + url);
             }
@@ -1498,6 +1892,7 @@ public final class InGeQtActivity extends QtActivity
     }
 
     private void hideDirectEarthWebView(boolean releaseBackCallback) {
+        cancelMapLoading("earth_closed");
         emitEarthPageVisibility(false);
         stopEarthLocationSearch();
         if (earthWebView != null) {
@@ -1639,6 +2034,7 @@ public final class InGeQtActivity extends QtActivity
         earthWebView = null;
         earthAssetLoader = null;
         earthWebViewLoaded = false;
+        cancelMapLoading("webview_destroyed");
         if (webView == null)
             return;
         try { webView.removeJavascriptInterface("InGeEarthTelemetry"); }
@@ -1781,6 +2177,14 @@ public final class InGeQtActivity extends QtActivity
 
     private final class EarthUiBridge {
         @JavascriptInterface
+        public void mapLoading(String state, int session, String mapType, int elapsedMs) {
+            if (state == null || !state.matches("[A-Z_]{1,24}"))
+                return;
+            final String type = mapType != null && mapType.matches("[A-Z_]{1,24}") ? mapType : "DEFAULT";
+            runOnUiThread(() -> onMapLoadingEvent(state, session, type, elapsedMs));
+        }
+
+        @JavascriptInterface
         public void publishDockBackdrop(String json) {
             if (json == null || json.length() > 65536)
                 return;
@@ -1817,6 +2221,38 @@ public final class InGeQtActivity extends QtActivity
             try {
                 nativeDockComplete(json);
             } catch (Throwable ignored) {
+            }
+        }
+
+        @JavascriptInterface
+        public boolean pickerSelected(double latitude, double longitude) {
+            if (!earthPickerActive || !Double.isFinite(latitude) || !Double.isFinite(longitude)
+                    || latitude < -90.0 || latitude > 90.0
+                    || longitude < -180.0 || longitude > 180.0)
+                return false;
+            try {
+                nativeEarthPickerSelected(latitude, longitude);
+                return true;
+            } catch (Throwable error) {
+                android.util.Log.e("InGeEarthPicker", "INGE_EARTH_PICKER_SELECT_FAILED", error);
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public boolean pickerSnapshot(String mapType, double latitude, double longitude, String dataUrl) {
+            if (mapType == null || dataUrl == null || dataUrl.length() > 700_000
+                    || !dataUrl.startsWith("data:image/jpeg;base64,")
+                    || ("SATELLITE".equals(mapType) && dataUrl.length() < 1024)
+                    || !Double.isFinite(latitude) || !Double.isFinite(longitude))
+                return false;
+            try {
+                nativeEarthPickerSnapshot("SATELLITE".equals(mapType) ? "SATELLITE" : "DEFAULT",
+                        latitude, longitude, dataUrl);
+                return true;
+            } catch (Throwable error) {
+                android.util.Log.e("InGeEarthPicker", "INGE_EARTH_PICKER_SNAPSHOT_FAILED", error);
+                return false;
             }
         }
 

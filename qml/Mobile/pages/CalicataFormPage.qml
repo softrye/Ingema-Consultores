@@ -10513,16 +10513,24 @@ Item {
                     font.pixelSize: root.fsLabel
                     wrapMode: Text.WordWrap
                 }
-                Text {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: root.dp(4)
-                    readonly property string legacyName: root.doc && !root.doc.header.projectId
-                        ? String(root.doc.header.project_full_name || root.doc.header.excel_title || "").trim() : ""
-                    text: "Nombre registrado antes de asignar proyecto: " + legacyName
-                    visible: legacyName.length > 0
-                    color: root.cMuted
-                    font.pixelSize: root.fsLabel
-                    wrapMode: Text.WordWrap
+                // Denominación oficial completa (header.project_full_name; dato de la
+                // ficha, independiente de projects.name y del nombre corto).
+                GenHeaderField {
+                    label: "Nombre del proyecto"
+                    labelCaps: true
+                    iconName: "calgen.project"
+                    headerKey: "project_full_name"
+                    inputPlaceholder: "Denominación oficial completa del proyecto"
+                    inputMaximumLength: 600
+                }
+                // Nombre corto (rótulo de fotografías y vistas compactas).
+                GenHeaderField {
+                    label: "Nombre corto del proyecto"
+                    labelCaps: true
+                    iconName: "calgen.project"
+                    headerKey: "project_short_name"
+                    inputPlaceholder: "Ej.: Lechemayo"
+                    inputMaximumLength: 80
                 }
 
                 // ---- Fechas y responsable ----
@@ -10611,10 +10619,26 @@ Item {
                 // edita en el detalle; su valor se conserva y viaja tal cual.
                 GenGroupHeader { title: "FICHA"; accent: root.cGenBlue }
 
-                GenHeaderField {
-                    label: "Título de la ficha / testificación"
-                    glyph: "T"
-                    headerKey: "description"
+                // Tipo de ficha = calicatas.description (Web: "Título de la ficha /
+                // testificación"). Solo dos valores; un texto antiguo se muestra tal cual.
+                GenFieldShell {
+                    readonly property var sheetTypes: ["FICHA DE CALICATA", "FICHA DE CANTERA"]
+                    readonly property string current: root.doc ? String(root.doc.header.description || "") : ""
+                    label: "Título / Testificación"
+                    iconName: "calgen.code"
+                    tappable: true
+                    valueText: current
+                    placeholder: "Seleccionar tipo de ficha"
+                    onActivated: root._openOptionPicker("Título / Testificación", sheetTypes,
+                                                        Math.max(0, sheetTypes.indexOf(current)), "calgen.code",
+                                                        root.cGenBlue, root.cGenBlueSoft,
+                                                        function(i) {
+                                                            if (!root.doc || i < 0 || i >= sheetTypes.length) return
+                                                            var h = Object.assign({}, root.doc.header)
+                                                            h.description = sheetTypes[i]
+                                                            root.doc.header = h
+                                                            root._markDirty()
+                                                        })
                 }
 
                 // ---- Excavación ----
@@ -10821,6 +10845,7 @@ Item {
                                 item.selectCoordinate(p.lat, p.lon, Rules.parseDecimalSafe(h.utm_z))
                         }
                         onLoaded: {
+                            item.flow = root.flow
                             item.interactive = false
                             item.statusCardOnly = true
                             item.darkMode = root.darkMode
@@ -11124,11 +11149,14 @@ Item {
                     }
                 }
                 // Altitud / Cota Z: valor, origen y acción explícita "Obtener altitud".
-                RowLayout {
+                // En columna: el resultado DEM (largo) ocupa todo el ancho y el
+                // botón va debajo, sin solaparse en pantallas estrechas.
+                ColumnLayout {
                     Layout.fillWidth: true
-                    spacing: root.dp(10)
+                    spacing: root.dp(8)
                     Text {
                         Layout.fillWidth: true
+                        Layout.preferredWidth: parent ? parent.width : implicitWidth
                         text: (root.elevationStatus.length ? root.elevationStatus
                               : Elevation.statusText(root.doc ? root.doc.header : {}))
                               + (root.elevationWarning.length ? "\nAdvertencia: " + root.elevationWarning : "")
@@ -11137,6 +11165,7 @@ Item {
                         wrapMode: Text.WordWrap
                     }
                     GenDialogButton {
+                        Layout.alignment: Qt.AlignRight
                         text: root.elevationBusy ? "Consultando…" : "Obtener altitud"
                         enabled: !root.elevationBusy && !!root.doc
                         onClicked: root.resolveAltitude("explicit", NaN)

@@ -19,6 +19,11 @@ class InGeGraphicsCore final : public QObject
     Q_PROPERTY(bool earthActive READ earthActive NOTIFY stateChanged)
     Q_PROPERTY(QString earthState READ earthState NOTIFY stateChanged)
     Q_PROPERTY(QString renderProfile READ renderProfile NOTIFY stateChanged)
+    // Último tipo de mapa elegido en el selector y su miniatura (memoria).
+    Q_PROPERTY(QString earthPickerMapType READ earthPickerMapType NOTIFY earthPickerSnapshotChanged)
+    Q_PROPERTY(QString earthPickerSnapshotUrl READ earthPickerSnapshotUrl NOTIFY earthPickerSnapshotChanged)
+    Q_PROPERTY(double earthPickerSnapshotLatitude READ earthPickerSnapshotLatitude NOTIFY earthPickerSnapshotChanged)
+    Q_PROPERTY(double earthPickerSnapshotLongitude READ earthPickerSnapshotLongitude NOTIFY earthPickerSnapshotChanged)
     // Live device state computed by InGePerformanceRuntime (Android). One
     // source for InGeCoreFlow, Flutter (via the QML profile) and Cesium.
     Q_PROPERTY(QString deviceTier READ deviceTier NOTIFY deviceStateChanged)
@@ -41,6 +46,10 @@ public:
     bool earthActive() const;
     QString earthState() const;
     QString renderProfile() const;
+    QString earthPickerMapType() const { return m_pickerMapType; }
+    QString earthPickerSnapshotUrl() const { return m_pickerSnapshotUrl; }
+    double earthPickerSnapshotLatitude() const { return m_pickerSnapshotLat; }
+    double earthPickerSnapshotLongitude() const { return m_pickerSnapshotLon; }
     QString deviceTier() const;
     QString baseDeviceTier() const;
     bool lowRamDevice() const;
@@ -66,8 +75,22 @@ public:
     Q_INVOKABLE void closeEarth();
     Q_INVOKABLE bool setRenderProfile(const QString &profile);
 
+    // Selector de coordenadas de Calicatas sobre el WebView de InGe Earth
+    // (un solo motor Cesium). Rect en píxeles físicos de pantalla.
+    Q_INVOKABLE bool openEarthPicker(const QString &json, int left, int top,
+                                     int width, int height);
+    Q_INVOKABLE void updateEarthPickerRect(int left, int top, int width, int height);
+    Q_INVOKABLE void setEarthPickerPoint(const QString &json);
+    Q_INVOKABLE void setEarthPickerSuspended(bool suspended);
+    Q_INVOKABLE void closeEarthPicker();
+    // Plantilla XYZ del mapa base de Earth ("" si no está configurada).
+    Q_INVOKABLE QString earthBaseMapUrl() const;
+
 signals:
     void stateChanged();
+    void earthPickerPointSelected(double latitude, double longitude);
+    void earthPickerStateChanged(const QString &state);
+    void earthPickerSnapshotChanged();
     void deviceStateChanged();
 
 private:
@@ -97,6 +120,10 @@ private:
     qreal m_systemFontScale = 1.0;
     int m_memoryTrimLevel = 0;
     InGeEarthHostController *m_earthHostController = nullptr;
+    QString m_pickerMapType = QStringLiteral("DEFAULT");
+    QString m_pickerSnapshotUrl;
+    double m_pickerSnapshotLat = 0.0;
+    double m_pickerSnapshotLon = 0.0;
     QPointer<QQuickWindow> m_window;
     bool m_qtRenderingSuspended = false;
     bool m_windowWasVisible = true;
