@@ -132,6 +132,7 @@ public final class InGePerformanceRuntime {
     private volatile int liveThermal;
     private volatile boolean animatorsEnabled = true;
     private volatile float fontScale = 1.0f;
+    private volatile int trimLevel;
     private boolean monitoring;
     private Runnable budgetListener;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -228,6 +229,7 @@ public final class InGePerformanceRuntime {
             state.put("animatorsEnabled", runtime.animatorsEnabled);
             state.put("fontScale", (double) runtime.fontScale);
             state.put("refreshHz", (double) runtime.budget.sustainableRefreshHz);
+            state.put("trimLevel", runtime.trimLevel);
         } catch (JSONException ignored) {
             return "";
         }
@@ -288,6 +290,15 @@ public final class InGePerformanceRuntime {
         } catch (RuntimeException error) {
             Log.w("InGePerformance", "INGE_ANIMATOR_MONITOR_UNAVAILABLE", error);
         }
+        publish();
+    }
+
+    // Last ComponentCallbacks2 level; 0 again once the Activity resumes.
+    public void onTrimMemory(int level) {
+        final int next = Math.max(0, level);
+        if (next == trimLevel)
+            return;
+        trimLevel = next;
         publish();
     }
 

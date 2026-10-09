@@ -222,6 +222,18 @@ int main(int argc, char *argv[])
     qInfo() << "INGE_STARTUP_STAGE SERVICES_READY";
     QQmlApplicationEngine engine;
     engine.addImageProvider("nothingvideo",new NothingVideoProvider);
+    // Al pasar a segundo plano (camara del OEM, otra app) Android decide que
+    // proceso matar por su memoria. Qt bloquea su bucle poco despues de
+    // ApplicationSuspended: liberar aqui los componentes QML sin uso y el
+    // heap JS. No toca el scene graph ni los datos de la app.
+    QObject::connect(&app, &QGuiApplication::applicationStateChanged, &engine,
+                     [&engine](Qt::ApplicationState state) {
+        if (state != Qt::ApplicationSuspended)
+            return;
+        engine.trimComponentCache();
+        engine.collectGarbage();
+        qInfo() << "INGE_QML_MEMORY_TRIMMED reason=suspended";
+    });
 
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreated,

@@ -189,6 +189,12 @@ public final class InGeQtActivity extends QtActivity
     private volatile boolean earthBackTransitionInProgress;
     private volatile boolean earthHomeNavigationRequested;
     private long earthRendererLostAtMs;
+    // LOW/ULTRA_LOW: a hidden Cesium WebView is released shortly after it
+    // leaves the screen; other tiers keep it for a fast reopen and release it
+    // only when Android reports memory pressure (onTrimMemory).
+    private static final long EARTH_LOW_TIER_RELEASE_MS = 2_000L;
+    private final Runnable releaseHiddenEarthRunnable =
+            () -> releaseHiddenEarthWebView("low_tier_hidden");
     private boolean activityResumed;
     private Configuration lastConfiguration;
     private float preferredRefreshRateHz;
@@ -845,6 +851,8 @@ public final class InGeQtActivity extends QtActivity
         android.util.Log.i("InGeLifecycle",
                 "INGE_ACTIVITY_ON_RESUME instance=" + System.identityHashCode(this));
         activityResumed = true;
+        if (performanceRuntime != null)
+            performanceRuntime.onTrimMemory(0);
         emitBetaDiagnostic("LIFECYCLE", "INFO", "ON_RESUME", null, null, null);
         performanceHandler.removeCallbacks(betaPerformanceSample);
         performanceHandler.postDelayed(betaPerformanceSample, 15_000L);
@@ -901,6 +909,45 @@ public final class InGeQtActivity extends QtActivity
         android.util.Log.i("InGeLifecycle",
                 "INGE_ACTIVITY_ON_STOP instance=" + System.identityHashCode(this));
         super.onStop();
+    }
+
+    // Android 14+ only delivers TRIM_MEMORY_UI_HIDDEN and _BACKGROUND; older
+    // versions also RUNNING_LOW/CRITICAL while in the foreground. This host
+    // is not a FlutterActivity, so the engines get the signal from here.
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        android.util.Log.i("InGePerformance", "INGE_TRIM_MEMORY level=" + level
+                + " earthRequested=" + earthRequested
+                + " earthAlive=" + (earthWebView != null));
+        if (performanceRuntime != null)
+            performanceRuntime.onTrimMemory(level);
+        notifyFlutterMemoryPressure(homeEngine, level);
+        notifyFlutterMemoryPressure(earthEngine, level);
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
+            releaseHiddenEarthWebView("trim_" + level);
+    }
+
+    @Override
+    public void onLowMemory() {
+        super.onLowMemory();
+        onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE);
+    }
+
+    // Same contract as FlutterActivityAndFragmentDelegate.onTrimMemory: Dart
+    // clears caches (image cache) and the renderer trims its textures.
+    private static void notifyFlutterMemoryPressure(FlutterEngine engine, int level) {
+        if (engine == null)
+            return;
+        try {
+            if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+                engine.getDartExecutor().notifyLowMemoryWarning();
+                engine.getSystemChannel().sendMemoryPressureWarning();
+            }
+            engine.getRenderer().onTrimMemory(level);
+        } catch (Throwable error) {
+            android.util.Log.w("InGePerformance", "INGE_FLUTTER_TRIM_FAILED", error);
+        }
     }
 
     @Override
@@ -1310,6 +1357,7 @@ public final class InGeQtActivity extends QtActivity
             hideDirectEarthWebView(!earthBackTransitionInProgress);
             return;
         }
+        performanceHandler.removeCallbacks(releaseHiddenEarthRunnable);
         homeRequested = false;
         parkFlutterView(homeView);
         try {
@@ -1445,7 +1493,42 @@ public final class InGeQtActivity extends QtActivity
             hiding.onPause();
             hiding.setEnabled(false);
             fadeOutSurface(hiding, () -> hiding.setVisibility(View.GONE));
+            if (isLowMemoryTier()) {
+                performanceHandler.removeCallbacks(releaseHiddenEarthRunnable);
+                performanceHandler.postDelayed(releaseHiddenEarthRunnable,
+                        EARTH_LOW_TIER_RELEASE_MS);
+            }
         }
+    }
+
+    private boolean isLowMemoryTier() {
+        final InGePerformanceRuntime runtime = performanceRuntime;
+        if (runtime == null)
+            return false;
+        final InGePerformanceRuntime.DeviceTier tier = runtime.baseTier();
+        return tier == InGePerformanceRuntime.DeviceTier.LOW
+                || tier == InGePerformanceRuntime.DeviceTier.ULTRA_LOW
+                || runtime.capabilities().lowRamDevice;
+    }
+
+    // Frees the Cesium WebGL context, tiles and its renderer only while Earth
+    // is not the requested surface; the next open (or onResume) recreates it.
+    // During the Back transition earthRequested is still true: retry later.
+    private void releaseHiddenEarthWebView(String reason) {
+        if (earthWebView == null)
+            return;
+        if (earthBackTransitionInProgress) {
+            performanceHandler.removeCallbacks(releaseHiddenEarthRunnable);
+            performanceHandler.postDelayed(releaseHiddenEarthRunnable,
+                    EARTH_LOW_TIER_RELEASE_MS);
+            return;
+        }
+        if (earthRequested || earthWebView.getVisibility() == View.VISIBLE
+                && earthWebView.isEnabled())
+            return;
+        android.util.Log.i("InGeEarthDirect",
+                "INGE_EARTH_WEBVIEW_RELEASED reason=" + reason);
+        destroyDirectEarthWebView();
     }
 
 
@@ -2789,6 +2872,7 @@ public final class InGeQtActivity extends QtActivity
         performanceHandler.removeCallbacks(betaPerformanceSample);
         if (performanceRuntime != null)
             performanceRuntime.setBudgetListener(null);
+        performanceHandler.removeCallbacks(releaseHiddenEarthRunnable);
         android.util.Log.i("InGeLifecycle",
                 "INGE_ACTIVITY_ON_DESTROY instance=" + System.identityHashCode(this));
         // Relaunch (config/core settings) vs real exit: process-global Qt state is
