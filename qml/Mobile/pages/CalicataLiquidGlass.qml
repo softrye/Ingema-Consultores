@@ -175,6 +175,11 @@ Item {
         lens: glass.primarySurface ? 0.3 : 0.8
         frost: glass.primarySurface ? 8 : 3
         frostTaps: glass.primarySurface ? 6 : 4
+        // Los fondos son ambientes opacos, estaticos y sin texto: media
+        // resolucion (primarias) y un tercio (controles) no se distinguen bajo
+        // el frost y ahorran 4-9x memoria de GPU por control (decenas de MB con
+        // 30-60 controles por etapa a DPR 2.6-3).
+        captureScale: glass.primarySurface ? 0.5 : 0.33
         magnify: 0
         bevel: glass.primarySurface ? Math.min(14, Math.min(glass.width, glass.height) * 0.3)
                                     : Math.min(6, Math.min(glass.width, glass.height) * 0.19)

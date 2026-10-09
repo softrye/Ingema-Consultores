@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Effects
 
 // InGe+ Liquid Glass surface: the Dock material extracted verbatim from
@@ -27,6 +28,11 @@ Item {
     // Static surfaces (a modal peek over a blocked page) freeze the backdrop:
     // one grab when capture starts, no re-render while open. Default: live.
     property bool liveCapture: true
+    // Fraction of the physical resolution used for the backdrop capture.
+    // liquidglass.frag works in item space (pxToUv), and the frost already
+    // blurs several pixels, so a lower value only softens what is already
+    // frosted while rendering and storing scale^2 fewer pixels per pass.
+    property real captureScale: 1.0
     // Backdrop-space rect to sample instead of mapping the item each frame
     // (lets a transformed/animated surface keep a single stable grab).
     property rect captureRect: Qt.rect(0, 0, 0, 0)
@@ -80,6 +86,12 @@ Item {
                            Math.max(1, surface.width + 2 * m),
                            Math.max(1, surface.height + 2 * m))
         }
+        // Qt 6.9 uses an explicit textureSize as physical pixels (an empty size
+        // means sourceRect x devicePixelRatio): apply the DPR here.
+        textureSize: surface.captureScale < 1.0 && surface.captureActive
+            ? Qt.size(Math.max(1, Math.ceil(sourceRect.width * Screen.devicePixelRatio * surface.captureScale)),
+                      Math.max(1, Math.ceil(sourceRect.height * Screen.devicePixelRatio * surface.captureScale)))
+            : Qt.size(0, 0)
         // Re-renders only when the backdrop subtree is dirty; no timer.
         live: surface.captureActive && surface.liveCapture
         // A frozen grab must be retaken when its rect settles after the first

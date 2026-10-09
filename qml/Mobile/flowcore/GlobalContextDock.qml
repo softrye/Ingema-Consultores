@@ -99,6 +99,10 @@ Item {
     readonly property bool deviceLowCostGlass: !!flow
         && (flow.lowMemoryMode || flow.performance.profile >= flow.performance.safe)
     readonly property bool lowCostGlass: (nativeSurface && darkBackdrop) || deviceLowCostGlass
+    // The Dock refracts live page content (text): full resolution normally,
+    // half resolution with the low-cost material (3-5 live passes per frame
+    // while scrolling on a tiler GPU).
+    readonly property real lowCostCaptureScale: lowCostGlass ? 0.5 : 1.0
     onLowCostGlassChanged: {
         if (lowCostGlass)
             console.info("INGE_DOCK_GLASS_PROFILE profile=low reason="
@@ -479,7 +483,7 @@ Item {
             Behavior on width { NumberAnimation { duration: root.motionDuration; easing.type: Easing.BezierSpline; easing.bezierCurve: root.motionCurve } }
 
             MouseArea { anchors.fill: parent }
-            LiquidGlassSurface { id: capsuleGlass; anchors.fill: parent; tokens: root; frost: 4.5; lowCostTaps: 4; surfaceName: "main" }
+            LiquidGlassSurface { id: capsuleGlass; anchors.fill: parent; tokens: root; frost: 4.5; lowCostTaps: 4; captureScale: root.lowCostCaptureScale; surfaceName: "main" }
 
             // Single persistent selection lens: the same glass, slightly
             // stronger. It travels by action.id.
@@ -487,6 +491,7 @@ Item {
                 id: selection
                 surfaceName: "selected"
                 tokens: root
+                captureScale: root.lowCostCaptureScale
                 strength: 1.2
                 lens: 2.2
                 frost: 2.5
@@ -663,7 +668,7 @@ Item {
             Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutQuad } }
 
             MouseArea { anchors.fill: parent }
-            LiquidGlassSurface { anchors.fill: parent; tokens: root; strength: 0.55; lens: 0.8; frost: 3; elevation: false; surfaceName: "search" }
+            LiquidGlassSurface { anchors.fill: parent; tokens: root; strength: 0.55; lens: 0.8; frost: 3; elevation: false; captureScale: root.lowCostCaptureScale; surfaceName: "search" }
 
             Row {
                 id: searchRow
@@ -718,7 +723,7 @@ Item {
             Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutQuad } }
 
             MouseArea { anchors.fill: parent }
-            LiquidGlassSurface { anchors.fill: parent; tokens: root; strength: 0.7; frost: 4; magnify: 0.03; elevation: false; surfaceName: "ai" }
+            LiquidGlassSurface { anchors.fill: parent; tokens: root; strength: 0.7; frost: 4; magnify: 0.03; elevation: false; captureScale: root.lowCostCaptureScale; surfaceName: "ai" }
 
             Components.FlowIcon {
                 anchors.centerIn: parent
@@ -899,6 +904,7 @@ Item {
             LiquidGlassSurface {
                 anchors.fill: parent
                 tokens: root
+                captureScale: root.lowCostCaptureScale
                 cornerRadius: 22
                 strength: 0.75
                 lens: 0.25
