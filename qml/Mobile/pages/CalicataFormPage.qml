@@ -690,26 +690,38 @@ Item {
     // =========================================================
     // Modo híbrido táctil: phone / tablet / desktop-kit
     // =========================================================
-    // El teclado (adjustResize) solo encoge el alto; nunca el ancho. El alto
-    // de referencia es el maximo visto con el ancho actual: abrir el IME ya no
-    // cambia phone/tablet ni uiScale (re-maquetaba toda la ficha con el campo
-    // enfocado en tablets, plegables y landscape). Rotar o cambiar de ventana
-    // cambia el ancho y lo reinicia; callLater espera a que ancho y alto se
-    // asienten en la misma pasada.
+    // El teclado (adjustResize) solo encoge el alto; nunca el ancho. Mientras
+    // escribe (IME visible o un campo de texto con foco, que llega antes que el
+    // resize) se conserva el alto previo: abrir el IME ya no cambia phone/tablet
+    // ni uiScale (re-maquetaba toda la ficha con el campo enfocado en tablets,
+    // plegables y landscape). Cualquier otro cambio (rotar, split arriba/abajo,
+    // ventanas libres) se acepta. El alto retenido solo se usa con el mismo
+    // ancho, asi que una rotacion se clasifica en el mismo frame.
     property real _layoutWidth: 0
     property real _layoutHeight: 0
+    function _imeLikely() {
+        // Acceso indexado, como InGeCoreFlow: existen en runtime aunque la
+        // metadata estatica de qmllint no las enumere.
+        if (Qt.inputMethod["visible"] === true)
+            return true
+        var focusItem = root.Window.activeFocusItem
+        return !!focusItem && focusItem["cursorPosition"] !== undefined
+    }
     function _updateLayoutSize() {
-        if (Math.abs(root.width - root._layoutWidth) > 0.5) {
+        if (Math.abs(root.width - root._layoutWidth) > 0.5
+                || root.height > root._layoutHeight || !root._imeLikely()) {
+            root._layoutHeight = root.height
             root._layoutWidth = root.width
-            root._layoutHeight = root.height
-        } else if (root.height > root._layoutHeight) {
-            root._layoutHeight = root.height
         }
     }
     onWidthChanged: Qt.callLater(root._updateLayoutSize)
     onHeightChanged: Qt.callLater(root._updateLayoutSize)
-    readonly property real _layoutMinSide: Math.min(root.width,
-        root._layoutHeight > 0 ? root._layoutHeight : root.height)
+    readonly property real _layoutMinSide: {
+        var w = root.width, h = root.height
+        if (Math.abs(w - root._layoutWidth) <= 0.5 && root._layoutHeight > h)
+            h = root._layoutHeight
+        return Math.min(w, h)
+    }
     readonly property bool isPhone: root.width > 0 && root._layoutMinSide < 600
     readonly property bool isTablet: root.width > 0 && root._layoutMinSide >= 600
     readonly property real uiScale: root.isPhone

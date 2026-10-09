@@ -24,25 +24,38 @@ Page {
 
 
     // === ARM HYBRID PHONE/TABLET HELPERS ===
-    // Alto sin teclado: el IME (adjustResize) solo encoge el alto. Mismo
-    // criterio que _layoutHeight de CalicataFormPage; abrir el teclado ya no
-    // cambia __armPhone ni __armScale. Un cambio de ancho lo reinicia.
+    // Alto sin teclado: mismo criterio que _layoutHeight de CalicataFormPage.
+    // Mientras se escribe se conserva el alto previo (abrir el IME ya no cambia
+    // __armPhone ni __armScale); rotar, split arriba/abajo o ventanas libres se
+    // aceptan. El alto retenido solo se usa con el mismo ancho.
     property real __armLayoutWidth: 0
     property real __armLayoutHeight: 0
+    function __armImeLikely() {
+        // Acceso indexado, como InGeCoreFlow: existen en runtime aunque la
+        // metadata estatica de qmllint no las enumere.
+        if (Qt.inputMethod["visible"] === true)
+            return true
+        var focusItem = Window.activeFocusItem
+        return !!focusItem && focusItem["cursorPosition"] !== undefined
+    }
     function __armUpdateLayoutSize() {
-        if (Math.abs(width - __armLayoutWidth) > 0.5) {
+        if (Math.abs(width - __armLayoutWidth) > 0.5
+                || height > __armLayoutHeight || !__armImeLikely()) {
+            __armLayoutHeight = height
             __armLayoutWidth = width
-            __armLayoutHeight = height
-        } else if (height > __armLayoutHeight) {
-            __armLayoutHeight = height
         }
     }
     onWidthChanged: Qt.callLater(__armUpdateLayoutSize)
     onHeightChanged: Qt.callLater(__armUpdateLayoutSize)
     readonly property real __armWidth:  width  > 0 ? width  : 420
-    readonly property real __armHeight: __armLayoutHeight > 0 ? __armLayoutHeight
-                                                              : (height > 0 ? height : 820)
-    readonly property real __armMinSide: Math.min(__armWidth, __armHeight)
+    readonly property real __armHeight: height > 0 ? height : 820
+    readonly property real __armMinSide: {
+        var w = width > 0 ? width : 420
+        var h = height > 0 ? height : 820
+        if (Math.abs(width - __armLayoutWidth) <= 0.5 && __armLayoutHeight > h)
+            h = __armLayoutHeight
+        return Math.min(w, h)
+    }
     readonly property bool __armPhone: __armMinSide < 600
     readonly property bool __armTablet: !__armPhone
     readonly property real __armScale: __armPhone
