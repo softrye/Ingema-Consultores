@@ -173,38 +173,51 @@ Rectangle {
         }
     }
 
-    Rectangle {
-        id: glassMask
+    // The scene-capture blur is disabled (realBlurActive, see above). Its mask
+    // layer, capture and MultiEffect are only created if it is enabled again,
+    // instead of in every FlowGlassSurface (Buscador, Perfil, Documentos...).
+    Loader {
+        id: realBlurLoader
         anchors.fill: parent
-        radius: root.radius
-        color: "white"
-        visible: false
-        layer.enabled: true
-    }
+        active: root.realBlurActive
+        sourceComponent: Item {
+            readonly property alias capture: glassCapture
+            readonly property alias mask: glassMask
 
-    ShaderEffectSource {
-        id: glassCapture
-        anchors.fill: parent
-        sourceItem: root.blurSource
-        sourceRect: root.mappedSourceRect()
-        live: root.realBlurActive && root.visible
-        hideSource: false
-        visible: false
-    }
+            Rectangle {
+                id: glassMask
+                anchors.fill: parent
+                radius: root.radius
+                color: "white"
+                visible: false
+                layer.enabled: true
+            }
 
-    MultiEffect {
-        anchors.fill: parent
-        source: glassCapture
-        visible: root.realBlurActive
-        blurEnabled: true
-        blur: root.blurAmount
-        blurMax: root.materialRole === "emphasized" ? 64 : 48
-        saturation: root.blurSaturation
-        opacity: root.flow.theme.glassOpacity
-        scale: 1.0 + root.flow.theme.glassRefraction * 0.018
-        maskEnabled: true
-        maskSource: glassMask
-        autoPaddingEnabled: false
+            ShaderEffectSource {
+                id: glassCapture
+                anchors.fill: parent
+                sourceItem: root.blurSource
+                sourceRect: root.mappedSourceRect()
+                live: root.realBlurActive && root.visible
+                hideSource: false
+                visible: false
+            }
+
+            MultiEffect {
+                anchors.fill: parent
+                source: glassCapture
+                visible: root.realBlurActive
+                blurEnabled: true
+                blur: root.blurAmount
+                blurMax: root.materialRole === "emphasized" ? 64 : 48
+                saturation: root.blurSaturation
+                opacity: root.flow.theme.glassOpacity
+                scale: 1.0 + root.flow.theme.glassRefraction * 0.018
+                maskEnabled: true
+                maskSource: glassMask
+                autoPaddingEnabled: false
+            }
+        }
     }
 
     // Fallback material visible even when the renderer cannot sample the
@@ -239,44 +252,50 @@ Rectangle {
 
     // Lightweight edge dispersion: two gated capture passes shift opposite
     // color channels by a fraction of the centralized refraction token.
-    MultiEffect {
+    Loader {
         anchors.fill: parent
-        source: glassCapture
-        visible: root.realBlurActive
-                 && root.edgeDispersionEnabled
-                 && root.flow.performance.reflectionsEnabled
-                 && root.flow.theme.glassChromaticDispersion > 0
-        blurEnabled: false
-        colorization: 1.0
-        colorizationColor: "#FF5E8B"
-        opacity: root.flow.theme.glassChromaticDispersion * 2.6
-        transform: Translate {
-            x: -root.flow.theme.glassRefraction * 7.0
-            y: -root.flow.theme.glassRefraction * 2.0
-        }
-        maskEnabled: true
-        maskSource: glassMask
-        autoPaddingEnabled: false
-    }
+        active: root.realBlurActive && realBlurLoader.status === Loader.Ready
+        sourceComponent: Item {
+            MultiEffect {
+                anchors.fill: parent
+                source: realBlurLoader.item.capture
+                visible: root.realBlurActive
+                         && root.edgeDispersionEnabled
+                         && root.flow.performance.reflectionsEnabled
+                         && root.flow.theme.glassChromaticDispersion > 0
+                blurEnabled: false
+                colorization: 1.0
+                colorizationColor: "#FF5E8B"
+                opacity: root.flow.theme.glassChromaticDispersion * 2.6
+                transform: Translate {
+                    x: -root.flow.theme.glassRefraction * 7.0
+                    y: -root.flow.theme.glassRefraction * 2.0
+                }
+                maskEnabled: true
+                maskSource: realBlurLoader.item.mask
+                autoPaddingEnabled: false
+            }
 
-    MultiEffect {
-        anchors.fill: parent
-        source: glassCapture
-        visible: root.realBlurActive
-                 && root.edgeDispersionEnabled
-                 && root.flow.performance.reflectionsEnabled
-                 && root.flow.theme.glassChromaticDispersion > 0
-        blurEnabled: false
-        colorization: 1.0
-        colorizationColor: "#55D7FF"
-        opacity: root.flow.theme.glassChromaticDispersion * 2.6
-        transform: Translate {
-            x: root.flow.theme.glassRefraction * 7.0
-            y: root.flow.theme.glassRefraction * 2.0
+            MultiEffect {
+                anchors.fill: parent
+                source: realBlurLoader.item.capture
+                visible: root.realBlurActive
+                         && root.edgeDispersionEnabled
+                         && root.flow.performance.reflectionsEnabled
+                         && root.flow.theme.glassChromaticDispersion > 0
+                blurEnabled: false
+                colorization: 1.0
+                colorizationColor: "#55D7FF"
+                opacity: root.flow.theme.glassChromaticDispersion * 2.6
+                transform: Translate {
+                    x: root.flow.theme.glassRefraction * 7.0
+                    y: root.flow.theme.glassRefraction * 2.0
+                }
+                maskEnabled: true
+                maskSource: realBlurLoader.item.mask
+                autoPaddingEnabled: false
+            }
         }
-        maskEnabled: true
-        maskSource: glassMask
-        autoPaddingEnabled: false
     }
 
     Rectangle {
