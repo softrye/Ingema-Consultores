@@ -62,7 +62,7 @@ check('vidrio de Calicatas y genérico no se crean en modo mínimo', () => {
 });
 check('Earth HTML sin animaciones ni captura para el Dock', () => {
   assert.ok(java.includes("classList.add('bare-ui')"));
-  assert.ok(read('android/assets/cesium/ui/inge-earth-ui.css').includes('body.bare-ui *'));
+  assert.ok(!/(?:@keyframes|animation\\s*:|transition\\s*:|backdrop-filter\\s*:|box-shadow\\s*:)/.test(read('android/assets/cesium/ui/inge-earth-ui.css')), 'CSS physically contains no decorative motion or effects');
   assert.ok(read('android/assets/cesium/ui/inge-earth-ui.js').includes("if (document.body.classList.contains('bare-ui')) return;"));
 });
 check('Auth conserva su video y su movimiento propio', () => {

@@ -3217,7 +3217,7 @@ Page {
                         border.width: 1
                         border.color: infoPeek.dark ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(0.0824, 0.102, 0.1882, 0.07)
                         scale: closeTap.pressed ? 0.94 : 1.0
-                        Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutQuad } }
+
                         Components.FlowIcon {
                             anchors.centerIn: parent
                             width: root.__dp(20)
@@ -3401,7 +3401,7 @@ Page {
                             border.width: 1
                             border.color: infoPeek.hairline
                             scale: copyActionTap.pressed ? 0.985 : 1.0
-                            Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutQuad } }
+
                             Components.FlowIcon {
                                 id: copyActionIcon
                                 x: root.__dp(18)
@@ -3463,7 +3463,7 @@ Page {
                 color: infoPeek.dark ? "#F6F6F7" : Mobile.InGeCoreFlow.colors.ingemaDeep
                 opacity: 0
                 visible: opacity > 0
-                Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+
                 Label {
                     id: infoToastText
                     anchors.centerIn: parent
@@ -5821,7 +5821,7 @@ Page {
         font.pixelSize: root.__sp(14)
         font.weight: Font.DemiBold
         scale: calBtn.down ? 0.985 : 1
-        Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+
         background: CalicataSurface {
             dark: root.darkMode; accent: root.calGenBlue
             radius: root.__dp(12)
@@ -5878,7 +5878,7 @@ Page {
         scale: calRowTap.pressed ? 0.985 : 1
         Accessible.role: Accessible.Button
         Accessible.name: calRow.title
-        Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+
 
         CalicataSurface {
             dark: root.darkMode; accent: root.calGenBlue

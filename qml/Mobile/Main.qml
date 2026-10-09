@@ -1017,259 +1017,38 @@ Rectangle {
     id: profileOverlayV18
     anchors.fill: parent
     z: 99950
-    visible: profileOverlayOpenV18 || opacity > 0.01
-    enabled: profileOverlayOpenV18
-    opacity: profileOverlayOpenV18 ? 1.0 : 0.0
-    y: profileOverlayOpenV18 ? 0 : 15
-    color: bgColor()
-
-    Behavior on opacity { NumberAnimation { duration: inGeCoreFlow.normalDuration; easing.type: inGeCoreFlow.easeStandard } }
-    Behavior on y { NumberAnimation { duration: inGeCoreFlow.normalDuration; easing.type: inGeCoreFlow.easeStandard } }
+    visible: profileOverlayOpenV18
+    enabled: visible
+    color: "#FFFFFF"
     MouseArea { anchors.fill: parent }
-
-    Rectangle {
-        id: profileBackdropV18
+    ScrollView {
         anchors.fill: parent
-        color: profileOverlayV18.color
-        Image {
-            anchors.fill: parent
-            // Decoracion solo del tema Glass (liquidGlass es hoy la constante
-            // false). opacity 0 no evita decodificar el SVG de 1080x2400 (~10 MB
-            // RGBA residentes desde el arranque): sin Glass no se carga.
-            source: liquidGlass ? "qrc:/ui/v2/backgrounds/bg_topographic_lines.svg" : ""
-            sourceSize: Qt.size(Math.max(1, width), Math.max(1, height))
-            asynchronous: true
-            fillMode: Image.PreserveAspectCrop
-            opacity: liquidGlass ? 0.13 : 0.0
-        }
-    }
-
-    Rectangle {
-        id: profileHeaderV20
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        height: 76
-        color: panelColor()
-        border.color: borderColor()
-        border.width: 1
-
-        Column {
-            anchors.left: parent.left
-            anchors.leftMargin: 16
-            anchors.verticalCenter: parent.verticalCenter
-            width: parent.width - 92
-            spacing: 4
-            Text { width: parent.width; text: "Perfil"; color: textColor(); font.pixelSize: fs(22); font.bold: true; elide: Text.ElideRight }
-            Text { width: parent.width; text: "Cuenta vinculada a InGe+"; color: mutedColor(); font.pixelSize: fs(11); elide: Text.ElideRight }
-        }
-
-        Rectangle {
-            width: 40; height: 40; radius: 13
-            anchors.right: parent.right; anchors.rightMargin: 18
-            anchors.verticalCenter: parent.verticalCenter
-            color: closeMouseV18.pressed ? inGeCoreFlow.theme.pressed : inGeCoreFlow.theme.selected
-            border.color: borderColor(); border.width: 1
-            scale: closeMouseV18.pressed ? 0.96 : 1.0
-            Behavior on scale { NumberAnimation { duration: inGeCoreFlow.fastDuration; easing.type: inGeCoreFlow.easeOut } }
-            Components.FlowIcon { anchors.centerIn: parent; width: 20; height: 20; name: "system.close"; flow: inGeCoreFlow; active: true }
-            MouseArea { id: closeMouseV18; anchors.fill: parent; onClicked: closeProfileOverlayV18() }
-        }
-    }
-
-    Flickable {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: profileHeaderV20.bottom
-        anchors.bottom: parent.bottom
-        contentWidth: width
-        contentHeight: profileColumnV18.height + 34
         clip: true
-        flickableDirection: Flickable.VerticalFlick
-        pressDelay: inGeCoreFlow.touchPressDelay
-        flickDeceleration: inGeCoreFlow.flickDeceleration
-        maximumFlickVelocity: inGeCoreFlow.scrollVelocity(contentHeight, height)
-        boundsBehavior: inGeCoreFlow.motionAllowed
-                        ? Flickable.DragAndOvershootBounds
-                        : Flickable.StopAtBounds
-
+        contentWidth: availableWidth
         Column {
-            id: profileColumnV18
-            x: 14; y: 14
-            width: parent.width - 28
-            spacing: 12
-
-            FlowCore.FlowGlassSurface {
-                width: parent.width
-                height: 314
-                radius: 30
-                flow: inGeCoreFlow
-                darkMode: app.darkMode
-                materialRole: "emphasized"
-                blurSource: profileBackdropV18
-
-                Components.CircularAvatar {
-                    id: largeAvatarV18
-                    width: 92; height: 92
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    y: 22
-                    source: accountPhotoV18()
-                    hasImage: accountHasPhotoV18()
-                    borderColor: primaryColor()
-                    borderWidth: 3
-                    fallbackText: accountInitialsV20(accountNameV18())
-                    showStatus: true
-                    statusColor: inGeCoreFlow.theme.textSecondary
-
-                    MouseArea { anchors.fill: parent; onClicked: changePhotoV18() }
-                }
-
-                Column {
-                    x: 18; y: 126
-                    width: parent.width - 36
-                    spacing: 4
-                    Text { width: parent.width; text: accountNameV18(); color: textColor(); font.pixelSize: fs(21); font.bold: true; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight }
-                    Text { width: parent.width; text: accountPositionV50(); color: mutedColor(); font.pixelSize: fs(11); horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight }
-                    Text { width: parent.width; text: accountEmailV18(); color: mutedColor(); font.pixelSize: fs(10); horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight }
-                }
-
-                Rectangle {
-                    width: profileRoleTextV70.implicitWidth + 24
-                    height: 28; radius: 14
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    y: 196
-                    color: inGeCoreFlow.theme.selected
-                    border.color: borderColor()
-                    Text {
-                        id: profileRoleTextV70
-                        anchors.centerIn: parent
-                        text: accountRoleV25().toUpperCase()
-                        color: primaryColor(); font.pixelSize: fs(9); font.bold: true
-                        font.letterSpacing: 0.8
-                    }
-                }
-
-                Row {
-                    x: 18; y: 244
-                    width: parent.width - 36
-                    height: 46
-                    spacing: 12
-
-                    Rectangle {
-                        width: (parent.width - 12) / 2; height: parent.height; radius: 14
-                        color: avatarDefaultMouseV18.pressed ? inGeCoreFlow.theme.pressed : card2Color()
-                        border.color: borderColor(); border.width: 1
-                        scale: avatarDefaultMouseV18.pressed ? 0.97 : 1.0
-                        Behavior on scale { NumberAnimation { duration: inGeCoreFlow.fastDuration; easing.type: inGeCoreFlow.easeOut } }
-                        Text { anchors.centerIn: parent; text: "Usar avatar"; color: textColor(); font.pixelSize: fs(11); font.bold: true }
-                        MouseArea { id: avatarDefaultMouseV18; anchors.fill: parent; onClicked: useDefaultAvatarV18() }
-                    }
-
-                    Rectangle {
-                        width: (parent.width - 12) / 2; height: parent.height; radius: 14
-                        color: changePhotoMouseV18.pressed ? Qt.darker(inGeCoreFlow.theme.actionPrimary, 1.12) : inGeCoreFlow.theme.actionPrimary
-                        scale: changePhotoMouseV18.pressed ? 0.97 : 1.0
-                        Behavior on scale { NumberAnimation { duration: inGeCoreFlow.fastDuration; easing.type: inGeCoreFlow.easeOut } }
-                        Text { anchors.centerIn: parent; text: "Cambiar foto"; color: inGeCoreFlow.theme.onActionPrimary; font.pixelSize: fs(11); font.bold: true }
-                        MouseArea { id: changePhotoMouseV18; anchors.fill: parent; onClicked: changePhotoV18() }
-                    }
-                }
+            width: parent.width
+            spacing: 8
+            padding: 16
+            Text { text: "Perfil"; font.pixelSize: 20; font.bold: true }
+            Text { text: "Nombre: " + accountNameV18(); width: parent.width - 32; wrapMode: Text.Wrap }
+            Text { text: "Cargo: " + accountPositionV50(); width: parent.width - 32; wrapMode: Text.Wrap }
+            Text { text: "Correo: " + accountEmailV18(); width: parent.width - 32; wrapMode: Text.Wrap }
+            Text { text: "Telefono: " + accountPhoneV50(); width: parent.width - 32; wrapMode: Text.Wrap }
+            Text { text: "Rol: " + accountRoleV25(); width: parent.width - 32; wrapMode: Text.Wrap }
+            Text { text: "Estado: " + accountProfileStatusV50(); width: parent.width - 32; wrapMode: Text.Wrap }
+            Text { text: "Proyecto: " + accountPrimaryProjectV50(); width: parent.width - 32; wrapMode: Text.Wrap }
+            Text { text: "Proyectos asignados: " + accountProjectCountV50(); width: parent.width - 32 }
+            Button { text: "Cambiar foto"; width: parent.width - 32; onClicked: changePhotoV18() }
+            Button { text: "Usar avatar predeterminado"; width: parent.width - 32; onClicked: useDefaultAvatarV18() }
+            Button { text: "Seguridad"; width: parent.width - 32; onClicked: setFlutterSecuritySurfaceV70(true) }
+            Button {
+                text: "Ajustes"
+                width: parent.width - 32
+                onClicked: { closeProfileOverlayV18(); navigateToPage(4) }
             }
-
-            Rectangle {
-                width: parent.width; height: 204; radius: 18
-                color: cardColor(); border.color: borderColor(); border.width: 1
-                Text { x: 18; y: 14; width: parent.width - 36; text: "Datos de cuenta"; color: textColor(); font.pixelSize: fs(16); font.bold: true }
-                Text { x: 18; y: 52; width: parent.width * 0.34; text: "Nombre"; color: mutedColor(); font.pixelSize: fs(11) }
-                Text { x: parent.width * 0.38; y: 52; width: parent.width * 0.56; text: accountNameV18(); color: textColor(); font.pixelSize: fs(11); font.bold: true; horizontalAlignment: Text.AlignRight; elide: Text.ElideRight }
-                Text { x: 18; y: 82; width: parent.width * 0.34; text: "Correo"; color: mutedColor(); font.pixelSize: fs(11) }
-                Text { x: parent.width * 0.38; y: 82; width: parent.width * 0.56; text: accountEmailV18(); color: textColor(); font.pixelSize: fs(11); font.bold: true; horizontalAlignment: Text.AlignRight; elide: Text.ElideRight }
-                Text { x: 18; y: 112; width: parent.width * 0.34; text: "Teléfono"; color: mutedColor(); font.pixelSize: fs(11) }
-                Text { x: parent.width * 0.38; y: 112; width: parent.width * 0.56; text: accountPhoneV50(); color: textColor(); font.pixelSize: fs(11); font.bold: true; horizontalAlignment: Text.AlignRight; elide: Text.ElideRight }
-                Text { x: 18; y: 142; width: parent.width * 0.34; text: "Rol"; color: mutedColor(); font.pixelSize: fs(11) }
-                Text { x: parent.width * 0.38; y: 142; width: parent.width * 0.56; text: accountRoleV25(); color: primaryColor(); font.pixelSize: fs(11); font.bold: true; horizontalAlignment: Text.AlignRight; elide: Text.ElideRight }
-                Text { x: 18; y: 172; width: parent.width * 0.34; text: "Estado"; color: mutedColor(); font.pixelSize: fs(11) }
-                Text { x: parent.width * 0.38; y: 172; width: parent.width * 0.56; text: accountProfileStatusV50(); color: inGeCoreFlow.theme.success; font.pixelSize: fs(11); font.bold: true; horizontalAlignment: Text.AlignRight; elide: Text.ElideRight }
-            }
-
-            Rectangle {
-                width: parent.width; height: 116; radius: 18
-                color: cardColor(); border.color: borderColor(); border.width: 1
-                Rectangle {
-                    x: 16; y: 16; width: 42; height: 42; radius: 13
-                    color: inGeCoreFlow.theme.selected
-                    Components.FlowIcon { anchors.centerIn: parent; width: 22; height: 22; name: "project.current"; flow: inGeCoreFlow; active: true }
-                }
-                Column {
-                    x: 70; y: 16; width: parent.width - 86; spacing: 4
-                    Text { width: parent.width; text: "Proyecto principal"; color: mutedColor(); font.pixelSize: fs(10); font.bold: true }
-                    Text { width: parent.width; text: accountPrimaryProjectV50(); color: textColor(); font.pixelSize: fs(14); font.bold: true; elide: Text.ElideRight }
-                    Text { width: parent.width; text: accountProjectCountV50() === 1 ? "1 proyecto asignado" : accountProjectCountV50() + " proyectos asignados"; color: primaryColor(); font.pixelSize: fs(10); elide: Text.ElideRight }
-                }
-                Text { x: 16; y: 82; width: parent.width - 32; text: "La información proviene de tu acceso actual."; color: mutedColor(); font.pixelSize: fs(9); elide: Text.ElideRight }
-            }
-
-            Rectangle {
-                width: parent.width; height: 222; radius: 18
-                color: cardColor(); border.color: borderColor(); border.width: 1
-                Text { x: 18; y: 14; width: parent.width - 36; text: "Acciones de cuenta"; color: textColor(); font.pixelSize: fs(16); font.bold: true }
-
-                Rectangle {
-                    x: 18; y: 52; width: (parent.width - 48) / 2; height: 42; radius: 13
-                    color: profileSecurityMouseV70.pressed ? inGeCoreFlow.theme.pressed : inGeCoreFlow.theme.selected
-                    border.color: borderColor(); border.width: 1
-                    scale: profileSecurityMouseV70.pressed ? 0.97 : 1.0
-                    Behavior on scale { NumberAnimation { duration: inGeCoreFlow.fastDuration; easing.type: inGeCoreFlow.easeOut } }
-                    Row {
-                        anchors.centerIn: parent; spacing: 7
-                        Components.FlowIcon { width: 18; height: 18; name: "security.biometric"; flow: inGeCoreFlow; active: true; tintColor: primaryColor(); activeTintColor: primaryColor(); inactiveOpacity: 1.0 }
-                        Text { text: "Seguridad"; color: textColor(); font.pixelSize: fs(10); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                    }
-                    MouseArea { id: profileSecurityMouseV70; anchors.fill: parent; onClicked: setFlutterSecuritySurfaceV70(true) }
-                }
-
-                Rectangle {
-                    x: (parent.width / 2) + 6; y: 52; width: (parent.width - 48) / 2; height: 42; radius: 13
-                    color: profileSettingsMouseV70.pressed ? inGeCoreFlow.theme.pressed : card2Color()
-                    border.color: borderColor(); border.width: 1
-                    scale: profileSettingsMouseV70.pressed ? 0.97 : 1.0
-                    Behavior on scale { NumberAnimation { duration: inGeCoreFlow.fastDuration; easing.type: inGeCoreFlow.easeOut } }
-                    Row {
-                        anchors.centerIn: parent; spacing: 7
-                        Components.FlowIcon { width: 18; height: 18; name: "nav.settings"; flow: inGeCoreFlow; tintColor: primaryColor(); inactiveOpacity: 1.0 }
-                        Text { text: "Ajustes"; color: textColor(); font.pixelSize: fs(10); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                    }
-                    MouseArea {
-                        id: profileSettingsMouseV70
-                        anchors.fill: parent
-                        onClicked: {
-                            closeProfileOverlayV18()
-                            navigateToPage(4)
-                        }
-                    }
-                }
-
-                Rectangle {
-                    x: 18; y: 108; width: parent.width - 36; height: 42; radius: 13
-                    color: switchAccountMouseV18.pressed ? inGeCoreFlow.theme.pressed : inGeCoreFlow.theme.selected
-                    border.color: borderColor(); border.width: 1
-                    scale: switchAccountMouseV18.pressed ? 0.97 : 1.0
-                    Behavior on scale { NumberAnimation { duration: inGeCoreFlow.fastDuration; easing.type: inGeCoreFlow.easeOut } }
-                    Text { anchors.centerIn: parent; text: "Cambiar o añadir cuenta"; color: primaryColor(); font.pixelSize: fs(11); font.bold: true }
-                    MouseArea { id: switchAccountMouseV18; anchors.fill: parent; onClicked: openAccountSwitchSheetV18() }
-                }
-
-                Rectangle {
-                    x: 18; y: 164; width: parent.width - 36; height: 42; radius: 13
-                    color: logoutMouseV18.pressed ? inGeCoreFlow.theme.errorContainer : card2Color()
-                    border.color: borderColor(); border.width: 1
-                    scale: logoutMouseV18.pressed ? 0.97 : 1.0
-                    Behavior on scale { NumberAnimation { duration: inGeCoreFlow.fastDuration; easing.type: inGeCoreFlow.easeOut } }
-                    Text { anchors.centerIn: parent; text: "Cerrar sesión"; color: inGeCoreFlow.theme.error; font.pixelSize: fs(11); font.bold: true }
-                    MouseArea { id: logoutMouseV18; anchors.fill: parent; onClicked: performLogoutV18() }
-                }
-            }
-            Item { width: parent.width; height: 28 }
+            Button { text: "Cambiar o anadir cuenta"; width: parent.width - 32; onClicked: openAccountSwitchSheetV18() }
+            Button { text: "Cerrar sesion"; width: parent.width - 32; onClicked: performLogoutV18() }
+            Button { text: "Volver"; width: parent.width - 32; onClicked: closeProfileOverlayV18() }
         }
     }
 }
@@ -1278,199 +1057,75 @@ Rectangle {
     id: accountSwitchSheetV18
     anchors.fill: parent
     z: 100000
-    visible: accountSwitchSheetOpenV18 || opacity > 0.01
-    enabled: accountSwitchSheetOpenV18
-    // Sin sesión (selector de Auth) no hay Home detrás: fondo opaco.
-    color: accountPickerSourceV800 === "sessionClosed"
-           ? bgColor() : inGeCoreFlow.theme.scrim
-    opacity: accountSwitchSheetOpenV18 ? 1.0 : 0.0
-    Behavior on opacity { NumberAnimation { duration: inGeCoreFlow.normalDuration; easing.type: inGeCoreFlow.easeStandard } }
-    MouseArea { anchors.fill: parent; onClicked: closeAccountSwitchSheetV18() }
-
-    Rectangle {
-        id: accountPanelV18
-        x: 16
-        width: parent.width - 32
-        height: Math.min(parent.height - 24,
-                         Math.max(420, 250 + Math.min(3, savedAccountsModelV20.length) * 90))
-        radius: 24
-        color: liquidGlass ? inGeCoreFlow.theme.surfaceOverlay : cardColor()
-        border.color: borderColor()
-        border.width: 1
-        y: accountSwitchSheetOpenV18 ? parent.height - height - 16 : parent.height + 24
-        scale: accountSwitchSheetOpenV18 ? 1.0 : inGeCoreFlow.sheetStartScale
-        transformOrigin: Item.Bottom
-        Behavior on y { NumberAnimation { duration: inGeCoreFlow.sheetDuration; easing.type: inGeCoreFlow.easeEmphasized } }
-        Behavior on scale { NumberAnimation { duration: inGeCoreFlow.sheetDuration; easing.type: inGeCoreFlow.easeOvershoot } }
-        MouseArea { anchors.fill: parent }
-
-        Rectangle { width: 48; height: 5; radius: 3; anchors.horizontalCenter: parent.horizontalCenter; y: 10; color: borderColor() }
-        Text { x: 22; y: 30; width: parent.width - 86; text: manageAccountsModeV18 ? "Gestionar cuentas" : "Cambiar de cuenta"; color: textColor(); font.pixelSize: fs(20); font.bold: true; elide: Text.ElideRight }
-        Rectangle {
-            width: 40; height: 40; radius: 13; x: parent.width - width - 18; y: 22
-            color: closeSheetMouseV18.pressed ? inGeCoreFlow.theme.pressed : inGeCoreFlow.theme.selected
-            scale: closeSheetMouseV18.pressed ? 0.96 : 1.0
-            Behavior on scale { NumberAnimation { duration: inGeCoreFlow.fastDuration; easing.type: inGeCoreFlow.easeOut } }
-            Components.FlowIcon { anchors.centerIn: parent; width: 19; height: 19; name: "system.close"; flow: inGeCoreFlow; active: true }
-            MouseArea { id: closeSheetMouseV18; anchors.fill: parent; onClicked: closeAccountSwitchSheetV18() }
-        }
-
+    visible: accountSwitchSheetOpenV18
+    enabled: visible
+    color: "#FFFFFF"
+    MouseArea { anchors.fill: parent }
+    Column {
+        anchors.fill: parent
+        anchors.margins: 12
+        spacing: 8
+        Text { text: manageAccountsModeV18 ? "Gestionar cuentas" : "Cambiar de cuenta"; font.pixelSize: 20 }
+        Button { width: parent.width; text: "Cerrar"; onClicked: closeAccountSwitchSheetV18() }
         ListView {
             id: accountsListV20
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.bottom: addAccountBtnV18.top
-            anchors.leftMargin: 18
-            anchors.rightMargin: 18
-            anchors.topMargin: 82
-            anchors.bottomMargin: 14
+            width: parent.width
+            height: Math.max(120, parent.height - 260)
+            spacing: 4
             clip: true
-            spacing: 8
             model: savedAccountsModelV20
-            boundsBehavior: Flickable.StopAtBounds
-
             delegate: Rectangle {
-                id: accountRowV20
                 property var accountData: modelData
                 width: accountsListV20.width
-                height: 82
-                radius: 15
-                color: accountMouseV20.pressed ? inGeCoreFlow.theme.pressed : (accountData && accountData.isCurrent ? inGeCoreFlow.theme.selected : card2Color())
-                border.color: accountData && accountData.isCurrent ? primaryColor() : borderColor()
-                border.width: 1
-                scale: accountMouseV20.pressed ? 0.985 : 1.0
-                Behavior on scale { NumberAnimation { duration: inGeCoreFlow.fastDuration; easing.type: inGeCoreFlow.easeOut } }
-
-                Components.CircularAvatar {
-                    width: 54; height: 54; x: 12; y: 14
-                    source: savedAccountPhotoV20(accountData)
-                    hasImage: savedAccountPhotoV20(accountData).length > 0
-                    borderColor: app.borderColor()
-                    borderWidth: 1
-                    fallbackText: savedAccountDisplayNameV20(accountData).length > 0
-                                  ? accountInitialsV20(savedAccountDisplayNameV20(accountData)) : ""
-                    showStatus: accountData && accountData.isCurrent
+                height: 76
+                color: accountData && accountData.isCurrent ? "#E5E7EB" : "#FFFFFF"
+                border.color: "#D1D5DB"
+                Text {
+                    x: 8; y: 5
+                    width: parent.width - 105
+                    text: savedAccountDisplayNameV20(accountData)
+                    elide: Text.ElideRight
                 }
-
-                Column {
-                    x: 78; y: 17
-                    width: parent.width - (manageAccountsModeV18 ? 132 : 100)
-                    spacing: 5
-                    Text { width: parent.width; text: savedAccountDisplayNameV20(accountData); color: textColor(); font.pixelSize: fs(13); font.bold: true; elide: Text.ElideRight }
-                    Text { width: parent.width; text: accountData ? inGeCoreFlow.displayEmailExact(accountData.email, "Cuenta guardada") : "Cuenta guardada"; color: mutedColor(); font.pixelSize: fs(10); elide: Text.ElideRight }
-                    Text { width: parent.width; text: accountData && accountData.isCurrent ? "Cuenta actual" : "Toca para cambiar"; color: accountData && accountData.isCurrent ? inGeCoreFlow.theme.success : primaryColor(); font.pixelSize: fs(9); font.bold: true }
+                Text {
+                    x: 8; y: 28
+                    width: parent.width - 105
+                    text: accountData ? inGeCoreFlow.displayEmailExact(accountData.email, "Cuenta guardada") : ""
+                    elide: Text.ElideRight
+                    font.pixelSize: 10
                 }
-
-                Rectangle {
-                    visible: manageAccountsModeV18 && accountData && !accountData.transient
-                    width: 38; height: 38; radius: 12
-                    anchors.right: parent.right; anchors.rightMargin: 12
+                Button {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 3
                     anchors.verticalCenter: parent.verticalCenter
-                    color: deleteAccountMouseV20.pressed ? inGeCoreFlow.theme.pressed : inGeCoreFlow.theme.errorContainer
-                    Components.FlowIcon {
-                        anchors.centerIn: parent
-                        width: 20
-                        height: 20
-                        name: "action.delete"
-                        flow: inGeCoreFlow
-                        pressed: deleteAccountMouseV20.pressed
-                        tintColor: inGeCoreFlow.theme.error
-                        activeTintColor: inGeCoreFlow.theme.error
-                        inactiveOpacity: 1.0
-                    }
-                    MouseArea { id: deleteAccountMouseV20; anchors.fill: parent; onClicked: removeSavedAccountV20(accountData.id) }
-                }
-
-                MouseArea {
-                    id: accountMouseV20
-                    anchors.fill: parent
-                    anchors.rightMargin: manageAccountsModeV18 ? 58 : 0
+                    text: manageAccountsModeV18 ? "Eliminar" : "Abrir"
                     enabled: !accountSwitchBusyV20
                     onClicked: {
-                        if (accountData && accountData.isCurrent) closeAccountSwitchSheetV18()
-                        else if (accountData) switchSavedAccountV20(accountData.id)
+                        if (!accountData) return
+                        if (manageAccountsModeV18) {
+                            if (!accountData.transient) removeSavedAccountV20(accountData.id)
+                        } else if (accountData.isCurrent) closeAccountSwitchSheetV18()
+                        else switchSavedAccountV20(accountData.id)
                     }
                 }
             }
-
             Text {
                 anchors.centerIn: parent
                 visible: savedAccountsModelV20.length === 0
-                width: parent.width - 24
-                text: "Aún no hay cuentas recordadas. Activa “Recordarme” al iniciar sesión."
-                color: mutedColor(); font.pixelSize: fs(11); wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter
+                text: "No hay cuentas recordadas"
             }
         }
-
-        Rectangle {
-            id: addAccountBtnV18
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: manageAccountsBtnV18.top
-            anchors.leftMargin: 18
-            anchors.rightMargin: 18
-            anchors.bottomMargin: 14
-            height: 58
-            radius: 15
-            color: addAccountMouseV18.pressed ? Qt.darker(inGeCoreFlow.theme.actionPrimary, 1.12) : inGeCoreFlow.theme.actionPrimary
-            scale: addAccountMouseV18.pressed ? 0.98 : 1.0
-            Behavior on scale { NumberAnimation { duration: inGeCoreFlow.fastDuration; easing.type: inGeCoreFlow.easeOut } }
-            Components.FlowIcon {
-                x: 18
-                anchors.verticalCenter: parent.verticalCenter
-                width: 27
-                height: 27
-                name: "profile.add"
-                flow: inGeCoreFlow
-                pressed: addAccountMouseV18.pressed
-                tintColor: inGeCoreFlow.theme.onActionPrimary
-                activeTintColor: inGeCoreFlow.theme.onActionPrimary
-                inactiveOpacity: 1.0
-            }
-            Text { x: 56; width: parent.width - 74; anchors.verticalCenter: parent.verticalCenter; text: "Añadir otra cuenta"; color: inGeCoreFlow.theme.onActionPrimary; font.pixelSize: fs(13); font.bold: true; elide: Text.ElideRight }
-            MouseArea { id: addAccountMouseV18; anchors.fill: parent; enabled: !accountSwitchBusyV20; onClicked: performAddAccountV18() }
+        Button {
+            width: parent.width
+            enabled: !accountSwitchBusyV20
+            text: "Anadir otra cuenta"
+            onClicked: performAddAccountV18()
         }
-
-        Rectangle {
-            id: manageAccountsBtnV18
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.leftMargin: 18
-            anchors.rightMargin: 18
-            anchors.bottomMargin: 18
-            height: 58
-            radius: 15
-            color: manageAccountsMouseV18.pressed ? inGeCoreFlow.theme.pressed : card2Color()
-            border.color: borderColor(); border.width: 1
-            scale: manageAccountsMouseV18.pressed ? 0.98 : 1.0
-            Behavior on scale { NumberAnimation { duration: inGeCoreFlow.fastDuration; easing.type: inGeCoreFlow.easeOut } }
-            Components.FlowIcon {
-                x: 18
-                anchors.verticalCenter: parent.verticalCenter
-                width: 23
-                height: 23
-                name: manageAccountsModeV18 ? "system.check" : "profile.account"
-                flow: inGeCoreFlow
-                active: manageAccountsModeV18
-                pressed: manageAccountsMouseV18.pressed
-                tintColor: primaryColor()
-                activeTintColor: inGeCoreFlow.theme.success
-                inactiveOpacity: 1.0
-            }
-            Text { x: 56; width: parent.width - 74; anchors.verticalCenter: parent.verticalCenter; text: manageAccountsModeV18 ? "Terminar gestión" : "Gestionar cuentas guardadas"; color: textColor(); font.pixelSize: fs(12); font.bold: true; elide: Text.ElideRight }
-            MouseArea { id: manageAccountsMouseV18; anchors.fill: parent; onClicked: openManageAccountsV18() }
+        Button {
+            width: parent.width
+            text: manageAccountsModeV18 ? "Terminar gestion" : "Gestionar cuentas guardadas"
+            onClicked: openManageAccountsV18()
         }
-
-        FlowCore.FlowBusyIndicator {
-            anchors.centerIn: accountsListV20
-            running: accountSwitchBusyV20
-            visible: accountSwitchBusyV20
-            width: 42
-            height: 42
-            flow: inGeCoreFlow
-        }
+        Text { visible: accountSwitchBusyV20; text: "Procesando cuenta..." }
     }
 }
 
@@ -4496,7 +4151,7 @@ Item {
         function visibleOf(list) {
             var result = []
             for (var i = 0; list && i < list.length; ++i)
-                if (list[i] && list[i].visible !== false)
+                if (list[i] && list[i].visible !== false && String(list[i].command || "") !== "inge.core")
                     result.push(list[i])
             return result
         }
@@ -4509,7 +4164,7 @@ Item {
             return hasChildren(action) ? "menu" : "none"
         }
         readonly property var actions: visibleOf(dockContextController ? dockContextController.actions : [])
-        readonly property bool coreAvailable: !!dockContextController && dockContextController.ingeCoreAvailable === true
+        readonly property bool coreAvailable: false
         visible: (actions.length > 0 || coreAvailable)
                  && !(inGeCoreFlow.imeVisible || Qt.inputMethod.visible)
                  && !(app.pageIndex === 1 && app.calicataDockSuppressed)
@@ -4546,14 +4201,6 @@ Item {
                         // Una acción con comando Y submenú: mantener pulsado abre el menú.
                         onPressAndHold: if (bareNavBarV1.hasChildren(modelData)) actionMenuV1.openFor(modelData)
                     }
-                }
-                Button {
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: bareNavBarV1.coreAvailable
-                    flat: true
-                    text: "InGe Core"
-                    enabled: !dockCommandRouter.busy
-                    onClicked: dockCommandRouter.dispatchGlobal("inge.core")
                 }
             }
         }
@@ -5072,11 +4719,6 @@ Component {
                     width: bareHomeColumnV1.width
                     text: "Sincronizar"
                     onClicked: app.dispatchGlobalSyncV60()
-                }
-                Button {
-                    width: bareHomeColumnV1.width
-                    text: "InGe+ IA"
-                    onClicked: dockCommandRouter.dispatchGlobal("inge.core")
                 }
                 Button {
                     width: bareHomeColumnV1.width

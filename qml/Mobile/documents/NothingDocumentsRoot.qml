@@ -25,11 +25,7 @@ Rectangle {
     property bool motionAllowed: true
     required property var flow
     // One static backdrop for grouped controls; rows never capture the list.
-    Rectangle {
-        id: driveGlassBackdrop
-        anchors.fill: parent
-        color: root.color
-    }
+
     property real bottomSafeInset: 0
     property bool contextEnabled: true
     readonly property bool dark: files.theme === "dark" || (files.theme === "system" && systemDark)
@@ -72,16 +68,7 @@ Rectangle {
         : null
     property string toastText: ""
     property string currentRoute: files.route
-    onCurrentRouteChanged: if (motionAllowed)
-        localFade.restart()
-    NumberAnimation {
-        id: localFade
-        target: root
-        property: "opacity"
-        from: 0
-        to: 1
-        duration: root.flow.normalDuration
-    }
+
     color: dark ? (files.oled ? "#000000" : root.flow.colors.ingemaDeep) : root.flow.theme.surfaceElevated
     clip: true
 
@@ -534,18 +521,7 @@ Rectangle {
             font.pixelSize: 13
             selectByMouse: true
             onTextEdited: files.query = text
-            background: FlowCore.FlowGlassSurface {
-                flow: root.flow
-                darkMode: root.dark
-                materialRole: "emphasized"
-                blurSource: driveGlassBackdrop
-                selected: search.activeFocus
-                elevationEnabled: false
-                fallbackLight: root.surface
-                fallbackDark: root.surface
-                radius: 24
-                border.color: search.activeFocus ? (root.dark ? root.flow.theme.surfaceElevated : root.flow.theme.accent) : root.surface
-            }
+            background: Rectangle { color: root.surface; border.width: 1; border.color: "#D1D5DB" }
             NothingIcon {
                 ink: root.accent
                 x: 14
@@ -591,177 +567,16 @@ Rectangle {
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Flickable {
+            Column {
                 anchors.fill: parent
+                anchors.margins: 16
+                spacing: 12
                 visible: root.home
-                clip: true
-                contentWidth: width
-                contentHeight: dashboard.height + 40
-                boundsBehavior: Flickable.StopAtBounds
-                Column {
-                    id: dashboard
-                    x: 24
-                    width: parent.width - 48
-                    spacing: 32
-                    Rectangle {
-                        width: parent.width
-                        height: Math.max(220, storageSummary.implicitHeight + 48)
-                        radius: 32
-                        color: root.surface
-                        MouseArea {
-                            anchors.fill: parent
-                            enabled: !files.busy
-                            onClicked: files.navigate("drive")
-                        }
-                        Column {
-                            id: storageSummary
-                            anchors.fill: parent
-                            anchors.margins: 24
-                            spacing: 10
-                            Text {
-                                text: "ALMACENAMIENTO INGE DRIVE"
-                                font.family: root.flow.typography.family
-                                font.pixelSize: 12
-                                font.bold: true
-                                color: (root.dark ? root.flow.theme.surfaceElevated : root.flow.theme.accent)
-                            }
-                            Text {
-                                text: files.stats.total ? Math.floor(100 * files.stats.used / files.stats.total) + "%" : "—"
-                                color: root.ink
-                                font.family: root.flow.typography.family
-                                font.bold: true
-                                font.pixelSize: 48
-                            }
-                            Rectangle {
-                                width: parent.width
-                                height: 8
-                                radius: 4
-                                color: root.color
-                                Rectangle {
-                                    height: 8
-                                    radius: 4
-                                    color: (root.dark ? root.flow.theme.surfaceElevated : root.flow.theme.accent)
-                                    width: parent.width * Math.min(1, (files.stats.total ? files.stats.used / files.stats.total : 0))
-                                }
-                            }
-                            RowLayout {
-                                width: parent.width
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: files.stats.used !== undefined ? files.formatSize(files.stats.used) + " USADO EN SERVIDOR" : "CONSULTANDO SERVIDOR..."
-                                    color: root.muted
-                                    font.family: root.flow.typography.family
-                                    font.pixelSize: 9
-                                }
-                                Text {
-                                    text: files.stats.total ? files.formatSize(files.stats.total) + " CUOTA DEL PLAN" : "CUOTA NO CONFIGURADA"
-                                    color: root.muted
-                                    font.family: root.flow.typography.family
-                                    font.pixelSize: 9
-                                }
-                            }
-                            Text {
-                                width: parent.width
-                                text: files.stats.remaining !== undefined && files.stats.remaining !== null
-                                      ? files.formatSize(files.stats.remaining) + " RESTANTE EN SERVIDOR"
-                                      : "Espacio restante pendiente de verificar"
-                                color: root.ink
-                                font.pixelSize: 11
-                                wrapMode: Text.WordWrap
-                            }
-                        }
-                        NothingIcon {
-                            ink: root.accent
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            anchors.margins: 24
-                            name: "save"
-                            size: 32
-                        }
-                    }
-                    TextField {
-                        id: homeSearch
-                        width: parent.width
-                        height: 52
-                        leftPadding: 44
-                        color: root.ink
-                        placeholderText: "BUSCAR ARCHIVOS..."
-                        placeholderTextColor: root.muted
-                        font.family: root.flow.typography.family
-                        font.pixelSize: 12
-                        enabled: !files.busy
-                        onTextEdited: {
-                            var q = text;
-                            if (q.length) {
-                                files.navigate("drive");
-                                files.query = q;
-                                text = "";
-                                search.forceActiveFocus();
-                            }
-                        }
-                        background: Rectangle {
-                            radius: 32
-                            color: root.surface
-                        }
-                        NothingIcon {
-                            ink: root.accent
-                            x: 14
-                            anchors.verticalCenter: parent.verticalCenter
-                            name: "search"
-                        }
-                    }
-                    Column {
-                        width: parent.width
-                        spacing: 16
-                        Text {
-                            text: "HERRAMIENTAS"
-                            color: (root.dark ? root.flow.theme.surfaceElevated : root.flow.theme.accent)
-                            font.family: root.flow.typography.family
-                            font.bold: true
-                            font.pixelSize: 14
-                        }
-                        RowLayout {
-                            width: parent.width
-                            spacing: 12
-                            Repeater {
-                                model: [
-                                    {
-                                        name: "INGE DRIVE",
-                                        icon: "cloud",
-                                        key: "drive"
-                                    }
-                                ]
-                                Rectangle {
-                                    required property var modelData
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: 80
-                                    radius: 24
-                                    color: root.surface
-                                    Column {
-                                        anchors.centerIn: parent
-                                        spacing: 5
-                                        NothingIcon {
-                                            ink: root.accent
-                                            anchors.horizontalCenter: parent.horizontalCenter
-                                            name: modelData.icon
-                                        }
-                                        Text {
-                                            text: modelData.name
-                                            color: root.ink
-                                            font.family: root.flow.typography.family
-                                            font.pixelSize: 10
-                                        }
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        enabled: !files.busy
-                                        onClicked: files.navigate(modelData.key)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                Text { text: "Documentos"; color: root.ink; font.pixelSize: 18; font.bold: true }
+                Button { width: parent.width; text: "InGeDrive"; onClicked: files.navigate("drive") }
+                Button { width: parent.width; text: "Recientes"; onClicked: files.navigate("recents") }
+                Button { width: parent.width; text: "Papelera"; onClicked: files.navigate("trash") }
+                Text { text: files.busy ? "Cargando..." : ""; color: root.ink }
             }
             ListView {
                 id: list
@@ -862,58 +677,11 @@ Rectangle {
             }
             // ===== Estados de carga (sin reemplazar contenido existente) =====
             // Primera carga: skeleton estático con un único pulso compartido.
-            Item {
-                id: driveSkeleton
-                anchors.fill: parent
-                anchors.margins: 16
-                visible: opacity > 0.01
-                opacity: root.firstLoadPending ? 1.0 : 0.0
-                Behavior on opacity { OpacityAnimator { duration: root.motionAllowed ? 160 : 0 } }
-
-                Item {
-                    id: skeletonPulse
-                    anchors.fill: parent
-                    SequentialAnimation {
-                        running: driveSkeleton.visible && root.motionAllowed
-                        loops: Animation.Infinite
-                        OpacityAnimator { target: skeletonPulse; from: 1.0; to: 0.55; duration: 720; easing.type: Easing.InOutSine }
-                        OpacityAnimator { target: skeletonPulse; from: 0.55; to: 1.0; duration: 720; easing.type: Easing.InOutSine }
-                    }
-
-                    Column {
-                        visible: !files.grid
-                        width: parent.width
-                        spacing: 12
-                        Repeater {
-                            model: 5
-                            Row {
-                                required property int index
-                                spacing: 12
-                                Rectangle { width: 40; height: 40; radius: 10; color: root.surface }
-                                Column {
-                                    spacing: 8
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    Rectangle { width: skeletonPulse.width * (0.62 - (index % 3) * 0.1); height: 10; radius: 5; color: root.surface }
-                                    Rectangle { width: skeletonPulse.width * 0.3; height: 8; radius: 4; color: root.surface }
-                                }
-                            }
-                        }
-                    }
-                    Grid {
-                        visible: files.grid
-                        columns: Math.max(1, Math.floor(skeletonPulse.width / 126))
-                        spacing: 12
-                        Repeater {
-                            model: 6
-                            Rectangle {
-                                width: Math.floor(skeletonPulse.width / Math.max(1, Math.floor(skeletonPulse.width / 126))) - 12
-                                height: 134
-                                radius: 14
-                                color: root.surface
-                            }
-                        }
-                    }
-                }
+            Text {
+                anchors.centerIn: parent
+                visible: root.firstLoadPending
+                text: "Cargando documentos..."
+                color: root.ink
             }
 
             // Recarga con contenido: el contenido se queda; barra fina + guard.
@@ -923,32 +691,12 @@ Rectangle {
                 visible: enabled
                 preventStealing: true
             }
-            Item {
-                id: driveBusyBar
-                anchors.left: parent.left
-                anchors.right: parent.right
+            Text {
                 anchors.top: parent.top
-                height: 2
-                clip: true
-                visible: opacity > 0.01
-                opacity: files.busy && !root.firstLoadPending ? 1.0 : 0.0
-                Behavior on opacity { OpacityAnimator { duration: root.motionAllowed ? 150 : 0 } }
-                Rectangle { anchors.fill: parent; color: root.flow.theme.accent; opacity: 0.18 }
-                Rectangle {
-                    id: driveBusySegment
-                    width: parent.width * 0.32
-                    height: parent.height
-                    radius: 1
-                    color: root.flow.theme.accent
-                    XAnimator on x {
-                        from: -driveBusySegment.width
-                        to: driveBusyBar.width
-                        duration: 1100
-                        loops: Animation.Infinite
-                        running: driveBusyBar.visible && root.motionAllowed
-                        easing.type: Easing.InOutSine
-                    }
-                }
+                anchors.horizontalCenter: parent.horizontalCenter
+                visible: files.busy && !root.firstLoadPending
+                text: "Procesando..."
+                color: root.ink
             }
 
         }
@@ -1050,16 +798,7 @@ Rectangle {
             root.heldPath = "";
             console.info("INGE_DOC_CONTEXT_CLOSE");
         }
-        background: FlowCore.FlowGlassSurface {
-            flow: root.flow
-            darkMode: root.dark
-            materialRole: "emphasized"
-            blurSource: driveGlassBackdrop
-            elevationEnabled: false
-            fallbackLight: root.surface
-            fallbackDark: root.surface
-            radius: 12
-        }
+        background: Rectangle { color: root.surface; border.width: 1; border.color: "#D1D5DB" }
         width: 230
         palette.window: root.surface
         palette.text: root.ink
@@ -1101,15 +840,7 @@ Rectangle {
         y: Math.max(16, (root.height - height) / 2)
         padding: 24
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        background: FlowCore.FlowGlassSurface {
-            flow: root.flow
-            darkMode: root.dark
-            materialRole: "emphasized"
-            blurSource: driveGlassBackdrop
-            fallbackLight: root.surface
-            fallbackDark: root.surface
-            radius: 28
-        }
+        background: Rectangle { color: root.surface; border.width: 1; border.color: "#D1D5DB" }
         Overlay.modal: Rectangle {
             color: root.flow.theme.scrim
         }

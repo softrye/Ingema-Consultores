@@ -1,45 +1,33 @@
-// SPDX-License-Identifier: GPL-3.0-only
 import QtQuick
 import QtQuick.Controls
-import InGe.CoreFlow 3.0 as Mobile
 
 Button {
     id: control
     property string glyph: ""
     property bool filled: false
-    // Identidad INGEMA: contorno/texto en el acento; relleno en la accion
-    // primaria (INGEMA Blue) con texto blanco en cualquier modo.
-    property color foreground: Mobile.InGeCoreFlow.theme.accent
-    property color fill: Mobile.InGeCoreFlow.theme.actionPrimary
-    property color onFill: Mobile.InGeCoreFlow.theme.onActionPrimary
-    implicitHeight: 44
-    implicitWidth: text.length ? Math.max(70, label.implicitWidth + 28) : 44
-    padding: 10
-    opacity: enabled ? 1 : 0.35
-    background: Rectangle {
-        radius: control.text.length ? 22 : width / 2
-        color: control.filled ? control.fill : control.down ? Qt.rgba(control.foreground.r, control.foreground.g, control.foreground.b, 0.15) : "transparent"
-    }
-    contentItem: Item {
-        implicitWidth: label.implicitWidth
-        NothingIcon {
-            anchors.centerIn: parent
-            name: control.glyph
-            visible: control.glyph.length > 0
-            ink: control.filled ? control.onFill : control.foreground
-        }
-        Text {
-            id: label
-            anchors.centerIn: parent
-            text: control.text
-            visible: !control.glyph.length
-            font.family: Mobile.InGeCoreFlow.typography.family
-            font.pixelSize: 11
-            font.bold: true
-            color: control.filled ? control.onFill : control.foreground
-        }
+    property color foreground: "#111827"
+    property color fill: "#E5E7EB"
+    property color onFill: "#111827"
+    implicitWidth: Math.max(44, displayText.implicitWidth + 20)
+    implicitHeight: 42
+    readonly property string glyphLabel: glyph === "arrow_back" ? "<"
+                                 : glyph === "more_vert" ? "..."
+                                 : glyph === "close" ? "X"
+                                 : glyph === "add" ? "+"
+                                 : glyph === "search" ? "?"
+                                 : glyph === "refresh" ? "Refrescar"
+                                 : glyph === "grid_view" ? "Cuadricula"
+                                 : glyph === "list" ? "Lista"
+                                 : glyph === "sort" ? "Ordenar" : glyph
+    background: Rectangle { color: control.down ? "#D1D5DB" : "#F3F4F6"; border.color: "#9CA3AF" }
+    contentItem: Text {
+        id: displayText
+        text: control.text.length ? control.text : control.glyphLabel
+        horizontalAlignment: Text.AlignHCenter
+        verticalAlignment: Text.AlignVCenter
+        color: "#111827"
+        font.pixelSize: 12
+        elide: Text.ElideRight
     }
     Accessible.name: text.length ? text : glyph
-    ToolTip.visible: hovered && text.length === 0
-    ToolTip.text: Accessible.name
 }

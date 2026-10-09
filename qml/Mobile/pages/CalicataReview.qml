@@ -192,7 +192,7 @@ Item {
         color: "transparent"
         scale: chipTap.pressed ? 0.97 : 1
         CalicataSurface { dark: review.darkMode; accent: chip.tone; anchors.fill: parent; radius: chip.radius; tone: "tinted"; pressed: chipTap.pressed }
-        Behavior on scale { NumberAnimation { duration: chipTap.pressed ? 70 : 170; easing.type: Easing.OutCubic } }
+
         Row {
             id: chipRow
             anchors.centerIn: parent
@@ -297,7 +297,7 @@ Item {
                     name: "system.up"; flow: review.flow
                     tintColor: review.muted; activeTintColor: review.accent; inactiveOpacity: 1
                     rotation: pendingCard.expanded ? 0 : 180
-                    Behavior on rotation { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+
                 }
                 TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: pendingCard.expanded = !pendingCard.expanded }
             }
@@ -305,13 +305,13 @@ Item {
                 Layout.fillWidth: true
                 implicitHeight: pendingCard.expanded ? pendingList.implicitHeight : 0
                 clip: true
-                Behavior on implicitHeight { NumberAnimation { duration: 220 * review.motionScale + 1; easing.type: Easing.OutCubic } }
+
                 ColumnLayout {
                     id: pendingList
                     width: parent.width
                     spacing: review.dp(8)
                     opacity: pendingCard.expanded ? 1 : 0
-                    Behavior on opacity { NumberAnimation { duration: 160 } }
+
                     Repeater {
                         model: review.pendingComponents
                         delegate: Rectangle {
@@ -326,7 +326,7 @@ Item {
                             border.width: 1
                             border.color: review.tint(pendingRow.tone, 0.22)
                             scale: pendingTap.pressed ? 0.985 : 1
-                            Behavior on scale { NumberAnimation { duration: pendingTap.pressed ? 70 : 170; easing.type: Easing.OutCubic } }
+
                             RowLayout {
                                 id: pendingRowContent
                                 anchors.left: parent.left; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
@@ -745,7 +745,7 @@ Item {
                     y: review.dp(4)
                     radius: height / 2
                     selected: true
-                    Behavior on x { NumberAnimation { duration: 220 * review.motionScale + 1; easing.type: Easing.OutCubic } }
+
                 }
                 Row {
                     anchors.fill: parent
@@ -829,7 +829,7 @@ Item {
                         implicitHeight: recText.implicitHeight + review.dp(18)
                         radius: review.dp(14)
                         color: recTap.pressed ? review.tint(review.accent, 0.12) : "transparent"
-                        Behavior on color { ColorAnimation { duration: 130 } }
+
                         Rectangle {
                             x: review.dp(10); y: review.dp(14)
                             width: review.dp(6); height: width; radius: width / 2

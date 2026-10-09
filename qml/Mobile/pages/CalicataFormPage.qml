@@ -3006,12 +3006,7 @@ Item {
             activeTintColor: root.cAccent
             active: cb.popup && cb.popup.visible
             inactiveOpacity: 1.0
-            Behavior on rotation {
-                NumberAnimation {
-                    duration: root.flow ? root.flow.fastDuration : 0
-                    easing.type: root.flow ? root.flow.easeOut : Easing.OutCubic
-                }
-            }
+
         }
     }
 
@@ -3346,7 +3341,7 @@ Item {
                     activeTintColor: root.cMuted
                     inactiveOpacity: 1
                     rotation: logoHistoryStrip.expanded ? 90 : 0
-                    Behavior on rotation { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+
                 }
             }
         }
@@ -3357,7 +3352,7 @@ Item {
             Layout.preferredHeight: Math.min(count, 4) * logoHistoryStrip.rowHeight
             visible: opacity > 0
             opacity: logoHistoryStrip.expanded ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+
             clip: true
             interactive: count > 4
             boundsBehavior: Flickable.StopAtBounds
@@ -3538,8 +3533,8 @@ Item {
             pressed: photoPillTap.pressed
         }
         scale: photoPillTap.pressed ? 0.975 : 1
-        Behavior on scale { NumberAnimation { duration: photoPillTap.pressed ? 70 : 170; easing.type: Easing.OutCubic } }
-        Behavior on color { ColorAnimation { duration: 140 } }
+
+
         Text { anchors.centerIn: parent; text: photoPill.text; color: photoPill.primary || photoPill.onGlass ? "#FFFFFF" : root.cText; font.bold: true; font.pixelSize: root.fsLabel }
         TapHandler { id: photoPillTap; gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: photoPill.clicked() }
         Accessible.role: Accessible.Button
@@ -3604,8 +3599,8 @@ Item {
         implicitHeight: tile.wide ? root.dp(52) : root.dp(60)
         opacity: enabled ? 1 : 0.38
         scale: tileTap.pressed ? 0.975 : 1
-        Behavior on scale { NumberAnimation { duration: tileTap.pressed ? 70 : 170; easing.type: Easing.OutCubic } }
-        Behavior on opacity { NumberAnimation { duration: 140 } }
+
+
         // Separador sutil entre acciones de la misma superficie.
         Rectangle {
             visible: tile.divider
@@ -3620,7 +3615,7 @@ Item {
             radius: root.dp(16)
             color: tile.onDark ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(root.cGenBlue.r, root.cGenBlue.g, root.cGenBlue.b, 0.10)
             opacity: tileTap.pressed ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: tileTap.pressed ? 60 : 200; easing.type: Easing.OutCubic } }
+
         }
         Column {
             visible: !tile.wide
@@ -3679,8 +3674,8 @@ Item {
         color: "transparent"
         scale: labPillTap.pressed ? 0.97 : 1
         CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: labPill.radius; tone: "tinted"; pressed: labPillTap.pressed }
-        Behavior on scale { NumberAnimation { duration: root.flow ? root.flow.instantDuration : 70; easing.type: Easing.OutQuad } }
-        Behavior on color { ColorAnimation { duration: root.flow ? root.flow.duration(140) : 140 } }
+
+
         Accessible.role: Accessible.Button
         Accessible.name: labPill.text
         Text {
@@ -3710,7 +3705,7 @@ Item {
         border.width: 1
         border.color: chip.current ? root.cGenBlue : root.cBorder
         scale: chipTap.pressed ? 0.96 : 1
-        Behavior on scale { NumberAnimation { duration: root.flow ? root.flow.instantDuration : 70; easing.type: Easing.OutQuad } }
+
         Accessible.role: chip.current ? Accessible.StaticText : Accessible.Button
         Accessible.name: chip.current ? chip.code + " ya está seleccionado" : "Adoptar " + chip.code
         Text {
@@ -3910,7 +3905,7 @@ Item {
             font.letterSpacing: genShell.labelCaps ? 1.6 : 0.2
             font.weight: Font.DemiBold
             wrapMode: Text.WordWrap
-            Behavior on color { ColorAnimation { duration: 140 } }
+
         }
 
         Rectangle {
@@ -3922,7 +3917,7 @@ Item {
             scale: genShell.pressed ? 0.985 : 1
             Accessible.role: genShell.tappable ? Accessible.Button : Accessible.Grouping
             Accessible.name: genShell.label
-            Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+
 
             CalicataSurface {
                 dark: root.darkMode
@@ -4063,7 +4058,7 @@ Item {
         padding: 0
         focusPolicy: Qt.NoFocus
         scale: genRoundBtn.down ? 0.94 : 1
-        Behavior on scale { NumberAnimation { duration: genRoundBtn.down ? 70 : 170; easing.type: Easing.OutCubic } }
+
         background: CalicataSurface {
             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
             radius: width / 2
@@ -4137,7 +4132,7 @@ Item {
         font.pixelSize: genBtn.stacked ? root.fsLabel : root.fsField
         font.weight: Font.DemiBold
         scale: genBtn.down ? 0.985 : 1
-        Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+
         background: CalicataSurface {
             dark: root.darkMode
             accent: genBtn.accent
@@ -4758,7 +4753,7 @@ Item {
         radius: root.dp(12)
         color: "transparent"
         scale: prfSegmentTap.pressed ? 0.985 : 1
-        Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+
         Accessible.role: Accessible.RadioButton
         Accessible.name: prfSegment.label
         Accessible.checked: prfSegment.isOn
@@ -4823,7 +4818,7 @@ Item {
                 y: root.dp(3)
                 x: prfSwitch.isOn ? parent.width - width - root.dp(3) : root.dp(3)
                 color: "#FFFFFF"
-                Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+
             }
         }
         Text {
@@ -5204,7 +5199,7 @@ Item {
         padding: root.dp(8)
 
         scale: mobileIconButton.down ? 0.94 : 1
-        Behavior on scale { NumberAnimation { duration: mobileIconButton.down ? 70 : 170; easing.type: Easing.OutCubic } }
+
         background: CalicataSurface {
             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
             radius: root.dp(12)
@@ -8752,7 +8747,7 @@ Item {
                     // de sobra para pantalla completa y el zoom del visor.
                     sourceSize: Qt.size(2048, 2048)
                     autoTransform: true
-                    Behavior on scale { enabled: !viewerPinch.active; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+
                 }
                 PinchHandler {
                     id: viewerPinch
@@ -8776,7 +8771,7 @@ Item {
                 Rectangle {
                     Layout.preferredWidth: root.dp(40); Layout.preferredHeight: root.dp(40); radius: width / 2
                     color: viewerBackTap.pressed ? "#33FFFFFF" : "#1FFFFFFF"
-                    Behavior on color { ColorAnimation { duration: 120 } }
+
                     Components.FlowIcon {
                         anchors.centerIn: parent
                         width: root.dp(22); height: width
@@ -8910,8 +8905,8 @@ Item {
                         color: sheetRowTap.pressed ? Qt.rgba(root.cGenBlue.r, root.cGenBlue.g, root.cGenBlue.b, 0.10) : "transparent"
                         opacity: modelData.enabled ? 1 : 0.4
                         scale: sheetRowTap.pressed ? 0.98 : 1
-                        Behavior on scale { NumberAnimation { duration: sheetRowTap.pressed ? 70 : 170; easing.type: Easing.OutCubic } }
-                        Behavior on color { ColorAnimation { duration: 130 } }
+
+
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: root.dp(8); anchors.rightMargin: root.dp(10)
@@ -9067,7 +9062,7 @@ Item {
                     x: root.dp(3) + labTabBar.current * labTabBar.slotWidth
                     radius: height / 2
                     color: root.cGenBlue
-                    Behavior on x { NumberAnimation { duration: root.flow ? root.flow.duration(220) : 220; easing.type: Easing.OutCubic } }
+
                 }
                 Row {
                     x: root.dp(3)
@@ -9081,14 +9076,14 @@ Item {
                             width: labTabBar.slotWidth
                             height: labTabBar.height - root.dp(6)
                             scale: labTabTap.pressed ? 0.97 : 1
-                            Behavior on scale { NumberAnimation { duration: root.flow ? root.flow.instantDuration : 70 } }
+
                             Text {
                                 anchors.centerIn: parent
                                 text: labTabSlot.modelData.label
                                 color: labTabBar.current === labTabSlot.index ? "#FFFFFF" : root.cText
                                 font.pixelSize: root.fsLabel
                                 font.bold: labTabBar.current === labTabSlot.index
-                                Behavior on color { ColorAnimation { duration: root.flow ? root.flow.duration(160) : 160 } }
+
                             }
                             TapHandler { id: labTabTap; onTapped: root.setLabTab(labTabSlot.modelData.key) }
                             Accessible.role: Accessible.PageTab
@@ -9386,7 +9381,7 @@ Item {
                                 Layout.fillWidth: true
                                 visible: root.labTab === "lab"
                                 implicitHeight: sampleSummaryRow.implicitHeight + root.dp(24)
-                                Behavior on implicitHeight { enabled: !root._stageSettling; NumberAnimation { duration: root.flow ? root.flow.duration(180) : 180; easing.type: Easing.OutCubic } }
+
                                 radius: root.dp(14)
                                 color: "transparent"
                                 CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; level: "card" }
@@ -9678,7 +9673,7 @@ Item {
                                                 Layout.preferredHeight: root.dp(22)
                                                 radius: height / 2
                                                 color: root.labStageColor(stage, true)
-                                                Behavior on color { ColorAnimation { duration: root.flow ? root.flow.duration(220) : 220 } }
+
                                                 Text {
                                                     id: estadoText
                                                     anchors.centerIn: parent
@@ -9686,7 +9681,7 @@ Item {
                                                     color: root.labStageColor(parent.stage, false)
                                                     font.bold: true
                                                     font.pixelSize: root.sp(11)
-                                                    Behavior on color { ColorAnimation { duration: root.flow ? root.flow.duration(220) : 220 } }
+
                                                 }
                                             }
                                         }
@@ -9968,7 +9963,7 @@ Item {
                             color: dayCell.isSelected ? root.cGenBlue : "transparent"
                             border.width: dayCell.model.today && !dayCell.isSelected ? 1 : 0
                             border.color: root.cGenBlue
-                            Behavior on color { ColorAnimation { duration: 140 } }
+
                         }
                         Text {
                             anchors.centerIn: parent
@@ -10338,7 +10333,7 @@ Item {
                     padding: root.dp(12)
                     onClicked: identityPopup.open()
                     scale: down ? 0.985 : 1
-                    Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+
                     background: CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; radius: root.dp(14); tone: "tinted"; selected: true; pressed: genIdentityEntry.down }
                     contentItem: RowLayout {
                         id: genIdentityRow
@@ -10568,7 +10563,7 @@ Item {
                         width: locationAdjustRow.implicitWidth + root.dp(28)
                         height: root.dp(42)
                         scale: locationAdjustTap.pressed ? 0.985 : 1
-                        Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+
                         Accessible.role: Accessible.Button
                         Accessible.name: locationMapCard.hasPoint ? "Actualizar ubicación GPS" : "Obtener ubicación GPS"
                         Rectangle {
@@ -10585,7 +10580,7 @@ Item {
                                    : (root.darkMode ? Qt.rgba(0.0824, 0.102, 0.1882, 0.62) : Qt.rgba(0.98, 0.99, 1.0, 0.78))
                             border.width: 1
                             border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(1, 1, 1, 0.55)
-                            Behavior on color { ColorAnimation { duration: 130 } }
+
                         }
                         Row {
                             id: locationAdjustRow
@@ -10869,7 +10864,7 @@ Item {
                         font.weight: Font.DemiBold
                         focusPolicy: Qt.NoFocus
                         scale: down ? 0.985 : 1
-                        Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+
                         background: CalicataSurface {
                             dark: root.darkMode
                             accent: root.cGenOrange
@@ -10968,9 +10963,9 @@ Item {
                         radius: root.dp(22)
                         // Tarjeta = Liquid Glass (ambiente propio + superficie del sistema).
                         color: "transparent"
-                        Behavior on implicitHeight { enabled: !root._stageSettling; NumberAnimation { duration: root.flow ? root.flow.duration(180) : 180; easing.type: Easing.OutCubic } }
+
                         scale: photoCardTap.pressed ? 0.99 : 1
-                        Behavior on scale { NumberAnimation { duration: root.flow ? root.flow.instantDuration : 70 } }
+
                         // Seleccionar la categoría NUNCA abre cámara, galería ni visor.
                         TapHandler { id: photoCardTap; onTapped: root.activePhotoCategory = photoCard.slot }
                         Component.onCompleted: root._photoCardItems[photoCard.slot] = photoCard
@@ -10993,7 +10988,7 @@ Item {
                             border.width: photoCard.selected ? root.dp(2) : 0
                             border.color: root.cGenBlue
                             opacity: photoCard.selected ? 1 : 0
-                            Behavior on opacity { NumberAnimation { duration: root.flow ? root.flow.duration(160) : 160 } }
+
                         }
                         ColumnLayout {
                             id: photoCardColumn
@@ -11030,9 +11025,9 @@ Item {
                                     Layout.preferredWidth: root.dp(34); Layout.preferredHeight: root.dp(34)
                                     radius: width / 2
                                     color: photoMenuTap.pressed ? Qt.rgba(root.cGenBlue.r, root.cGenBlue.g, root.cGenBlue.b, 0.12) : "transparent"
-                                    Behavior on color { ColorAnimation { duration: 120 } }
+
                                     scale: photoMenuTap.pressed ? 0.94 : 1
-                                    Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+
                                     Components.FlowIcon {
                                         anchors.centerIn: parent
                                         width: root.dp(20); height: width
@@ -11080,7 +11075,7 @@ Item {
                                     barRadius: root.dp(20)
                                     absorbTaps: false
                                     opacity: visible ? 1 : 0
-                                    Behavior on opacity { NumberAnimation { duration: root.flow ? root.flow.duration(200) : 200 } }
+
                                     Column {
                                         id: photoEmptyContent
                                         anchors.horizontalCenter: parent.horizontalCenter
@@ -11158,7 +11153,7 @@ Item {
                                         Layout.preferredWidth: photoStateRow.implicitWidth + root.dp(18); Layout.preferredHeight: root.dp(24)
                                         radius: height / 2
                                         color: root.photoToneColor(photoCard.info.tone, true)
-                                        Behavior on color { ColorAnimation { duration: root.flow ? root.flow.duration(220) : 220 } }
+
                                         Row {
                                             id: photoStateRow
                                             anchors.centerIn: parent
@@ -12561,7 +12556,7 @@ Item {
                             color: root.labStageColor(labCard.info ? labCard.info.stage : "", false)
                         }
                         scale: labCardTap.pressed ? 0.985 : 1.0
-                        Behavior on scale { NumberAnimation { duration: root.flow ? root.flow.instantDuration : 70; easing.type: Easing.OutQuad } }
+
                         TapHandler { id: labCardTap; onTapped: root.openLabForStratum(labCard.corteIdx, labCard) }
                         ColumnLayout {
                             id: labCardColumn
@@ -12692,7 +12687,7 @@ Item {
                             color: root.labStageColor(resultCard.modelData ? resultCard.modelData.stage : "", false)
                         }
                         scale: resultCardTap.pressed ? 0.985 : 1.0
-                        Behavior on scale { NumberAnimation { duration: root.flow ? root.flow.instantDuration : 70; easing.type: Easing.OutQuad } }
+
                         TapHandler { id: resultCardTap; onTapped: root.openLabForStratum(resultCard.index, resultCard) }
                         ColumnLayout {
                             id: resultColumn
@@ -12903,7 +12898,7 @@ Item {
         color: "#000000"
         opacity: root.labSheetActive && !root.labDetailClosing ? (root.darkMode ? 0.42 : 0.26) : 0
         visible: opacity > 0.001
-        Behavior on opacity { NumberAnimation { duration: root.flow ? root.flow.duration(220) : 220; easing.type: Easing.OutCubic } }
+
         LabDetailScrimBlocker {
             enabled: labDetailScrim.visible
             onClicked: root.closeLabDetail()

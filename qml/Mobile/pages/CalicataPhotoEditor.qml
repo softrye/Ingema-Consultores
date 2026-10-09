@@ -718,7 +718,7 @@ Popup {
         opacity: enabled ? 1 : 0.35
         CalicataSurface { dark: editor.dark; accent: editor.cBlue; anchors.fill: parent; radius: eib.radius; tone: eib.on ? "tinted" : "glass"; selected: eib.on; pressed: eibTap.pressed }
         scale: eibTap.pressed ? 0.92 : 1
-        Behavior on scale { NumberAnimation { duration: 80 } }
+
         Components.FlowIcon {
             anchors.centerIn: parent
             width: editor.dp(22); height: width
@@ -746,7 +746,7 @@ Popup {
         color: "transparent"
         opacity: enabled ? 1 : 0.4
         scale: pillTap.pressed ? 0.97 : 1
-        Behavior on scale { NumberAnimation { duration: 80 } }
+
         CalicataSurface {
             dark: editor.dark; accent: editor.cBlue
             anchors.fill: parent
@@ -781,7 +781,7 @@ Popup {
             y: editor.dp(3)
             x: sw.checked ? parent.width - width - editor.dp(3) : editor.dp(3)
             color: "#FFFFFF"
-            Behavior on x { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+
         }
         TapHandler { enabled: sw.enabled; margin: editor.dp(10); onTapped: sw.toggled(!sw.checked) }
         Accessible.role: Accessible.CheckBox
@@ -873,7 +873,7 @@ Popup {
                 color: "#FFFFFF"
                 border.width: 2; border.color: editor.cBlue
                 scale: sl._dragging ? 1.18 : 1
-                Behavior on scale { NumberAnimation { duration: 90 } }
+
             }
             MouseArea {
                 anchors.fill: parent
@@ -918,7 +918,7 @@ Popup {
                 radius: editor.dp(10)
                 color: "transparent"
                 scale: cellTap.pressed ? 0.96 : 1
-                Behavior on scale { NumberAnimation { duration: 80 } }
+
                 CalicataSurface {
                     dark: editor.dark; accent: editor.cBlue
                     anchors.fill: parent
@@ -935,7 +935,7 @@ Popup {
                     y: anchorCell.parts[0] === "top" ? editor.dp(8)
                        : anchorCell.parts[0] === "middle" ? (parent.height - height) / 2 : parent.height - height - editor.dp(8)
                     color: anchorCell.active ? editor.cBlue : editor.cMuted
-                    Behavior on width { NumberAnimation { duration: 120 } }
+
                 }
                 TapHandler { id: cellTap; onTapped: grid.picked(anchorCell.modelData) }
                 Accessible.role: Accessible.RadioButton
@@ -984,7 +984,7 @@ Popup {
         color: "transparent"
         opacity: choice.available ? 1 : 0.6
         scale: choiceTap.pressed ? 0.97 : 1
-        Behavior on scale { NumberAnimation { duration: 80 } }
+
         CalicataSurface {
             dark: editor.dark; accent: editor.cBlue
             anchors.fill: parent
@@ -1125,7 +1125,7 @@ Popup {
         color: "#FFFFFF"
         border.width: 2; border.color: editor.cBlue
         scale: handleArea.pressed ? 1.2 : 1
-        Behavior on scale { NumberAnimation { duration: 90 } }
+
         MouseArea {
             id: handleArea
             anchors.fill: parent
@@ -1200,7 +1200,7 @@ Popup {
                 width: previewBox.width
                 height: previewBox.height
                 scale: editor.zoom
-                Behavior on scale { enabled: !stagePinch.active; NumberAnimation { duration: editor.motion; easing.type: Easing.OutCubic } }
+
 
                 // --- comparación
                 Item {
@@ -1735,7 +1735,7 @@ Popup {
                             width: Math.max(editor.dp(68), tabLabel.implicitWidth + editor.dp(16))
                             height: tabRow.height
                             scale: tabTap.pressed ? 0.95 : 1
-                            Behavior on scale { NumberAnimation { duration: 80 } }
+
                             Components.FlowIcon {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 y: editor.dp(8)
@@ -1754,7 +1754,7 @@ Popup {
                                 color: editor.tab === tabItem.index ? editor.cBlue : editor.cMuted
                                 font.pixelSize: editor.dp(11)
                                 font.bold: editor.tab === tabItem.index
-                                Behavior on color { ColorAnimation { duration: 140 } }
+
                             }
                             TapHandler { id: tabTap; onTapped: editor.setTab(tabItem.index) }
                             Accessible.role: Accessible.PageTab
@@ -1770,8 +1770,8 @@ Popup {
                     width: target ? target.width - editor.dp(20) : 0
                     height: editor.dp(3); radius: 2
                     color: editor.cBlue
-                    Behavior on x { NumberAnimation { duration: editor.motion + 40; easing.type: Easing.OutCubic } }
-                    Behavior on width { NumberAnimation { duration: editor.motion + 40; easing.type: Easing.OutCubic } }
+
+
                 }
             }
             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: editor.cBorder }
@@ -1890,7 +1890,7 @@ Popup {
                                 border.width: editor.st.color === swatch.modelData ? 3 : 1
                                 border.color: editor.st.color === swatch.modelData ? editor.cBlue : editor.cBorder
                                 scale: swatchTap.pressed ? 0.9 : 1
-                                Behavior on scale { NumberAnimation { duration: 80 } }
+
                                 TapHandler { id: swatchTap; onTapped: { var c = swatch.modelData; editor.change(function(n) { n.style.color = c }) } }
                             }
                         }
@@ -2037,7 +2037,7 @@ Popup {
                         spacing: editor.dp(6)
                         enabled: !!(editor.edit.logo && editor.edit.logo.enabled)
                         opacity: enabled ? 1 : 0.45
-                        Behavior on opacity { NumberAnimation { duration: 140 } }
+
                         EdSlider { label: "Tamaño"; suffix: " %"; from: 40; to: 300; stepSize: 5; resetValue: 100; value: editor.st.logoScalePct
                                    onCommitted: function(v) { editor.change(function(n) { n.style.logoScalePct = v }) } }
                         EdSlider { label: "Opacidad"; suffix: " %"; from: 10; to: 100; resetValue: 100; value: editor.st.logoOpacityPct
@@ -2081,7 +2081,7 @@ Popup {
                         spacing: editor.dp(6)
                         enabled: !!editor.wm.enabled
                         opacity: enabled ? 1 : 0.45
-                        Behavior on opacity { NumberAnimation { duration: 140 } }
+
                         EdSlider { label: "Opacidad"; suffix: " %"; from: 5; to: 100; resetValue: 30; value: editor.wm.opacityPct || 30
                                    onCommitted: function(v) { editor.change(function(n) { n.watermark.opacityPct = v }) } }
                         EdSlider { label: "Tamaño"; suffix: " %"; from: 2; to: 20; stepSize: 0.5; resetValue: 6; value: editor.wm.sizePct || 6

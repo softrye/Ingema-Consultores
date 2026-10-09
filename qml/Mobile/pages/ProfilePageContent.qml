@@ -97,170 +97,27 @@ Page {
         root.requestLogout()
     }
 
-    readonly property var pageFlow: Mobile.InGeCoreFlow
 
-
-
-    background: Rectangle {
-        color: "#F4F7FB"
-    }
-
+    background: Rectangle { color: "#FFFFFF" }
     ScrollView {
         anchors.fill: parent
         clip: true
         contentWidth: availableWidth
-
         ColumnLayout {
             width: parent.width
-            spacing: 14
-            anchors.margins: 16
-
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: 154
-                radius: 22
-                color: "#FFFFFF"
-                border.color: "#DDE7F2"
-                border.width: 1
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.margins: 18
-                    spacing: 16
-
-                    Rectangle {
-                        Layout.preferredWidth: 86
-                        Layout.preferredHeight: 86
-                        radius: 43
-                        color: "#EAF4FF"
-                        border.color: "#0654A2"
-                        border.width: 2
-
-                        Label {
-                            anchors.centerIn: parent
-                            text: root.initials()
-                            color: "#0654A2"
-                            font.pixelSize: 28
-                            font.bold: true
-                        }
-                    }
-
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 5
-
-                        Label {
-                            Layout.fillWidth: true
-                            text: root.displayName()
-                            color: "#151A30"
-                            font.pixelSize: 21
-                            font.bold: true
-                            elide: Text.ElideRight
-                        }
-
-                        Label {
-                            Layout.fillWidth: true
-                            text: root.emailText()
-                            color: "#667085"
-                            font.pixelSize: 13
-                            elide: Text.ElideRight
-                        }
-
-                        Label {
-                            Layout.fillWidth: true
-                            text: root.isLogged() ? "Sesión activa" : "Sin sesión iniciada"
-                            color: root.isLogged() ? "#496426" : "#667085"
-                            font.pixelSize: 12
-                            font.bold: true
-                        }
-                    }
-                }
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: 168
-                radius: 22
-                color: "#FFFFFF"
-                border.color: "#DDE7F2"
-                border.width: 1
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 18
-                    spacing: 12
-
-                    Label {
-                        Layout.fillWidth: true
-                        text: "Datos de cuenta"
-                        color: "#151A30"
-                        font.pixelSize: 19
-                        font.bold: true
-                    }
-
-                    Label {
-                        Layout.fillWidth: true
-                        text: "Correo: " + root.emailText()
-                        color: "#151A30"
-                        font.pixelSize: 13
-                        wrapMode: Text.WordWrap
-                    }
-
-                    Label {
-                        Layout.fillWidth: true
-                        text: "Teléfono: " + root.phoneText()
-                        color: "#151A30"
-                        font.pixelSize: 13
-                        wrapMode: Text.WordWrap
-                    }
-
-                    Label {
-                        Layout.fillWidth: true
-                        text: "Rol: " + root.roleText()
-                        color: "#0654A2"
-                        font.pixelSize: 13
-                        font.bold: true
-                        wrapMode: Text.WordWrap
-                    }
-                }
-            }
-
+            spacing: 10
+            anchors.margins: 12
+            Label { Layout.fillWidth: true; text: "Perfil"; font.bold: true }
+            Label { Layout.fillWidth: true; text: "Nombre: " + root.displayName(); wrapMode: Text.Wrap }
+            Label { Layout.fillWidth: true; text: "Correo: " + root.emailText(); wrapMode: Text.Wrap }
+            Label { Layout.fillWidth: true; text: "Telefono: " + root.phoneText(); wrapMode: Text.Wrap }
+            Label { Layout.fillWidth: true; text: "Rol: " + root.roleText(); wrapMode: Text.Wrap }
+            Label { Layout.fillWidth: true; text: root.isLogged() ? "Sesion activa" : "Sesion cerrada" }
             Button {
                 Layout.fillWidth: true
-                visible: root.isLogged()
-                text: "Cerrar sesión"
+                text: "Cerrar sesion"
+                enabled: root.isLogged()
                 onClicked: root.closeSession()
-
-                background: Rectangle {
-                    radius: 14
-                    color: parent.down ? "#FFF0EE" : "#FFFFFF"
-                    border.color: "#DDE7F2"
-                    border.width: 1
-                }
-
-                contentItem: Label {
-                    text: parent.text
-                    color: "#B42318"
-                    font.pixelSize: 13
-                    font.bold: true
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
-
-            Label {
-                Layout.fillWidth: true
-                visible: !root.isLogged()
-                text: "Inicia sesión desde la pantalla principal para administrar tu cuenta."
-                color: "#667085"
-                font.pixelSize: 12
-                wrapMode: Text.WordWrap
-                horizontalAlignment: Text.AlignHCenter
-            }
-
-            Item {
-                Layout.fillWidth: true
-                implicitHeight: 20
             }
         }
     }

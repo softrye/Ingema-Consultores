@@ -35,15 +35,9 @@
 .glass {
   background: var(--glass);
   border: 1px solid var(--line);
-  box-shadow: var(--shadow);
-  -webkit-backdrop-filter: blur(10px) saturate(1.12);
-  backdrop-filter: blur(10px) saturate(1.12);
 }
 .earth-ui.low-tier .glass {
   background: var(--glass-strong);
-  box-shadow: none;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
 }
 button, input { font: inherit; }
 button { color: inherit; }
@@ -62,7 +56,6 @@ button { color: inherit; }
 .context-heading img, .context-actions img {
   width: 26px;
   height: 26px;
-  filter: brightness(0) opacity(.8);
   pointer-events: none;
 }
 .material-symbol, .control-glyph { color: var(--text); font-size: 25px; line-height: 1; }
@@ -82,7 +75,6 @@ button:active { transform: scale(.96); }
   display: flex;
   align-items: center;
   border-radius: 23px;
-  transition: transform 160ms ease, opacity 160ms ease;
   z-index: 20;
 }
 .search-bar:focus-within { background: var(--glass-strong); transform: translateY(1px); }
@@ -107,11 +99,10 @@ button:active { transform: scale(.96); }
   border: 2px solid rgba(255,255,255,.3);
   border-top-color: var(--accent);
   border-radius: 50%;
-  animation: inge-spin .7s linear infinite;
   visibility: hidden;
 }
 .searching .search-progress { visibility: visible; }
-@keyframes inge-spin { to { transform: rotate(360deg); } }
+
 
 .popup-menu {
   position: absolute;
@@ -175,7 +166,7 @@ button:active { transform: scale(.96); }
   pointer-events: auto;
   background: rgba(0, 0, 0, .48);
 }
-.drawer-scrim { z-index: 40; opacity: 0; transition: opacity 150ms ease-out; }
+.drawer-scrim { z-index: 40; opacity: 0; }
 .drawer-scrim.open { opacity: 1; }
 .earth-drawer {
   position: absolute;
@@ -190,7 +181,6 @@ button:active { transform: scale(.96); }
   overflow-y: auto;
   transform: translateX(-102%);
   opacity: 0;
-  transition: transform 150ms cubic-bezier(.2,.8,.2,1), opacity 140ms ease-out;
   z-index: 50;
 }
 .earth-drawer.open { transform: translateX(0); opacity: 1; }
@@ -214,10 +204,9 @@ button:active { transform: scale(.96); }
   border-radius: 50%;
   background: var(--glass);
   border: 1px solid var(--line);
-  box-shadow: var(--shadow);
 }
 .round-button.active { background: var(--selected); border-color: var(--accent); }
-#compassIcon { transition: transform 120ms linear; }
+#compassIcon { }
 #compassButton.north { opacity: .82; }
 
 .floating-sheet {
@@ -252,8 +241,8 @@ button:active { transform: scale(.96); }
 .map-runtime-status { margin: -2px 2px 8px; color: #ffd7a0; font-size: 10px; line-height: 1.35; }
 .toggle-row { min-height: 50px; gap: 12px; font-size: 14px; touch-action: manipulation; }
 .toggle-row input { position: absolute; opacity: 0; }
-.toggle-row i { position: relative; width: 42px; height: 24px; flex: 0 0 auto; border-radius: 14px; background: rgba(255,255,255,.22); transition: background 160ms ease; }
-.toggle-row i::after { content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; border-radius: 50%; background: #fff; transition: transform 160ms ease; }
+.toggle-row i { position: relative; width: 42px; height: 24px; flex: 0 0 auto; border-radius: 14px; background: rgba(255,255,255,.22); }
+.toggle-row i::after { content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; border-radius: 50%; background: #fff; }
 .toggle-row input:checked + i { background: var(--accent); }
 .toggle-row input:checked + i::after { transform: translateX(18px); }
 .project-layers { max-height: min(52vh, 480px); overflow-y: auto; }
@@ -307,13 +296,12 @@ button:active { transform: scale(.96); }
   bottom: calc(var(--safe-bottom) + 43px);
   padding: 5px 8px 4px;
   border-radius: 9px;
-  box-shadow: none;
   font-size: 11px;
   text-align: center;
   z-index: 20;
 }
 .map-scale span { display: block; width: 74px; border: 1px solid #fff; border-top: 0; height: 5px; }
-.map-scale b { font-weight: 600; text-shadow: 0 1px 2px #000; }
+.map-scale b { font-weight: 600; }
 
 .context-sheet {
   position: absolute;
@@ -329,7 +317,6 @@ button:active { transform: scale(.96); }
   border-radius: 19px;
   transform: translateY(0);
   opacity: 1;
-  transition: transform 190ms ease, opacity 160ms ease;
   z-index: 60;
 }
 .context-sheet.closed { pointer-events: none; transform: translateY(calc(100% + 80px)); opacity: 0; }
@@ -363,7 +350,6 @@ button:active { transform: scale(.96); }
   opacity: 0;
   font-size: 13px;
   text-align: center;
-  transition: opacity 160ms ease, transform 160ms ease;
   z-index: 80;
 }
 .earth-toast.visible { opacity: 1; transform: translate(-50%, 0); }
@@ -415,7 +401,7 @@ button:active { transform: scale(.96); }
 .interaction-bar button { min-height: 38px; padding: 7px 9px; border: 0; border-radius: 11px; background: rgba(255,255,255,.1); font-size: 11px; }
 .modal-scrim { display: grid; place-items: center; padding: 20px; z-index: 70; }
 .earth-dialog { width: min(420px, 100%); max-height: 78vh; overflow-y: auto; padding: 20px; border-radius: 24px; }
-.earth-dialog { transform: scale(.98); opacity: 0; transition: transform 160ms ease-out, opacity 160ms ease-out; }
+.earth-dialog { transform: scale(.98); opacity: 0; }
 .earth-dialog.open { transform: scale(1); opacity: 1; }
 .earth-dialog h2 { margin: 0 0 8px; font-size: 20px; }
 .earth-dialog p { color: var(--muted); line-height: 1.5; }
@@ -492,7 +478,7 @@ button:active { transform: scale(.96); }
   .context-sheet { max-height: 43vh; overflow-y: auto; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .earth-ui * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  .earth-ui * { }
 }
 
 /* InGe+ Earth minimal shell --------------------------------------------------------- */
@@ -520,10 +506,7 @@ button:active { transform: scale(.96); }
   transform: translateX(-50%);
   background: rgba(248, 250, 252, .96);
   border: 1px solid rgba(15, 23, 42, .12);
-  box-shadow: 0 3px 12px rgba(2, 8, 23, .20);
   z-index: 70;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
 }
 .earth-ui.minimal-shell .search-bar:focus-within {
   width: calc(100vw - 76px);
@@ -552,7 +535,6 @@ button:active { transform: scale(.96); }
   border: 1px solid var(--line);
   border-radius: 50%;
   background: var(--glass);
-  box-shadow: 0 3px 12px rgba(0, 7, 14, .30);
   touch-action: manipulation;
 }
 .earth-quick-actions button:active {
@@ -561,14 +543,12 @@ button:active { transform: scale(.96); }
 .earth-quick-actions img {
   width: 26px;
   height: 26px;
-  filter: brightness(0) opacity(.8);
   opacity: .90;
   pointer-events: none;
 }
-#earthCompassIcon { transition: transform 140ms ease-out; }
+#earthCompassIcon { }
 .earth-ui.low-tier .earth-quick-actions button {
   background: var(--glass-strong);
-  box-shadow: 0 2px 8px rgba(0, 7, 14, .26);
 }
 .earth-ui[data-overlay="DRAWER"] .earth-quick-actions,
 .earth-ui[data-overlay="BOTTOM_SHEET"] .earth-quick-actions,
@@ -625,15 +605,11 @@ button:active { transform: scale(.96); }
 .earth-ui.minimal-shell .earth-dialog,
 .earth-ui.minimal-shell .earth-toast {
   background: var(--glass-strong);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
 }
 
 /* Selector de coordenadas de Calicatas (mismo viewer; el WebView ocupa solo
    el área de mapa del selector Qt). Sin buscador, dock ni hojas de Earth. */
 body.picker-mode #earthUi,
-body.picker-mode #earthHdChip,
-body.picker-mode #earthBoot,
 body.picker-mode #earthToast,
 body.picker-mode #modalScrim,
 body.picker-mode #streetViewContainer,
@@ -723,7 +699,7 @@ body.picker-mode .cesium-viewer-bottom {
   position: absolute; inset: 0; z-index: 2;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
   background: #EEF3F8; color: #24577D; font: 600 14px Roboto, system-ui, sans-serif;
-  pointer-events: auto; opacity: 1; transition: opacity 220ms ease-out;
+  pointer-events: auto; opacity: 1;
 }
 .earth-picker .picker-loading.hidden { opacity: 0; pointer-events: none; }
 .earth-picker .picker-loading.error { color: #B42318; }
@@ -731,23 +707,7 @@ body.picker-mode .cesium-viewer-bottom {
 .earth-picker .picker-loading-ring {
   width: 34px; height: 34px; border-radius: 50%;
   border: 3px solid rgba(36, 87, 125, .18); border-top-color: #24577D;
-  animation: picker-spin 900ms linear infinite;
 }
 .earth-picker .picker-loading.error .picker-loading-ring { display: none; }
-@keyframes picker-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .earth-picker .picker-loading-ring { animation: none; } }
 
-/* Carga cartográfica única: la pinta el host Android sobre el WebView. */
-#earthBoot { display: none !important; }
-
-/* INGE_PERFORMANCE_BARE_UI: el host añade body.bare-ui. Sin efectos visuales. */
-body.bare-ui *,
-body.bare-ui *::before,
-body.bare-ui *::after {
-  animation: none !important;
-  transition: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  box-shadow: none !important;
-  filter: none !important;
-}
+@media (prefers-reduced-motion: reduce) { .earth-picker .picker-loading-ring { } }

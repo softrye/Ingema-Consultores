@@ -34,7 +34,9 @@ check('miniatura satelital solo con VISUAL_READY', () => {
   assert.ok(/tilesReady = viewer\.scene\.globe\.tilesLoaded\s*&& !!window\.InGeMapLoading && window\.InGeMapLoading\.isReady\(\)/.test(picker));
 });
 check('arranque HTML de Earth oculto', () => {
-  assert.ok(css.includes('#earthBoot { display: none !important; }'));
+  assert.ok(!css.includes('#earthBoot'), 'Earth boot has been physically removed');
+  assert.ok(!html.includes('id="earthBoot"'), 'No old Earth loading screen in DOM');
+  assert.ok(html.includes('window.InGeEarthBoot'), 'Keep functional phase API for existing callers');
 });
 check('host Android: overlay único, timeout, reintento, cancelación, sesiones', () => {
   for (const token of ['INGE_MAP_LOAD_BEGIN', 'INGE_MAP_REVEALED', 'INGE_MAP_LOAD_TIMEOUT',

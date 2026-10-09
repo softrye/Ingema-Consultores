@@ -91,8 +91,8 @@ check("stage change: no synchronous save inside the tap; deferred after the 220 
 check("stage change is immediate: no snapshot texture or reveal animation", () => {
     for (const t of ["stageMotionSnapshot", "stageRevealAnimation", "stageMotionTranslate"]) assert.ok(!form.includes(t), t);
     assert.ok(form.includes("readonly property bool _stageSettling: stageSettleAnimation.running"));
-    // Las alturas que dependen del ancho no se animan mientras la etapa se asienta (swipe).
-    assert.strictEqual((form.match(/enabled: !root\._stageSettling; NumberAnimation/g) || []).length, 3);
+    // La UI Visual Zero elimina los Behaviors decorativos; no reinstalarlos para aprobar la prueba.
+    assert.ok((form.match(/enabled: !root\._stageSettling; NumberAnimation/g) || []).length <= 1);
 });
 
 check("Ubicación map: created once (async), not recreated on every stage entry", () => {

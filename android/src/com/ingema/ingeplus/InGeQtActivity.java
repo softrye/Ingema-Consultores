@@ -181,15 +181,9 @@ public final class InGeQtActivity extends QtActivity
     private long mapLoadingStartedAt;
     private InGeAssistantWebHost assistantHost;
 
+    // InGe IA deshabilitada durante Visual Zero. Se conserva el servicio sin abrir WebView.
     public static boolean showAssistant(String visuals) {
-        final InGeQtActivity activity = current.get();
-        if (activity == null) return false;
-        activity.runOnUiThread(() -> {
-            if (!activity.activityResumed) return;
-            if (activity.assistantHost == null) activity.assistantHost = new InGeAssistantWebHost(activity);
-            activity.assistantHost.open(visuals);
-        });
-        return true;
+        return false;
     }
     public static void closeAssistant() {
         final InGeQtActivity activity = current.get();
