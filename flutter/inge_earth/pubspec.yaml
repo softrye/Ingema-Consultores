@@ -1,5 +1,5 @@
 name: inge_earth
-description: "Interfaz Add-to-App de InGe Earth para el host Android Qt de InGe+."
+description: "Módulo Add-to-App sin interfaz de InGe+ (lógica de Rendiciones, diagnósticos y verificación biométrica)."
 publish_to: none
 
 # The following defines the version and build number for your application.
@@ -29,10 +29,6 @@ dependencies:
   # La sesion Supabase sigue perteneciendo a AuthSession (Qt/C++).
   local_auth: 3.0.2
   flutter_secure_storage: 11.0.0
-  # Fondo animado de Auth (video local, sin audio). Plugin oficial Flutter.
-  video_player: 2.11.1
-  lucide_icons_flutter:
-    path: third_party/lucide_icons_flutter
 
 dev_dependencies:
   flutter_test:
@@ -43,31 +39,8 @@ dev_dependencies:
 # following page: https://dart.dev/tools/pub/pubspec
 
 flutter:
-  # La UI visible usa Phosphor/Core local mediante PhosphorIcon.
+  # Sin interfaz (Visual Zero, 2026-10-10): sin fuentes, assets ni shaders.
   uses-material-design: false
-
-  # Tipografia corporativa INGEMA (Manual 2025): Rubik, SIL OFL 1.1.
-  # Copia fisica unica; Qt (resources_mobile_ui_v2.qrc) y la IA web la
-  # referencian desde esta misma carpeta.
-  fonts:
-    - family: Rubik
-      fonts:
-        - asset: assets/fonts/rubik/Rubik-Light.ttf
-          weight: 300
-        - asset: assets/fonts/rubik/Rubik-Regular.ttf
-          weight: 400
-        - asset: assets/fonts/rubik/Rubik-SemiBold.ttf
-          weight: 600
-
-  assets:
-    - assets/home_final/approved_reference.png
-    - assets/branding/
-    - assets/auth/ingema_auth_video.mp4
-    - assets/auth/ingema_auth_video_poster.jpg
-
-  # Material Liquid Glass del Dock InGe+ (port de qml/Mobile/shaders/liquidglass.frag).
-  shaders:
-    - shaders/liquidglass.frag
 
   # To add Flutter specific assets to your application, add an assets section,
   # like this:

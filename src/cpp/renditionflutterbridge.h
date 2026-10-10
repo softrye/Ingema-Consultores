@@ -12,9 +12,10 @@ class RenditionRepository;
 class RenditionSyncController;
 class AndroidCalicataExporter;
 
-// Adaptador del único dominio Renditions V02 hacia el engine Flutter add-to-app
-// que ya pertenece al shell Android. No contiene reglas de negocio ni acceso a
-// Supabase: sólo traduce comandos JSON a las APIs existentes y publica estado.
+// Adaptador de comandos JSON del dominio Renditions V02 (sin interfaz, Visual
+// Zero 2026-10-10). No contiene reglas de negocio ni acceso a Supabase: traduce
+// comandos JSON (submit) a las APIs existentes y publica estado y resultados
+// como JSON mediante eventReady. Sin JNI: ningún consumidor visual conectado.
 class RenditionFlutterBridge final : public QObject
 {
     Q_OBJECT
@@ -28,7 +29,7 @@ public:
     ~RenditionFlutterBridge() override;
     void setCoreRemote(inge::core::RemoteExecutor *core);
 
-    static void submitFromAndroid(const QString &requestJson);
+    Q_INVOKABLE void submit(const QString &requestJson);
     Q_INVOKABLE void openDocumentTarget(const QString &renditionId);
     Q_INVOKABLE void pickCalicataProject(const QString &documentId);
 
@@ -36,6 +37,7 @@ signals:
     void calicataProjectPickerRequested();
     void calicataProjectPicked(const QString &documentId, const QVariantMap &project);
     void globalActionRequested(const QString &action);
+    void eventReady(const QString &eventJson);
 
 private:
     void handleCommand(const QString &requestJson);
@@ -50,7 +52,7 @@ private:
     void continuePresentationAfterSync();
     void clearPendingPresentation();
     void updateConnectionState(const QString &code);
-    void sendEvent(const QVariantMap &event) const;
+    void sendEvent(const QVariantMap &event);
     void sendResult(const QString &requestId, const QVariantMap &result = {});
     void sendError(const QString &requestId, const QString &code,
                    const QString &message);

@@ -13,15 +13,7 @@
 #include <QMetaObject>
 #include <QPointer>
 
-#ifdef Q_OS_ANDROID
-#  include <QJniEnvironment>
-#  include <QJniObject>
-#  include <jni.h>
-#endif
-
 namespace {
-QPointer<RenditionFlutterBridge> g_bridge;
-
 QString value(const QVariantMap &map, const QString &camel,
               const QString &snake = {})
 {
@@ -42,7 +34,6 @@ RenditionFlutterBridge::RenditionFlutterBridge(
       m_syncController(syncController),
       m_exporter(exporter)
 {
-    g_bridge = this;
     connect(m_repository, &RenditionRepository::receivedReset, this, [this]() {
         const auto picker = m_calicataPickerDocument;
         m_calicataPickerDocument.clear();
@@ -293,18 +284,12 @@ void RenditionFlutterBridge::setCoreRemote(inge::core::RemoteExecutor *core) {
         });
 }
 
-RenditionFlutterBridge::~RenditionFlutterBridge()
-{
-    if (g_bridge == this)
-        g_bridge.clear();
-}
+RenditionFlutterBridge::~RenditionFlutterBridge() = default;
 
-void RenditionFlutterBridge::submitFromAndroid(const QString &requestJson)
+void RenditionFlutterBridge::submit(const QString &requestJson)
 {
-    const QPointer<RenditionFlutterBridge> bridge = g_bridge;
-    if (!bridge)
-        return;
-    QMetaObject::invokeMethod(bridge, [bridge, requestJson]() {
+    const QPointer<RenditionFlutterBridge> bridge = this;
+    QMetaObject::invokeMethod(this, [bridge, requestJson]() {
         if (bridge)
             bridge->handleCommand(requestJson);
     }, Qt::QueuedConnection);
@@ -1071,36 +1056,8 @@ void RenditionFlutterBridge::sendError(const QString &requestId,
                {QStringLiteral("message"), message}});
 }
 
-void RenditionFlutterBridge::sendEvent(const QVariantMap &event) const
+void RenditionFlutterBridge::sendEvent(const QVariantMap &event)
 {
-#ifdef Q_OS_ANDROID
-    const QString json = QString::fromUtf8(
-        QJsonDocument::fromVariant(event).toJson(QJsonDocument::Compact));
-    const QJniObject payload = QJniObject::fromString(json);
-    QJniObject::callStaticMethod<void>(
-        "com/ingema/ingeplus/InGeQtActivity", "dispatchRenditionEvent",
-        "(Ljava/lang/String;)V", payload.object<jstring>());
-    QJniEnvironment environment;
-    if (environment->ExceptionCheck()) {
-        environment->ExceptionClear();
-    }
-#else
-    Q_UNUSED(event)
-#endif
+    emit eventReady(QString::fromUtf8(
+        QJsonDocument::fromVariant(event).toJson(QJsonDocument::Compact)));
 }
-
-#ifdef Q_OS_ANDROID
-extern "C" JNIEXPORT void JNICALL
-Java_com_ingema_ingeplus_InGeQtActivity_nativeSubmitRenditionCommand(
-    JNIEnv *environment, jclass, jstring requestJson)
-{
-    if (!requestJson)
-        return;
-    const char *utf8 = environment->GetStringUTFChars(requestJson, nullptr);
-    if (!utf8)
-        return;
-    const QString request = QString::fromUtf8(utf8);
-    environment->ReleaseStringUTFChars(requestJson, utf8);
-    RenditionFlutterBridge::submitFromAndroid(request);
-}
-#endif

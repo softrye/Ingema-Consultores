@@ -1,7 +1,6 @@
 ﻿#include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
-#include <QQuickStyle>
 #include <QtQml/qqml.h>
 #include <QtQml>
 #include <QSslSocket>
@@ -12,11 +11,9 @@
 #include <QLocationPermission>
 #include <QPermission>
 #include <QQuickWindow>
-#include <QFontDatabase>
 #include <QtQuick/QSGRendererInterface>
 
 #include "docsops.h"
-#include "src/documents/nothingvideoprovider.h"
 #include "appcontext.h"
 #include "authsession.h"
 #include "betadiagnostics.h"
@@ -27,20 +24,12 @@
 #include "fsutil.h"
 #include "androidcalicataexporter.h"
 #include "dropboxbridge.h"
-#include "firstexperiencecontroller.h"
-#include "ingenarrator.h"
-#include "ingeexperienceaudio.h"
-#include "flowhaptics.h"
-#include "mapworkspacecontroller.h"
 #include "src/cpp/renditionrepository.h"
 #include "src/cpp/renditionlocalstore.h"
 #include "src/cpp/renditionsynccontroller.h"
 #include "src/cpp/renditionflutterbridge.h"
 #include "src/cpp/renditionexportservice.h"
 #include "src/graphics/InGeGraphicsCore.h"
-#include "src/graphics/InGeEarthHostController.h"
-#include "src/dock/DockContextController.h"
-#include "src/dock/DockCommandRouter.h"
 #include "src/core/StartupInstrumentation.h"
 #include "src/core/RemoteExecutor.h"
 #include "src/core/GeminiAssistant.h"
@@ -48,35 +37,9 @@
 Q_LOGGING_CATEGORY(lcNet, "inge.net")
 
 
-#ifdef Q_OS_ANDROID
-#include <QJniObject>
-#include <QPointer>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QQmlNetworkAccessManagerFactory>
-static QPointer<QObject> globalBackRoot;
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_ingema_ingeplus_InGeQtActivity_nativeRequestGlobalBack(JNIEnv *, jclass)
-{
-    // No blocking Android/Qt cross-thread invocation: QML decides on its thread.
-    QMetaObject::invokeMethod(qApp, []() {
-        if (!globalBackRoot) {
-            qCritical() << "INGE_BACK_ROUTER_UNAVAILABLE";
-            return;
-        }
-        QVariant decision;
-        if (!QMetaObject::invokeMethod(globalBackRoot, "routeAndroidBack",
-                                      Q_RETURN_ARG(QVariant, decision))) {
-            qCritical() << "INGE_BACK_ROUTER_INVOKE_FAILED";
-            return;
-        }
-        const QJniObject action = QJniObject::fromString(decision.toString());
-        QJniObject::callStaticMethod<void>("com/ingema/ingeplus/InGeQtActivity",
-                "completeGlobalBack", "(Ljava/lang/String;)V", action.object<jstring>());
-    }, Qt::QueuedConnection);
-}
-#endif
 
 int main(int argc, char *argv[])
 {
@@ -87,7 +50,6 @@ int main(int argc, char *argv[])
     qputenv("ANDROID_OPENSSL_SUFFIX", "_3");
 #endif
     qputenv("QT_NETWORK_DISABLE_HTTP2", "1");
-    qputenv("QT_QUICK_CONTROLS_STYLE", "Basic");
 
 #ifdef Q_OS_ANDROID
     // P0 background: en Android priorizamos OpenGL ES para el scene graph Qt.
@@ -97,41 +59,8 @@ int main(int argc, char *argv[])
 #else
     // Let Qt select the supported native Desktop backend (D3D11 on Windows).
 #endif
-    QQuickStyle::setStyle("Basic");
 
     QGuiApplication app(argc, argv);
-
-    // Tipografia corporativa INGEMA (Manual Corporativo Ingema 2025): Rubik
-    // Light/Regular/SemiBold. Se registra antes de crear el motor QML para que
-    // todo Text sin familia explicita herede Rubik. FreeType agrupa los tres
-    // archivos bajo la familia tipografica "Rubik" (pesos 300/400/600).
-    {
-        QString rubikFamily;
-        const char *const rubikWeights[] = { "Light", "Regular", "SemiBold" };
-        for (const char *weight : rubikWeights) {
-            const QString path = QStringLiteral(":/ui/v2/fonts/rubik/Rubik-%1.ttf")
-                                     .arg(QLatin1String(weight));
-            const int fontId = QFontDatabase::addApplicationFont(path);
-            if (fontId < 0) {
-                qWarning() << "INGE_BRAND_FONT_MISSING" << path;
-                continue;
-            }
-            const QStringList families = QFontDatabase::applicationFontFamilies(fontId);
-            if (rubikFamily.isEmpty() || qstrcmp(weight, "Regular") == 0)
-                rubikFamily = families.value(0, rubikFamily);
-        }
-        if (!rubikFamily.isEmpty()) {
-            QFont brandFont = QGuiApplication::font();
-            brandFont.setFamily(rubikFamily);
-            QGuiApplication::setFont(brandFont);
-            qInfo() << "INGE_BRAND_FONT_READY" << rubikFamily;
-        }
-    }
-
-// Los permisos se solicitan de forma contextual desde Mapa/Cámara,
-// después de que la Primera Experiencia explique su propósito.
-
-
 
     QCoreApplication::setOrganizationName("InGePlus");
     QCoreApplication::setOrganizationDomain("ingeplus.app");
@@ -166,28 +95,7 @@ int main(int argc, char *argv[])
 
     DropboxBridge dropboxBridge(&app);
     DocsOps docsOps(&app);
-    FirstExperienceController firstExperience(&app);
-    // INGE_PERF_120HZ_V1: mobile startup stays silent; no eager TTS/SFX decoders.
-    FlowHaptics flowHaptics(&app);
-    InGeEarthHostController earthHost(&app);
     InGeGraphicsCore graphicsCore(&app);
-    graphicsCore.setEarthHostController(&earthHost);
-    // One host-owned dock context and one command router for every surface.
-    DockContextController dockContextController(&app);
-    DockCommandRouter dockCommandRouter(&dockContextController, &app);
-    // The dedicated assistant shares Auth and the global remote owner.
-    const auto updateAssistantAvailability = [&]() {
-        dockContextController.setIngeCoreAvailable(geminiAssistant.available());
-    };
-    QObject::connect(&dockContextController, &DockContextController::contextChanged,
-                     &app, updateAssistantAvailability);
-    QObject::connect(&geminiAssistant, &inge::core::GeminiAssistant::availableChanged,
-                     &app, updateAssistantAvailability);
-    QObject::connect(&dockCommandRouter, &DockCommandRouter::globalCapabilityRequested,
-                     &geminiAssistant, [&geminiAssistant](const QString &capability) {
-        if (capability == QStringLiteral("inge.core")) emit geminiAssistant.openingRequested();
-    });
-    updateAssistantAvailability();
     QObject::connect(&perms, &PermissionHelper::externalPhotoActivityStarted,
                      &graphicsCore, &InGeGraphicsCore::prepareForExternalActivity);
     QObject::connect(&perms, &PermissionHelper::externalPhotoActivityFinished,
@@ -202,21 +110,10 @@ int main(int argc, char *argv[])
     qmlRegisterSingletonInstance("InGe", 1, 0, "ExcelExporter", &excelExporter);
     qmlRegisterSingletonInstance("InGe", 1, 0, "CalicataCloud", &calicataCloud);
     qmlRegisterSingletonInstance("InGe", 1, 0, "Dropbox", &dropboxBridge);
-    qmlRegisterSingletonInstance("InGe", 1, 0, "FlowHaptics", &flowHaptics);
     qmlRegisterSingletonInstance("InGe", 1, 0, "GraphicsCore", &graphicsCore);
-    qmlRegisterSingletonInstance("InGe.Experience", 1, 0, "FirstExperience", &firstExperience);
-    qmlRegisterSingletonType(
-        QUrl(QStringLiteral("qrc:/InGe/Mobile/flowcore/InGeCoreFlow.qml")),
-        "InGe.CoreFlow", 3, 0, "InGeCoreFlow");
-    qmlRegisterSingletonType(
-        QUrl(QStringLiteral("qrc:/InGe/Mobile/flowcore/FlowIcons.qml")),
-        "InGe.CoreFlow", 3, 0, "FlowIcons");
-    qmlRegisterSingletonType(
-        QUrl(QStringLiteral("qrc:/InGe/Mobile/flowcore/InGeIconLibrary.qml")),
-        "InGe.CoreFlow", 3, 0, "InGeIconLibrary");
-
-    // desde el modulo QML real InGe.Mobile mediante QML_ELEMENT.
-    // No usar submodulos dinamicos InGe.Docs / InGe.Calicata.
+    // Servicios expuestos a QML para la futura interfaz; los tipos de dominio
+    // (CalicataDocument, DocsOps, NothingDocuments) se registran desde el
+    // modulo QML real InGe.Mobile mediante QML_ELEMENT.
 
     qCDebug(lcNet) << "[InGe+ V122] SSL supportsSsl=" << QSslSocket::supportsSsl()
                    << "build=" << QSslSocket::sslLibraryBuildVersionString()
@@ -250,7 +147,6 @@ int main(int argc, char *argv[])
         static IdentifiedNetworkFactory identifiedNetworkFactory;
         engine.setNetworkAccessManagerFactory(&identifiedNetworkFactory);
     }
-    engine.addImageProvider("nothingvideo",new NothingVideoProvider);
     // Al pasar a segundo plano (camara del OEM, otra app) Android decide que
     // proceso matar por su memoria. Qt bloquea su bucle poco despues de
     // ApplicationSuspended: liberar aqui los componentes QML sin uso y el
@@ -267,34 +163,14 @@ int main(int argc, char *argv[])
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreated,
         &graphicsCore,
-        [&graphicsCore, &earthHost, &startup, &coreRemote](QObject *object, const QUrl &) {
+        [&graphicsCore, &startup, &coreRemote](QObject *object, const QUrl &) {
+            // Ventana raiz minima (sin interfaz): primer fotograma = arranque listo.
             if (auto *window = qobject_cast<QQuickWindow *>(object)) {
                 graphicsCore.attachWindow(window);
                 QObject::connect(window, &QQuickWindow::frameSwapped, window,
                     [&startup, &coreRemote]() { startup.mark(StartupEvent::FIRST_UI); coreRemote.start(); },
                     static_cast<Qt::ConnectionType>(Qt::QueuedConnection | Qt::SingleShotConnection));
             }
-            if (!object)
-                return;
-            // Home QML visible with the session confirmed.
-            if (!startup.watchReadyProperty(object, "homeReadyV900", StartupEvent::HOME_READY))
-                qWarning() << "INGE_STARTUP HOME_READY observer unavailable";
-            QObject::connect(
-                &earthHost,
-                &InGeEarthHostController::coordinateForCalicata,
-                object,
-                [object](double latitude, double longitude, double altitude,
-                         double accuracy, const QString &timestamp,
-                         const QString &source) {
-                    QMetaObject::invokeMethod(
-                        object, "useEarthPointInCalicataM0809",
-                        Q_ARG(QVariant, latitude),
-                        Q_ARG(QVariant, longitude),
-                        Q_ARG(QVariant, altitude),
-                        Q_ARG(QVariant, accuracy),
-                        Q_ARG(QVariant, timestamp),
-                        Q_ARG(QVariant, source));
-                });
         });
 
     engine.rootContext()->setContextProperty("CoreRemote", &coreRemote);
@@ -308,14 +184,9 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("renditionLocalStore", renditionLocalStore);
     engine.rootContext()->setContextProperty("renditionSyncController", renditionSyncController);
     engine.rootContext()->setContextProperty("renditionFlutterBridge", renditionFlutterBridge);
-    engine.rootContext()->setContextProperty("dockContextController", &dockContextController);
-    engine.rootContext()->setContextProperty("dockCommandRouter", &dockCommandRouter);
     engine.rootContext()->setContextProperty("excelExporter", &excelExporter);
     engine.rootContext()->setContextProperty("dropbox", &dropboxBridge);
     engine.rootContext()->setContextProperty("docsOps", &docsOps);
-    engine.rootContext()->setContextProperty("firstExperience", &firstExperience);
-    engine.rootContext()->setContextProperty("narrator", static_cast<QObject*>(nullptr));
-    engine.rootContext()->setContextProperty("experienceAudio", static_cast<QObject*>(nullptr));
 
     QObject::connect(&engine, &QQmlEngine::warnings, [](const QList<QQmlError>& ws){
         for (const auto& w : ws)
@@ -343,8 +214,5 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-#ifdef Q_OS_ANDROID
-    globalBackRoot = engine.rootObjects().constFirst();
-#endif
     return app.exec();
 }

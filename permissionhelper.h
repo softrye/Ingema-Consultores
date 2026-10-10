@@ -46,35 +46,6 @@ public:
     Q_INVOKABLE bool openLocationSettings();
     Q_INVOKABLE bool openApplicationSettings();
 
-    // Adaptador acotado del Home Flutter add-to-app. NavigationShellV51 sigue
-    // siendo propiedad de QML y consume las acciones mediante take...().
-    Q_INVOKABLE bool setFlutterHomeVisible(bool visible,
-                                             const QString &themeMode,
-                                             double motionScale,
-                                             double glassIntensity,
-                                             const QString &performanceProfile);
-    Q_INVOKABLE bool setFlutterRenditionsVisible(bool visible,
-                                                 const QString &themeMode,
-                                                 double motionScale,
-                                                 double glassIntensity,
-                                                 const QString &performanceProfile);
-    Q_INVOKABLE bool isFlutterHomeReady() const;
-    Q_INVOKABLE QString takeFlutterHomeAction();
-    Q_INVOKABLE bool setFlutterAuthVisible(bool visible,
-                                           const QString &authStateJson,
-                                           const QString &themeMode,
-                                           double motionScale,
-                                           double glassIntensity,
-                                           const QString &performanceProfile);
-    Q_INVOKABLE bool setFlutterSecurityVisible(bool visible,
-                                               const QString &authStateJson,
-                                               const QString &themeMode,
-                                               double motionScale,
-                                               double glassIntensity,
-                                               const QString &performanceProfile);
-    Q_INVOKABLE bool updateFlutterAuthState(const QString &authStateJson);
-    Q_INVOKABLE QString takeFlutterAuthRequest();
-
     Q_INVOKABLE bool startNativeLocationUpdates();
     Q_INVOKABLE void stopNativeLocationUpdates();
     Q_INVOKABLE void refreshNativeLocation();

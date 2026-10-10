@@ -327,7 +327,8 @@ dependencies {
 
 
 
-    // Módulo Flutter compartido por Home, Auth y Rendiciones.
+    // Módulo Flutter sin interfaz: lógica de Rendiciones, diagnósticos y
+    // verificación biométrica (InGeBiometricActivity). Visual Zero 2026-10-10.
 
 
 
