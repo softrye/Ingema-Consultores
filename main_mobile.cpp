@@ -11,6 +11,7 @@
 #include <QLocationPermission>
 #include <QPermission>
 #include <QQuickWindow>
+#include <QTimer>
 #include <QtQuick/QSGRendererInterface>
 
 #include "docsops.h"
@@ -163,14 +164,17 @@ int main(int argc, char *argv[])
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreated,
         &graphicsCore,
-        [&graphicsCore, &startup, &coreRemote](QObject *object, const QUrl &) {
-            // Ventana raiz minima (sin interfaz): primer fotograma = arranque listo.
-            if (auto *window = qobject_cast<QQuickWindow *>(object)) {
+        [&graphicsCore, &startup, &coreRemote, &app](QObject *object, const QUrl &) {
+            if (!object)
+                return;
+            // Visual Zero no presenta fotogramas; no bloquear el motor remoto
+            // esperando frameSwapped en una ventana intencionadamente vacia.
+            if (auto *window = qobject_cast<QQuickWindow *>(object))
                 graphicsCore.attachWindow(window);
-                QObject::connect(window, &QQuickWindow::frameSwapped, window,
-                    [&startup, &coreRemote]() { startup.mark(StartupEvent::FIRST_UI); coreRemote.start(); },
-                    static_cast<Qt::ConnectionType>(Qt::QueuedConnection | Qt::SingleShotConnection));
-            }
+            QTimer::singleShot(0, &app, [&startup, &coreRemote]() {
+                startup.mark(StartupEvent::FIRST_UI); // hito de arranque compatible
+                coreRemote.start();
+            });
         });
 
     engine.rootContext()->setContextProperty("CoreRemote", &coreRemote);

@@ -236,12 +236,10 @@ if(INGE_BUILD_MOBILE)
 
     # Cartography is provided by InGe Earth/Cesium; no native map provider dependency.
 
-    # Android packages only the brand resources used by Calicatas/export.
-    # Windows Mobile retains the legacy QRC to avoid desktop regressions.
-    set(INGE_MOBILE_BRAND_QRC "${INGE_PROJECT_ROOT}/resources.qrc")
-    if(ANDROID)
-        set(INGE_MOBILE_BRAND_QRC "${INGE_PROJECT_ROOT}/resources_mobile_brand.qrc")
-    endif()
+    # Visual Zero: el target Mobile (Android y Windows de diagnostico) solo
+    # empaqueta marcas de exportacion. resources.qrc conserva el Desktop legado
+    # exclusivamente para AppCalicatasDemo, nunca para AppCalicatasMobile.
+    set(INGE_MOBILE_BRAND_QRC "${INGE_PROJECT_ROOT}/resources_mobile_brand.qrc")
 
     set(MOBILE_SOURCES
         "${INGE_PROJECT_ROOT}/main_mobile.cpp"
