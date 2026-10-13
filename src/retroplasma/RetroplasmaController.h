@@ -7,6 +7,7 @@
 #include <QElapsedTimer>
 #include <QTimer>
 #include <QHash>
+#include <QSet>
 #include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
