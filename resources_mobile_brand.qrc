@@ -1,0 +1,9 @@
+<RCC>
+    <!-- Mobile Calicatas only: retain QRC aliases used by exporter and photographs. -->
+    <!-- Desktop retains the original resources.qrc file unchanged. -->
+    <qresource prefix="/images">
+        <file alias="ICONO_LOGO_MTC.jpeg">images/ICONO_LOGO_MTC.jpeg</file>
+        <file alias="INGEMA_LOGO_COMPLETO.png">images/INGEMA_LOGO_COMPLETO.png</file>
+        <file alias="default_avatar_men.png">images/default_avatar_men.png</file>
+    </qresource>
+</RCC>

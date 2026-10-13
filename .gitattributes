@@ -1,0 +1,11 @@
+* text=auto
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.xlsx binary
+*.nmea binary
+*.keystore binary
+*.jks binary

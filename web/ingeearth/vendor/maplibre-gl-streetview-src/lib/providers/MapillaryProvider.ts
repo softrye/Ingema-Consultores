@@ -1,0 +1,316 @@
+import { LngLat, type LngLatLike } from 'maplibre-gl';
+import type { Viewer as MapillaryViewer } from 'mapillary-js';
+import { BaseProvider } from './BaseProvider';
+import type { ImageryResult, ViewState, ProviderType } from '../core/types';
+import { MAPILLARY_API, MAPILLARY_IMAGE_FIELDS } from '../core/constants';
+import { toLngLat, createBbox, bboxToString, findClosestPoint, headingToBasicPoint } from '../utils/geo';
+import { buildUrl, fetchJson, type MapillaryImageResponse, type MapillaryImage } from '../utils/api';
+import { StreetViewAuthError, isApiAuthError } from '../core/errors';
+
+/**
+ * Mapillary provider using the MapillaryJS viewer.
+ * Displays crowdsourced street-level imagery with 360° navigation.
+ */
+export class MapillaryProvider extends BaseProvider {
+  readonly name: ProviderType = 'mapillary';
+  readonly displayName = 'Mapillary';
+
+  private _accessToken: string;
+  private _viewer: MapillaryViewer | null = null;
+  private _viewerContainer: HTMLElement | null = null;
+  private _pendingHeading: number | undefined;
+  /**
+   * Bumped on every cleanup so an in-flight async `render()` can detect that a
+   * newer render (or a teardown) superseded it while mapillary-js was loading.
+   */
+  private _renderToken = 0;
+
+  /**
+   * Creates a new Mapillary provider.
+   *
+   * @param accessToken - Mapillary access token
+   */
+  constructor(accessToken: string) {
+    super();
+    this._accessToken = accessToken;
+  }
+
+  /**
+   * Check if the access token is configured.
+   */
+  isConfigured(): boolean {
+    return Boolean(this._accessToken);
+  }
+
+  /**
+   * Query for Mapillary imagery at a location.
+   *
+   * @param lngLat - The location to query
+   * @param radius - Search radius in meters (default: 50)
+   * @returns The closest imagery result or null
+   */
+  async queryImagery(lngLat: LngLatLike, radius = 50): Promise<ImageryResult | null> {
+    if (!this.isConfigured()) {
+      return null;
+    }
+
+    const point = toLngLat(lngLat);
+    const bbox = createBbox(point, radius);
+
+    try {
+      const url = buildUrl(`${MAPILLARY_API.GRAPH_URL}${MAPILLARY_API.IMAGES_ENDPOINT}`, {
+        access_token: this._accessToken,
+        bbox: bboxToString(bbox),
+        fields: MAPILLARY_IMAGE_FIELDS,
+        limit: 100,
+      });
+
+      const response = await fetchJson<MapillaryImageResponse>(url);
+
+      if (!response.data || response.data.length === 0) {
+        return null;
+      }
+
+      // Convert to imagery results and find closest
+      const imageryResults = response.data
+        .filter((img): img is MapillaryImage & { computed_geometry: NonNullable<MapillaryImage['computed_geometry']> } =>
+          Boolean(img.computed_geometry)
+        )
+        .map(img => this.mapillaryToImagery(img));
+
+      return findClosestPoint(point, imageryResults);
+    } catch (error) {
+      // A rejected access token must surface as an auth error, not as "no
+      // coverage" (issue #563). Other failures (transient 5xx, network) keep the
+      // previous behaviour and fall back to a no-imagery result.
+      if (isApiAuthError(error)) {
+        throw new StreetViewAuthError('mapillary', error.status, error.message);
+      }
+      console.error('Mapillary query failed:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Find nearest Mapillary imagery within a maximum radius.
+   * Progressively searches with increasing radii.
+   *
+   * @param lngLat - The target location
+   * @param maxRadius - Maximum search radius in meters (default: 100)
+   * @returns The nearest imagery or null
+   */
+  async findNearestImagery(lngLat: LngLatLike, maxRadius = 100): Promise<ImageryResult | null> {
+    // Mapillary bbox can be larger, so use fewer iterations
+    const radii = [50, 100, 250, 500].filter(r => r <= maxRadius || r === 50);
+
+    for (const radius of radii) {
+      if (radius > maxRadius) break;
+      const result = await this.queryImagery(lngLat, radius);
+      if (result) return result;
+    }
+
+    return null;
+  }
+
+  /**
+   * Convert Mapillary API response to ImageryResult.
+   */
+  private mapillaryToImagery(image: MapillaryImage & { computed_geometry: NonNullable<MapillaryImage['computed_geometry']> }): ImageryResult {
+    const [lng, lat] = image.computed_geometry.coordinates;
+    return {
+      id: image.id,
+      location: new LngLat(lng, lat),
+      provider: 'mapillary',
+      thumbnailUrl: image.thumb_256_url || image.thumb_1024_url,
+      capturedAt: image.captured_at ? new Date(image.captured_at) : undefined,
+      heading: image.compass_angle,
+      isPano: image.is_pano,
+    };
+  }
+
+  /**
+   * Render Mapillary viewer in a container.
+   *
+   * @param container - The container element
+   * @param imagery - The imagery to display
+   * @param view - Optional initial view; only heading is applied, best-effort,
+   *   and only for 360 panoramas. Pitch is not supported by Mapillary.
+   */
+  async render(container: HTMLElement, imagery: ImageryResult, view?: Partial<ViewState>): Promise<void> {
+    // Clean up existing viewer (keep heading/location subscriptions)
+    this.cleanupViewer();
+    const renderToken = this._renderToken;
+
+    this._container = container;
+    this._pendingHeading = view?.heading;
+
+    // Create viewer container
+    this._viewerContainer = document.createElement('div');
+    this._viewerContainer.className = 'mapillary-viewer';
+    this._viewerContainer.style.width = '100%';
+    this._viewerContainer.style.height = '100%';
+    container.appendChild(this._viewerContainer);
+
+    // Load MapillaryJS on demand. The viewer is the only thing in this package
+    // that needs the (heavy) mapillary-js bundle, so it is imported dynamically
+    // here instead of at module load. A static import would force every consumer
+    // to ship mapillary-js in its initial/boot bundle even when street view is
+    // never opened; the dynamic import lets bundlers split it into a chunk
+    // fetched only on first use.
+    let Viewer: typeof import('mapillary-js').Viewer;
+    try {
+      ({ Viewer } = await import('mapillary-js'));
+    } catch (error) {
+      console.error('Failed to load MapillaryJS:', error);
+      return;
+    }
+
+    // A newer render() — or a destroy()/cleanup — ran while mapillary-js was
+    // loading. Abandon this stale mount so we never attach to a removed
+    // container or clobber the current viewer.
+    if (renderToken !== this._renderToken || !this._viewerContainer) {
+      return;
+    }
+
+    // Initialize MapillaryJS viewer
+    this._viewer = new Viewer({
+      accessToken: this._accessToken,
+      container: this._viewerContainer,
+      imageId: imagery.id,
+    });
+
+    // Subscribe to bearing changes (when user rotates the view)
+    this._viewer.on('bearing', (event) => {
+      this.emitHeadingChange(event.bearing);
+    });
+
+    // Subscribe to image changes (when user navigates to a different image)
+    this._viewer.on('image', (event) => {
+      const image = event.image;
+      if (image) {
+        // Get position from image
+        const lngLat = image.lngLat;
+        if (lngLat) {
+          this.emitLocationChange(new LngLat(lngLat.lng, lngLat.lat));
+        }
+        // Apply the requested initial heading once (panoramas only)
+        let appliedHeading: number | undefined;
+        if (this._pendingHeading !== undefined) {
+          const heading = this._pendingHeading;
+          this._pendingHeading = undefined;
+          if (image.cameraType === 'spherical') {
+            try {
+              this._viewer?.setCenter(headingToBasicPoint(heading, image.compassAngle));
+              appliedHeading = heading;
+            } catch (error) {
+              console.error('Failed to set initial heading:', error);
+            }
+          }
+        }
+        if (appliedHeading !== undefined) {
+          // Report the heading we just applied; getBearing() would still
+          // reflect the view from before setCenter took effect
+          this.emitHeadingChange(appliedHeading);
+        } else {
+          // Get the current view bearing after image loads
+          this._viewer?.getBearing().then((bearing) => {
+            this.emitHeadingChange(bearing);
+          }).catch(() => {
+            // Fallback to compass angle if bearing not available
+            const compassAngle = image.compassAngle;
+            if (compassAngle !== undefined) {
+              this.emitHeadingChange(compassAngle);
+            }
+          });
+        }
+      }
+    });
+
+    // Emit initial heading if available (skip when an explicit initial
+    // heading is pending; it is emitted once applied on the image event)
+    if (imagery.heading !== undefined && this._pendingHeading === undefined) {
+      this.emitHeadingChange(imagery.heading);
+    }
+  }
+
+  /**
+   * Navigate to a specific image.
+   *
+   * @param imageId - The Mapillary image ID
+   */
+  async navigateToImage(imageId: string): Promise<void> {
+    if (!this._viewer) return;
+
+    try {
+      await this._viewer.moveTo(imageId);
+    } catch (error) {
+      console.error('Failed to navigate to image:', error);
+    }
+  }
+
+  /**
+   * Remove the MapillaryJS viewer and its container, keeping subscriptions.
+   */
+  private cleanupViewer(): void {
+    // Invalidate any in-flight async render() so a pending mapillary-js load
+    // does not create a viewer after teardown.
+    this._renderToken++;
+    if (this._viewer) {
+      this._viewer.remove();
+      this._viewer = null;
+    }
+    if (this._viewerContainer) {
+      this._viewerContainer.remove();
+      this._viewerContainer = null;
+    }
+    this._container = null;
+    this._pendingHeading = undefined;
+  }
+
+  /**
+   * Clean up the MapillaryJS viewer.
+   */
+  destroy(): void {
+    this.cleanupViewer();
+    this._headingCallbacks.clear();
+  }
+
+  /**
+   * Get the current view state from the viewer.
+   * Note: This is synchronous but may return stale data.
+   */
+  getViewState(): ViewState | null {
+    if (!this._viewer) return null;
+
+    // Return cached heading since getPointOfView is async
+    return {
+      heading: this._currentHeading,
+      pitch: 0,
+      zoom: 1,
+    };
+  }
+
+  /**
+   * Set the view bearing/heading. Best-effort: applies to 360 panoramas only.
+   *
+   * @param heading - The heading (0-360)
+   */
+  async setHeading(heading: number): Promise<void> {
+    if (!this._viewer) return;
+
+    try {
+      const image = await this._viewer.getImage();
+      if (image.cameraType !== 'spherical') return;
+      this._viewer.setCenter(headingToBasicPoint(heading, image.compassAngle));
+    } catch (error) {
+      console.error('Failed to set heading:', error);
+    }
+  }
+
+  /**
+   * Get the underlying MapillaryJS viewer instance.
+   */
+  getViewer(): MapillaryViewer | null {
+    return this._viewer;
+  }
+}

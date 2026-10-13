@@ -1,0 +1,17 @@
+{
+  "name": "ingeearth-web",
+  "private": true,
+  "version": "4.0.0",
+  "description": "InGe Earth 4.0: MapLibre GL JS + OpenFreeMap + maplibre-gl-streetview, empaquetado en android/assets/ingeearth",
+  "type": "module",
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "maplibre-gl": "5.24.0",
+    "mapillary-js": "4.1.2"
+  },
+  "devDependencies": {
+    "vite": "6.4.4"
+  }
+}

@@ -1,0 +1,28 @@
+plugins { id 'java' }
+repositories { google(); mavenCentral(); maven { url 'https://storage.googleapis.com/download.flutter.io' } }
+configurations { ocrLibraries }
+dependencies {
+    ocrLibraries 'com.google.mlkit:text-recognition-korean:16.0.1'
+}
+tasks.register('validateOcr', JavaCompile) {
+    classpath = files()
+    source '../../../android/src/com/ingema/ingeplus/RenditionReceiptOcr.java'
+    destinationDirectory = layout.buildDirectory.dir('ocr-classes')
+    sourceCompatibility = '17'
+    targetCompatibility = '17'
+    doFirst {
+        def libs = []
+        configurations.ocrLibraries.files.each { file ->
+            if (file.name.endsWith('.aar')) {
+                def dest = new File(layout.buildDirectory.get().asFile, 'deps/' + file.name)
+                copy { from zipTree(file); include 'classes.jar'; into dest }
+                libs.add(new File(dest, 'classes.jar'))
+            } else if(file.name.endsWith('.jar')) libs.add(file)
+        }
+        def sdk = System.getenv('ANDROID_SDK_ROOT')
+        libs.add(new File(sdk, 'platforms/android-35/android.jar'))
+        def flutter = System.getenv('FLUTTER_ROOT')
+        libs.add(new File(flutter, 'bin/cache/artifacts/engine/android-arm64/flutter.jar'))
+        classpath = files(libs)
+    }
+}

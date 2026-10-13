@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.21)
+project(NothingFilesChecks LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_AUTOMOC ON)
+find_package(Qt6 6.9 REQUIRED COMPONENTS Core Gui Concurrent)
+add_executable(nothing-files-checks checks.cpp ../../src/documents/nothingfileops.cpp ../../docsops.cpp ../../docsops.h)
+target_include_directories(nothing-files-checks PRIVATE ../.. ../../src/documents)
+target_link_libraries(nothing-files-checks PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Concurrent)

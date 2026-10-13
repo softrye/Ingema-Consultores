@@ -1,0 +1,3 @@
+InGe+ SUCS pattern redraws in this package are original vector redraws created for this deliverable.
+They are dedicated to the public domain under CC0 1.0 Universal.
+They are aligned to the MTC code set and conventional visual language, but are not scans or official MTC artwork.

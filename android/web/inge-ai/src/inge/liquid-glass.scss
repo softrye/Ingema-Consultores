@@ -1,0 +1,101 @@
+/* Material from FlowTheme/FlowGlassSurface and the existing Cesium .glass surface.
+   Runtime values are published by the single InGeCoreFlow in Main.qml. */
+/* Tipografia corporativa INGEMA (Manual 2025): Rubik, SIL OFL 1.1. Misma copia
+   fisica que Flutter (pubspec) y Qt (resources_mobile_ui_v2.qrc). */
+@font-face { font-family: 'Rubik'; font-style: normal; font-weight: 300; font-display: swap; src: url('../../../../../flutter/inge_earth/assets/fonts/rubik/Rubik-Light.ttf') format('truetype'); }
+@font-face { font-family: 'Rubik'; font-style: normal; font-weight: 400; font-display: swap; src: url('../../../../../flutter/inge_earth/assets/fonts/rubik/Rubik-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Rubik'; font-style: normal; font-weight: 600; font-display: swap; src: url('../../../../../flutter/inge_earth/assets/fonts/rubik/Rubik-SemiBold.ttf') format('truetype'); }
+/* Paleta oficial INGEMA (equivale a FlowColors.qml e IngemaBrand en Flutter).
+   Los defaults Light reproducen FlowTheme; el host reemplaza --glass, --text,
+   --muted, --accent, etc. en tiempo real con los tokens de InGeCoreFlow. */
+:root { --ingema-deep: #151A30; --ingema-navy: #1C2D50; --ingema-blue: #0654A2; --ingema-green: #486426; --action: var(--ingema-blue); --on-action: #fff; --glass: rgba(247,247,250,.62); --glassStrong: rgba(252,252,252,.74); --line: rgba(255,255,255,.86); --highlight: rgba(255,255,255,.88); --shadow: rgba(21,26,48,.14); --text: var(--ingema-deep); --muted: #575a6a; --accent: var(--ingema-blue); --error: #b83b45; --fast: 105ms; --normal: 180ms; --sheet: 240ms; --blur: 18px; --Neutral-30: var(--muted); --Neutral-80: var(--accent); }
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; width: 100%; height: 100%; background: transparent; font-family: 'Rubik', system-ui, sans-serif; font-weight: 400; color: var(--text); }
+button, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; min-height: 44px; border: 0; transition: transform var(--fast), opacity var(--fast); }
+button:active { transform: scale(.96); }
+button:disabled { opacity: .42; cursor: default; }
+button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.glass { background: var(--glass); border: 1px solid var(--line); box-shadow: inset 0 1px 0 var(--highlight), 0 10px 36px var(--shadow); backdrop-filter: blur(var(--blur)) saturate(1.12); -webkit-backdrop-filter: blur(var(--blur)) saturate(1.12); }
+.assistant-scrim { height: 100%; display: flex; align-items: flex-end; justify-content: center; background: rgba(21,26,48,.18); padding: 12px 8px max(10px, env(safe-area-inset-bottom)); }
+.assistant-sheet { width: min(100%, 720px); height: min(78dvh, 860px); border-radius: 32px; display: flex; flex-direction: column; padding: 8px 16px 12px; overflow: hidden; background: linear-gradient(135deg, rgba(255,255,255,.35), rgba(6,84,162,.05)), var(--glassStrong); transition: height var(--sheet); }
+.assistant-sheet.expanded { height: 96dvh; }
+.sheet-grip { width: 36px; height: 4px; background: var(--muted); opacity: .3; border-radius: 8px; margin: 2px auto 14px; }
+header { display: flex; align-items: center; gap: 10px; padding-bottom: 14px; }
+header > div:nth-child(2) { flex: 1; min-width: 0; }
+h1 { font-size: 21px; margin: 0 0 4px; font-weight: 600; letter-spacing: -.5px; }
+header p { color: var(--muted); font-size: 12px; margin: 0; }
+.brand-mark { width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center; background: var(--glassStrong); border: 1px solid var(--line); font-size: 28px; }
+.icon-button { min-width: 42px; border-radius: 50%; font-size: 24px; box-shadow: inset 0 1px var(--highlight); }
+.conversation { flex: 1; overflow-y: auto; padding: 8px 2px 16px; overscroll-behavior: contain; }
+.welcome { text-align: center; padding: 18px 2px 8px; }
+.welcome-star { font-size: 42px; color: var(--accent); }
+h2 { font-size: 25px; font-weight: 600; letter-spacing: -.6px; margin: 14px 0 8px; }
+.welcome p { color: var(--muted); font-size: 14px; line-height: 1.5; }
+.suggestions { display: grid; gap: 9px; margin-top: 24px; }
+.suggestions button { display: flex; align-items: center; justify-content: space-between; text-align: left; gap: 10px; border-radius: 18px; padding: 13px 16px; font-size: 14px; box-shadow: inset 0 1px var(--highlight); }
+.message { border-radius: 22px; padding: 12px 15px; margin-bottom: 14px; max-width: 94%; background: var(--glass); border: 1px solid var(--line); }
+.message.user { margin-left: auto; background: var(--glassStrong); }
+.message small { color: var(--muted); font-size: 11px; font-weight: 600; }
+.message p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.65; margin: 5px 0; }
+.composer { display: flex; gap: 10px; align-items: flex-end; border-radius: 24px; padding: 11px 12px; box-shadow: inset 0 1px var(--highlight); }
+textarea { resize: none; width: 100%; background: transparent; border: 0; outline: 0; font-size: 15px; line-height: 1.4; }
+textarea::placeholder { color: var(--muted); }
+.send-button { min-width: 44px; border-radius: 50%; font-size: 24px; background: var(--action); color: var(--on-action); }
+.control-tray { display: flex; gap: 8px; justify-content: center; align-items: center; padding: 12px 0 7px; }
+.voice-button { border-radius: 22px; padding: 10px 16px; display: flex; align-items: center; gap: 9px; box-shadow: inset 0 1px var(--highlight); font-size: 13px; }
+.voice-button.connected { border-color: var(--accent); }
+.pending { color: var(--muted); font-size: 14px; }
+.error { display: flex; gap: 8px; align-items: center; color: var(--error); padding: 10px 14px; border-radius: 18px; font-size: 14px; }
+.error button { margin-left: auto; background: transparent; font-size: 24px; }
+footer { text-align: center; font-size: 10px; color: var(--muted); line-height: 1.5; }
+.audioPulse { width: 22px; height: 24px; transition: opacity var(--normal); }
+.audioPulse > div { transition: height var(--fast); }
+[data-motion="false"] *, [data-motion="false"] *::before, [data-motion="false"] *::after { transition-duration: 0ms !important; animation: none !important; }
+@media (max-height: 540px) { .assistant-sheet { height: 96dvh; } .welcome { padding: 2px; } .suggestions { margin-top: 8px; } }
+/* Apertura InGe+ IA (IngeOpening.tsx): Deep opaco desde el primer frame, sin flash. */
+.inge-opening { position: fixed; inset: 0; z-index: 50; background: var(--ingema-deep); opacity: 1; transition: opacity 300ms ease-out; }
+.inge-opening.leaving { opacity: 0; pointer-events: none; }
+.inge-opening canvas { display: block; width: 100%; height: 100%; }
+/* ---- Halo perimetral InGe+ IA (InGeLiveEdgeGlow.tsx) ----------------------
+   Paleta INGEMA: Blue #0654A2, Navy #1C2D50, Green #486426 y tintes derivados
+   (Blue tint 143,178,213 · Green tint 173,185,157 · blanco azulado). Solo
+   transform/opacity animados (GPU); sin filter: blur ni JS por frame. */
+.assistant-scrim { position: relative; z-index: 1; }
+.inge-edge-glow { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; contain: strict; animation: edge-in 460ms cubic-bezier(.2,.7,.2,1) 100ms both; }
+.inge-edge-glow.leaving { animation: edge-out 280ms ease-in forwards; }
+.edge-field { position: absolute; inset: 0; animation: edge-breathe 4.3s ease-in-out infinite; will-change: opacity; }
+.inge-edge-glow.voice .edge-field { animation-duration: 2.6s; }
+.inge-edge-glow.thinking .edge-blobs { opacity: .78; }
+/* C: bruma interior pegada a los bordes. */
+.edge-haze { position: absolute; inset: 0; background: radial-gradient(ellipse 78% 84% at 50% 50%, rgba(6,84,162,0) 62%, rgba(6,84,162,.16) 84%, rgba(28,45,80,.34) 100%); }
+/* B: masas orgánicas; la máscara deja el centro limpio. */
+.edge-blobs { position: absolute; inset: 0; -webkit-mask-image: radial-gradient(ellipse 74% 80% at 50% 50%, transparent 56%, #000 92%); mask-image: radial-gradient(ellipse 74% 80% at 50% 50%, transparent 56%, #000 92%); }
+.edge-blob { position: absolute; left: 0; top: 0; width: 76vmin; height: 76vmin; margin: -38vmin 0 0 -38vmin; border-radius: 50%; will-change: transform, opacity; }
+.blob-a { background: radial-gradient(circle, rgba(143,178,213,.95) 0%, rgba(6,84,162,.62) 34%, rgba(6,84,162,0) 70%); animation: edge-a 7.4s ease-in-out infinite alternate; }
+.blob-b { background: radial-gradient(circle, rgba(173,185,157,.85) 0%, rgba(72,100,38,.55) 36%, rgba(72,100,38,0) 70%); animation: edge-b 6.1s ease-in-out -2.3s infinite alternate; }
+.blob-c { background: radial-gradient(circle, rgba(232,240,250,.80) 0%, rgba(143,178,213,.45) 32%, rgba(143,178,213,0) 68%); width: 58vmin; height: 58vmin; margin: -29vmin 0 0 -29vmin; animation: edge-c 8.3s ease-in-out -4.1s infinite alternate; }
+.blob-d { background: radial-gradient(circle, rgba(6,84,162,.85) 0%, rgba(28,45,80,.55) 40%, rgba(28,45,80,0) 72%); animation: edge-d 5.3s ease-in-out -1.2s infinite alternate; }
+/* A: rim fino; dos tonos que se alternan lentamente. */
+.edge-rim { position: absolute; inset: 0; border-radius: 30px; }
+.rim-blue { box-shadow: inset 0 0 0 1.5px rgba(143,178,213,.70), inset 0 0 16px 2px rgba(6,84,162,.55), inset 0 0 44px 6px rgba(6,84,162,.22); animation: edge-rim 5.9s ease-in-out infinite alternate; }
+.rim-green { box-shadow: inset 0 0 0 1.5px rgba(173,185,157,.55), inset 0 0 18px 2px rgba(72,100,38,.45); opacity: 0; animation: edge-rim 5.9s ease-in-out -2.95s infinite alternate; }
+@keyframes edge-in { from { opacity: 0; transform: scale(1.05); } to { opacity: 1; transform: none; } }
+@keyframes edge-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes edge-breathe { 0%, 100% { opacity: .84; } 50% { opacity: 1; } }
+@keyframes edge-rim { from { opacity: .25; } to { opacity: 1; } }
+/* Recorridos asimétricos por el perímetro (vw/vh), fases y periodos distintos. */
+@keyframes edge-a { 0% { transform: translate(4vw, 2vh) scale(1); opacity: .9; } 35% { transform: translate(48vw, -3vh) scale(1.18); opacity: 1; } 70% { transform: translate(92vw, 6vh) scale(.92); opacity: .8; } 100% { transform: translate(103vw, 30vh) scale(1.08); opacity: .95; } }
+@keyframes edge-b { 0% { transform: translate(98vw, 97vh) scale(1.1); opacity: .85; } 40% { transform: translate(56vw, 103vh) scale(.9); opacity: .7; } 75% { transform: translate(14vw, 99vh) scale(1.15); opacity: .95; } 100% { transform: translate(-3vw, 72vh) scale(1); opacity: .8; } }
+@keyframes edge-c { 0% { transform: translate(-2vw, 58vh) scale(.9); opacity: .65; } 45% { transform: translate(-4vw, 26vh) scale(1.12); opacity: .9; } 100% { transform: translate(18vw, -2vh) scale(.95); opacity: .7; } }
+@keyframes edge-d { 0% { transform: translate(102vw, 52vh) scale(1); opacity: .8; } 50% { transform: translate(98vw, 84vh) scale(1.2); opacity: 1; } 100% { transform: translate(72vw, 102vh) scale(.9); opacity: .75; } }
+/* "Mini Dock" de la IA (panel inferior real): entrada/salida compatibles. */
+.assistant-sheet { animation: sheet-in 400ms cubic-bezier(.2,.7,.2,1) 200ms both; }
+.assistant-scrim.closing .assistant-sheet { animation: sheet-out 240ms ease-in forwards; }
+@keyframes sheet-in { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: none; } }
+@keyframes sheet-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(20px); } }
+/* Movimiento reducido: rim y bruma estáticos (la identidad del estado IA se conserva). */
+@media (prefers-reduced-motion: reduce) {
+  .edge-field, .edge-blob, .edge-rim { animation: none !important; }
+  .rim-green { opacity: 0; }
+}

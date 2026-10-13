@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="inge_status_light">#F8FAFD</color>
+    <color name="inge_navigation_light">#FFFFFF</color>
+    <color name="inge_surface_light">#F8FAFD</color>
+    <color name="inge_primary">#005AA7</color>
+    <color name="inge_primary_dark">#2EC4B6</color>
+    <color name="ingeplus_icon_transparent">#00000000</color>
+    <color name="inge_surface_dark">#202A36</color>
+    <color name="inge_navigation_dark">#202A36</color>
+    <color name="inge_status_dark">#202A36</color>
+</resources>

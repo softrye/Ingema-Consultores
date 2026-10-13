@@ -1,0 +1,361 @@
+{
+  "standard_reference": "MTC Manual de Carreteras: Suelos, Geologia, Geotecnia y Pavimentos (2014), Cuadro 4.4; Manual de Ensayo de Materiales MTC E101, Anexo Simbolos graficos para suelos.",
+  "mtc_groups": [
+    {
+      "code": "GW",
+      "label": "Grava bien graduada",
+      "svg": "GW.svg",
+      "displayName": "Grava bien graduada",
+      "patternFile": "GW.svg",
+      "category": "sucs_base",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "MTC 2014, Cuadro 4.4, página impresa 32 / PDF 33. Redibujo vectorial, sin rótulos ni marco."
+    },
+    {
+      "code": "GP",
+      "label": "Grava mal graduada",
+      "svg": "GP.svg",
+      "displayName": "Grava mal graduada",
+      "patternFile": "GP.svg",
+      "category": "sucs_base",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "MTC 2014, Cuadro 4.4, página impresa 32 / PDF 33. Redibujo vectorial, sin rótulos ni marco."
+    },
+    {
+      "code": "GM",
+      "label": "Grava limosa",
+      "svg": "GM.svg",
+      "displayName": "Grava limosa",
+      "patternFile": "GM.svg",
+      "category": "sucs_base",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "MTC 2014, Cuadro 4.4, página impresa 32 / PDF 33. Redibujo vectorial, sin rótulos ni marco."
+    },
+    {
+      "code": "GC",
+      "label": "Grava arcillosa",
+      "svg": "GC.svg",
+      "displayName": "Grava arcillosa",
+      "patternFile": "GC.svg",
+      "category": "sucs_base",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "MTC 2014, Cuadro 4.4, página impresa 32 / PDF 33. Redibujo vectorial, sin rótulos ni marco."
+    },
+    {
+      "code": "SW",
+      "label": "Arena bien graduada",
+      "svg": "SW.svg",
+      "displayName": "Arena bien graduada",
+      "patternFile": "SW.svg",
+      "category": "sucs_base",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "MTC 2014, Cuadro 4.4, página impresa 32 / PDF 33. Redibujo vectorial, sin rótulos ni marco."
+    },
+    {
+      "code": "SP",
+      "label": "Arena mal graduada",
+      "svg": "SP.svg",
+      "displayName": "Arena mal graduada",
+      "patternFile": "SP.svg",
+      "category": "sucs_base",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "MTC 2014, Cuadro 4.4, página impresa 32 / PDF 33. Redibujo vectorial, sin rótulos ni marco."
+    },
+    {
+      "code": "SM",
+      "label": "Arena limosa",
+      "svg": "SM.svg",
+      "displayName": "Arena limosa",
+      "patternFile": "SM.svg",
+      "category": "sucs_base",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "MTC 2014, Cuadro 4.4, página impresa 32 / PDF 33. Redibujo vectorial, sin rótulos ni marco."
+    },
+    {
+      "code": "SC",
+      "label": "Arena arcillosa",
+      "svg": "SC.svg",
+      "displayName": "Arena arcillosa",
+      "patternFile": "SC.svg",
+      "category": "sucs_base",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "MTC 2014, Cuadro 4.4, página impresa 32 / PDF 33. Redibujo vectorial, sin rótulos ni marco."
+    },
+    {
+      "code": "ML",
+      "label": "Limo de baja plasticidad",
+      "svg": "ML.svg",
+      "displayName": "Limo de baja plasticidad",
+      "patternFile": "ML.svg",
+      "category": "sucs_base",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "MTC 2014, Cuadro 4.4, página impresa 32 / PDF 33. Redibujo vectorial, sin rótulos ni marco."
+    },
+    {
+      "code": "CL",
+      "label": "Arcilla de baja plasticidad",
+      "svg": "CL.svg",
+      "displayName": "Arcilla de baja plasticidad",
+      "patternFile": "CL.svg",
+      "category": "sucs_base",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "MTC 2014, Cuadro 4.4, página impresa 32 / PDF 33. Redibujo vectorial, sin rótulos ni marco."
+    },
+    {
+      "code": "OL",
+      "label": "Suelo orgánico de baja plasticidad",
+      "svg": "OL.svg",
+      "displayName": "Suelo orgánico de baja plasticidad",
+      "patternFile": "OL.svg",
+      "category": "sucs_base",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "MTC 2014, Cuadro 4.4, página impresa 32 / PDF 33. Redibujo vectorial, sin rótulos ni marco."
+    },
+    {
+      "code": "MH",
+      "label": "Limo de alta plasticidad",
+      "svg": "MH.svg",
+      "displayName": "Limo de alta plasticidad",
+      "patternFile": "MH.svg",
+      "category": "sucs_base",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "MTC 2014, Cuadro 4.4, página impresa 32 / PDF 33. Redibujo vectorial, sin rótulos ni marco."
+    },
+    {
+      "code": "CH",
+      "label": "Arcilla de alta plasticidad",
+      "svg": "CH.svg",
+      "displayName": "Arcilla de alta plasticidad",
+      "patternFile": "CH.svg",
+      "category": "sucs_base",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "MTC 2014, Cuadro 4.4, página impresa 32 / PDF 33. Redibujo vectorial, sin rótulos ni marco."
+    },
+    {
+      "code": "OH",
+      "label": "Suelo orgánico de alta plasticidad",
+      "svg": "OH.svg",
+      "displayName": "Suelo orgánico de alta plasticidad",
+      "patternFile": "OH.svg",
+      "category": "sucs_base",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "MTC 2014, Cuadro 4.4, página impresa 32 / PDF 33. Redibujo vectorial, sin rótulos ni marco."
+    },
+    {
+      "code": "Pt",
+      "label": "Turba / suelo altamente orgánico",
+      "svg": "Pt.svg",
+      "displayName": "Turba / suelo altamente orgánico",
+      "patternFile": "Pt.svg",
+      "category": "sucs_base",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "MTC 2014, Cuadro 4.4, página impresa 32 / PDF 33. Redibujo vectorial, sin rótulos ni marco.",
+      "aliases": [
+        "PT"
+      ]
+    }
+  ],
+  "supplementary": [
+    {
+      "code": "GW-GM",
+      "type": "dual",
+      "components": [
+        "GW",
+        "GM"
+      ],
+      "svg": "GW-GM.svg",
+      "displayName": "GW-GM · combinación",
+      "patternFile": "GW-GM.svg",
+      "category": "sucs_dual",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "Composición InGe+ en mitades sin deformación de las bases GW y GM. No es una figura individual oficial MTC."
+    },
+    {
+      "code": "GW-GC",
+      "type": "dual",
+      "components": [
+        "GW",
+        "GC"
+      ],
+      "svg": "GW-GC.svg",
+      "displayName": "GW-GC · combinación",
+      "patternFile": "GW-GC.svg",
+      "category": "sucs_dual",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "Composición InGe+ en mitades sin deformación de las bases GW y GC. No es una figura individual oficial MTC."
+    },
+    {
+      "code": "GP-GM",
+      "type": "dual",
+      "components": [
+        "GP",
+        "GM"
+      ],
+      "svg": "GP-GM.svg",
+      "displayName": "GP-GM · combinación",
+      "patternFile": "GP-GM.svg",
+      "category": "sucs_dual",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "Composición InGe+ en mitades sin deformación de las bases GP y GM. No es una figura individual oficial MTC."
+    },
+    {
+      "code": "GP-GC",
+      "type": "dual",
+      "components": [
+        "GP",
+        "GC"
+      ],
+      "svg": "GP-GC.svg",
+      "displayName": "GP-GC · combinación",
+      "patternFile": "GP-GC.svg",
+      "category": "sucs_dual",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "Composición InGe+ en mitades sin deformación de las bases GP y GC. No es una figura individual oficial MTC."
+    },
+    {
+      "code": "SW-SM",
+      "type": "dual",
+      "components": [
+        "SW",
+        "SM"
+      ],
+      "svg": "SW-SM.svg",
+      "displayName": "SW-SM · combinación",
+      "patternFile": "SW-SM.svg",
+      "category": "sucs_dual",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "Composición InGe+ en mitades sin deformación de las bases SW y SM. No es una figura individual oficial MTC."
+    },
+    {
+      "code": "SW-SC",
+      "type": "dual",
+      "components": [
+        "SW",
+        "SC"
+      ],
+      "svg": "SW-SC.svg",
+      "displayName": "SW-SC · combinación",
+      "patternFile": "SW-SC.svg",
+      "category": "sucs_dual",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "Composición InGe+ en mitades sin deformación de las bases SW y SC. No es una figura individual oficial MTC."
+    },
+    {
+      "code": "SP-SM",
+      "type": "dual",
+      "components": [
+        "SP",
+        "SM"
+      ],
+      "svg": "SP-SM.svg",
+      "displayName": "SP-SM · combinación",
+      "patternFile": "SP-SM.svg",
+      "category": "sucs_dual",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "Composición InGe+ en mitades sin deformación de las bases SP y SM. No es una figura individual oficial MTC."
+    },
+    {
+      "code": "SP-SC",
+      "type": "dual",
+      "components": [
+        "SP",
+        "SC"
+      ],
+      "svg": "SP-SC.svg",
+      "displayName": "SP-SC · combinación",
+      "patternFile": "SP-SC.svg",
+      "category": "sucs_dual",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "Composición InGe+ en mitades sin deformación de las bases SP y SC. No es una figura individual oficial MTC."
+    },
+    {
+      "code": "CL-ML",
+      "type": "dual",
+      "components": [
+        "CL",
+        "ML"
+      ],
+      "svg": "CL-ML.svg",
+      "displayName": "CL-ML · combinación",
+      "patternFile": "CL-ML.svg",
+      "category": "sucs_dual",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "Composición InGe+ en mitades sin deformación de las bases CL y ML. No es una figura individual oficial MTC."
+    },
+    {
+      "code": "RE",
+      "label": "Relleno antropico / material de relleno",
+      "type": "supplemental_non_sucs",
+      "svg": "RE_Relleno_Antropico.svg",
+      "displayName": "Relleno antrópico",
+      "patternFile": "RE_Relleno_Antropico.svg",
+      "category": "special_material",
+      "isSucs": false,
+      "aliases": [
+        "RA",
+        "RELLENO_ANTROPICO"
+      ],
+      "source": "Diseño suplementario local InGe+",
+      "reference": "Fragmentos y finos. No es un código ni una trama oficial SUCS/MTC."
+    },
+    {
+      "code": "GC-GM",
+      "type": "dual",
+      "components": [
+        "GC",
+        "GM"
+      ],
+      "svg": "GC-GM.svg",
+      "displayName": "GC-GM · combinación",
+      "patternFile": "GC-GM.svg",
+      "category": "sucs_dual",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "Composición InGe+ en mitades sin deformación de las bases GC y GM. No es una figura individual oficial MTC."
+    },
+    {
+      "code": "SC-SM",
+      "type": "dual",
+      "components": [
+        "SC",
+        "SM"
+      ],
+      "svg": "SC-SM.svg",
+      "displayName": "SC-SM · combinación",
+      "patternFile": "SC-SM.svg",
+      "category": "sucs_dual",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "Composición InGe+ en mitades sin deformación de las bases SC y SM. No es una figura individual oficial MTC."
+    },
+    {
+      "code": "GM-GC",
+      "type": "dual",
+      "components": [
+        "GM",
+        "GC"
+      ],
+      "svg": "GM-GC.svg",
+      "displayName": "GM-GC · combinación",
+      "patternFile": "GM-GC.svg",
+      "category": "sucs_dual",
+      "source": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+      "reference": "Composición InGe+ en mitades sin deformación de las bases GM y GC. No es una figura individual oficial MTC."
+    }
+  ],
+  "ui_icons": {
+    "source": "Font Awesome Free",
+    "files": [
+      "chevron-right.svg",
+      "droplet.svg",
+      "ruler.svg"
+    ]
+  },
+  "schemaVersion": 2,
+  "verifiedReference": {
+    "url": "https://portal.mtc.gob.pe/transportes/caminos/normas_carreteras/MTC%20NORMAS/ARCH_PDF/MAN_7%20SGGP-2014.pdf",
+    "pdfPage": 33,
+    "printedPage": 32,
+    "checkedOn": "2026-09-23"
+  },
+  "compositionRule": "Mitad izquierda: primera base; mitad derecha: segunda base, a escala idéntica. Sin divisor interno. La selección gráfica explícita prevalece sobre la clasificación; el origen Relleno antrópico utiliza el material especial.",
+  "legacyAssets": "RA es alias idéntico de RE; PT es alias de Pt. Los PNG son derivados de los SVG. PREVIEW_REFERENCIA_UI.png es referencia de composición; CATALOGO_VISUAL.png se regenera desde los SVG."
+}

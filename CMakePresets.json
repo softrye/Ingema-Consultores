@@ -1,0 +1,18 @@
+{
+  "version": 3,
+  "configurePresets": [{
+    "name": "desktop-mingw",
+    "displayName": "Desktop Qt 6.9.3 MinGW 64-bit",
+    "generator": "Ninja",
+    "binaryDir": "C:/InGeBuild/Desktop",
+    "cacheVariables": {
+      "CMAKE_BUILD_TYPE": "Debug",
+      "CMAKE_CXX_COMPILER": "C:/Qt/Tools/mingw1310_64/bin/g++.exe",
+      "CMAKE_MAKE_PROGRAM": "C:/Qt/Tools/Ninja/ninja.exe",
+      "CMAKE_PREFIX_PATH": "C:/Qt/6.9.3/mingw_64",
+      "INGE_BUILD_MOBILE": "ON"
+    },
+    "environment": {"PATH": "C:/Qt/6.9.3/mingw_64/bin;C:/Qt/Tools/mingw1310_64/bin;$penv{PATH}"}
+  }],
+  "buildPresets": [{"name": "desktop-mingw", "configurePreset": "desktop-mingw", "jobs": 4}]
+}

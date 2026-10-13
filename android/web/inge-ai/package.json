@@ -1,0 +1,32 @@
+{
+  "name": "inge-gemini-live-console",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "start": "vite",
+    "build": "tsc --noEmit && vite build",
+    "check": "tsc --noEmit",
+    "test": "node --test native-bridge.test.mjs live-session.test.mjs token-sdk.test.mjs prepare-dependencies.test.mjs assistant-errors.test.mjs"
+  },
+  "dependencies": {
+    "@google/genai": "2.27.0",
+    "classnames": "2.5.1",
+    "eventemitter3": "5.0.1",
+    "lodash": "4.17.21",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@types/lodash": "4.17.13",
+    "typescript": "5.9.3",
+    "vite": "8.3.2",
+    "sass": "1.93.2"
+  }
+}

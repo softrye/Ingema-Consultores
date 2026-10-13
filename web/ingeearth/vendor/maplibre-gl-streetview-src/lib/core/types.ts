@@ -1,0 +1,330 @@
+import type { Map as MapLibreMap, LngLat, LngLatLike } from 'maplibre-gl';
+
+/**
+ * Street view provider types.
+ */
+export type ProviderType = 'google' | 'mapillary';
+
+/**
+ * Control position on the map.
+ */
+export type ControlPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+
+/**
+ * Options for configuring the StreetViewControl.
+ */
+export interface StreetViewControlOptions {
+  /** Whether the control panel should start collapsed. Default: true */
+  collapsed?: boolean;
+
+  /** Position of the control on the map. Default: 'top-right' */
+  position?: ControlPosition;
+
+  /** Title displayed in the control header. Default: 'Street View' */
+  title?: string;
+
+  /** Width of the control panel in pixels. Default: 400 */
+  panelWidth?: number;
+
+  /** Height of the control panel in pixels. Default: 300 */
+  panelHeight?: number;
+
+  /** Maximum height of the control panel in pixels. Default: 500 */
+  maxHeight?: number;
+
+  /** Minimum panel width in pixels. Default: 300 */
+  minPanelWidth?: number;
+
+  /** Minimum panel height in pixels. Default: 200 */
+  minPanelHeight?: number;
+
+  /** Default provider to use. Default: 'google' */
+  defaultProvider?: ProviderType;
+
+  /** Google Maps API key */
+  googleApiKey?: string;
+
+  /** Mapillary access token */
+  mapillaryAccessToken?: string;
+
+  /** Show API key/token inputs inside the control panel. Default: true */
+  showApiKeyInputs?: boolean;
+
+  /** Custom CSS class name */
+  className?: string;
+
+  /** Maximum search radius for nearest imagery (meters). Default: 100 */
+  maxSearchRadius?: number;
+
+  /** Enable click-to-view on map. Default: true */
+  clickToView?: boolean;
+
+  /** Show marker at street view location. Default: true */
+  showMarker?: boolean;
+
+  /** Marker options */
+  markerOptions?: MarkerOptions;
+
+  /**
+   * Build the map marker that shows the street view location.
+   *
+   * Defaults to `maplibre-gl`'s own `Marker`. Supply a factory to place the
+   * marker with a different engine's class: MapLibre's `Marker` reads
+   * `map._camera.transform` on every move, which a `mapbox-gl` map does not
+   * have, so a host rendering with Mapbox GL JS passes
+   * `(options) => new mapboxgl.Marker(options)` here and the control's own
+   * marker element is placed by that engine instead.
+   *
+   * The control only ever calls `setLngLat`, `addTo` and `remove` on what it
+   * gets back — see {@link StreetViewMarkerHandle}.
+   */
+  createMarker?: CreateStreetViewMarker;
+}
+
+/**
+ * The marker surface the control uses. Both `maplibre-gl`'s and `mapbox-gl`'s
+ * `Marker` already satisfy it, so either class can be handed to
+ * {@link StreetViewControlOptions.createMarker} unchanged.
+ */
+export interface StreetViewMarkerHandle {
+  /** Move the marker to a location. */
+  setLngLat(lngLat: LngLatLike): unknown;
+
+  /** Add the marker to a map. */
+  addTo(map: unknown): unknown;
+
+  /** Take the marker off the map. */
+  remove(): unknown;
+}
+
+/**
+ * Factory for {@link StreetViewControlOptions.createMarker}. It is handed the
+ * control's own marker element (already styled and rotated by
+ * `StreetViewMarker`), so only the positioning belongs to the engine.
+ */
+export type CreateStreetViewMarker = (options: {
+  element: HTMLElement;
+  anchor: 'center';
+}) => StreetViewMarkerHandle;
+
+/**
+ * Marker customization options.
+ */
+export interface MarkerOptions {
+  /** Marker color. Default: '#ff5722' */
+  color?: string;
+
+  /** Show direction indicator. Default: true */
+  showDirection?: boolean;
+
+  /** Direction indicator color. Default: '#1976d2' */
+  directionColor?: string;
+}
+
+/**
+ * Optional view direction when showing street view imagery.
+ */
+export interface ViewOptions {
+  /** Initial heading in degrees (0-360). Values outside the range are normalized. */
+  heading?: number;
+
+  /** Initial pitch in degrees (-90 to 90). Values outside the range are clamped. */
+  pitch?: number;
+}
+
+/**
+ * Internal state of the street view control.
+ */
+export interface StreetViewState {
+  /** Whether the control panel is collapsed */
+  collapsed: boolean;
+
+  /** Currently active provider */
+  activeProvider: ProviderType;
+
+  /** Current location being viewed */
+  location: LngLat | null;
+
+  /** Current imagery data */
+  imagery: ImageryResult | null;
+
+  /** Current view heading (0-360 degrees) */
+  heading: number;
+
+  /** Current view pitch (-90 to 90 degrees) */
+  pitch: number;
+
+  /** Loading state */
+  loading: boolean;
+
+  /** Error message if any */
+  error: string | null;
+}
+
+/**
+ * Result from imagery query.
+ */
+export interface ImageryResult {
+  /** Provider-specific image ID */
+  id: string;
+
+  /** Image location */
+  location: LngLat;
+
+  /** Capture date (if available) */
+  capturedAt?: Date;
+
+  /** Thumbnail URL (if available) */
+  thumbnailUrl?: string;
+
+  /** Provider that returned this result */
+  provider: ProviderType;
+
+  /** Original compass heading of the image */
+  heading?: number;
+
+  /** Whether this is a 360 panorama */
+  isPano?: boolean;
+}
+
+/**
+ * Current view state of the street view viewer.
+ */
+export interface ViewState {
+  /** Current heading (0-360) */
+  heading: number;
+
+  /** Current pitch (-90 to 90) */
+  pitch: number;
+
+  /** Current zoom level (provider-specific) */
+  zoom?: number;
+}
+
+/**
+ * Bounding box for spatial queries.
+ */
+export interface BoundingBox {
+  minLng: number;
+  minLat: number;
+  maxLng: number;
+  maxLat: number;
+}
+
+/**
+ * Event types emitted by the control.
+ */
+export type StreetViewEvent =
+  | 'collapse'
+  | 'expand'
+  | 'statechange'
+  | 'providerchange'
+  | 'locationchange'
+  | 'headingchange'
+  | 'pitchchange'
+  | 'error'
+  | 'load';
+
+/**
+ * Event data passed to handlers.
+ */
+export interface StreetViewEventData {
+  type: StreetViewEvent;
+  state: StreetViewState;
+  error?: Error;
+}
+
+/**
+ * Event handler function type.
+ */
+export type StreetViewEventHandler = (event: StreetViewEventData) => void;
+
+/**
+ * Props for the React wrapper component.
+ */
+export interface StreetViewControlReactProps extends StreetViewControlOptions {
+  /** MapLibre GL map instance */
+  map: MapLibreMap;
+
+  /** Callback fired when the control state changes */
+  onStateChange?: (state: StreetViewState) => void;
+
+  /** Callback fired when provider changes */
+  onProviderChange?: (provider: ProviderType) => void;
+
+  /** Callback fired when location changes */
+  onLocationChange?: (location: LngLat | null) => void;
+
+  /** Callback fired when heading changes */
+  onHeadingChange?: (heading: number) => void;
+
+  /** Callback fired on error */
+  onError?: (error: Error) => void;
+}
+
+/**
+ * Configuration for provider availability.
+ */
+export interface ProviderConfig {
+  google: {
+    enabled: boolean;
+    apiKey: string | null;
+  };
+  mapillary: {
+    enabled: boolean;
+    accessToken: string | null;
+  };
+}
+
+/**
+ * Provider interface for street view imagery sources.
+ */
+export interface IStreetViewProvider {
+  /** Provider name identifier */
+  readonly name: ProviderType;
+
+  /** Display name for UI */
+  readonly displayName: string;
+
+  /** Check if API key/token is configured */
+  isConfigured(): boolean;
+
+  /** Query for imagery at a location */
+  queryImagery(lngLat: LngLatLike, radius?: number): Promise<ImageryResult | null>;
+
+  /** Find nearest imagery if none at exact location */
+  findNearestImagery(lngLat: LngLatLike, maxRadius?: number): Promise<ImageryResult | null>;
+
+  /**
+   * Render the viewer into a container, optionally with an initial view.
+   *
+   * Returns a promise so providers that load their renderer on demand (e.g.
+   * Mapillary dynamically imports mapillary-js) can signal when the viewer is
+   * actually mounted; callers that do not need to wait may ignore it.
+   */
+  render(container: HTMLElement, imagery: ImageryResult, view?: Partial<ViewState>): Promise<void>;
+
+  /** Set the view heading, if supported by the provider */
+  setHeading?(heading: number): void | Promise<void>;
+
+  /** Set the view pitch, if supported by the provider */
+  setPitch?(pitch: number): void | Promise<void>;
+
+  /** Clean up the viewer */
+  destroy(): void;
+
+  /** Get current view state */
+  getViewState(): ViewState | null;
+
+  /** Subscribe to heading changes */
+  onHeadingChange(callback: (heading: number) => void): void;
+
+  /** Unsubscribe from heading changes */
+  offHeadingChange(callback: (heading: number) => void): void;
+
+  /** Subscribe to location changes */
+  onLocationChange(callback: (location: LngLat) => void): void;
+
+  /** Unsubscribe from location changes */
+  offLocationChange(callback: (location: LngLat) => void): void;
+}

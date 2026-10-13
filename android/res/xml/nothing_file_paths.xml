@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="inge_calicata_exports" path="Exportaciones/" />
+    <!-- Durable, account-scoped mirrors; the bridge grants only the selected file. -->
+    <files-path name="inge_drive_mirrors" path="inge-drive/" />
+    <files-path name="inge_export_mirrors" path="rendition-exports/" />
+    <cache-path name="inge_camera_captures" path="calicata_camera/" />
+    <external-path name="inge_documents" path="Documents/InGePlusProyectos/" />
+    <external-files-path name="inge_external_documents" path="Documents/InGePlusProyectos/" />
+    <files-path name="inge_private_documents" path="Documents/InGePlusProyectos/" />
+</paths>

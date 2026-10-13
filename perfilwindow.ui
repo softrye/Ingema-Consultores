@@ -1,0 +1,811 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>PerfilWindow</class>
+ <widget class="QMainWindow" name="PerfilWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1207</width>
+    <height>725</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Perfil</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <layout class="QVBoxLayout" name="verticalLayout_4">
+    <property name="leftMargin">
+     <number>0</number>
+    </property>
+    <property name="topMargin">
+     <number>0</number>
+    </property>
+    <property name="rightMargin">
+     <number>0</number>
+    </property>
+    <property name="bottomMargin">
+     <number>0</number>
+    </property>
+    <item>
+     <widget class="QFrame" name="frameMain">
+      <property name="sizePolicy">
+       <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+        <horstretch>0</horstretch>
+        <verstretch>0</verstretch>
+       </sizepolicy>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">QFrame#frameMain{
+    background: #ffffff;
+    border: none;
+}
+</string>
+      </property>
+      <property name="frameShape">
+       <enum>QFrame::Shape::StyledPanel</enum>
+      </property>
+      <property name="frameShadow">
+       <enum>QFrame::Shadow::Raised</enum>
+      </property>
+      <layout class="QVBoxLayout" name="verticalLayout">
+       <property name="spacing">
+        <number>0</number>
+       </property>
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="QFrame" name="frameHeader">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>0</width>
+           <height>0</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>16777215</width>
+           <height>16777215</height>
+          </size>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">QFrame#frameHeader {
+    background-color: #004F8C;
+    border: none;
+}
+
+QLabel {
+    color: white;
+}
+
+QToolButton#btnMenu {
+
+    color: white;
+
+}
+
+QLabel#lblSubGreeting {
+    color: #CFE3F5;
+}
+
+</string>
+         </property>
+         <property name="frameShape">
+          <enum>QFrame::Shape::StyledPanel</enum>
+         </property>
+         <property name="frameShadow">
+          <enum>QFrame::Shadow::Raised</enum>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_2">
+          <property name="spacing">
+           <number>5</number>
+          </property>
+          <property name="leftMargin">
+           <number>20</number>
+          </property>
+          <property name="topMargin">
+           <number>10</number>
+          </property>
+          <property name="rightMargin">
+           <number>20</number>
+          </property>
+          <property name="bottomMargin">
+           <number>10</number>
+          </property>
+          <item>
+           <layout class="QHBoxLayout" name="topBarLayout">
+            <property name="spacing">
+             <number>10</number>
+            </property>
+            <property name="topMargin">
+             <number>4</number>
+            </property>
+            <property name="bottomMargin">
+             <number>4</number>
+            </property>
+            <item>
+             <widget class="QLabel" name="lblLogo">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>80</width>
+                <height>80</height>
+               </size>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">QLabel#lblLogo {
+    background-color: transparent;
+}
+</string>
+              </property>
+              <property name="text">
+               <string/>
+              </property>
+              <property name="pixmap">
+               <pixmap resource="resources.qrc">:/images/images/logo_tierra_borde_blanco.png</pixmap>
+              </property>
+              <property name="scaledContents">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLineEdit" name="lineSearch">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>0</height>
+               </size>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>16777215</width>
+                <height>16777215</height>
+               </size>
+              </property>
+              <property name="font">
+               <font>
+                <pointsize>10</pointsize>
+                <kerning>true</kerning>
+               </font>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">QLineEdit#lineSearch {
+    background-color: #FFFFFF;
+    border: 2px solid #E0E0E0;
+    border-radius: 14px;
+    padding-left: 35px; /* espacio para el icono del buscador */
+    font-size: 10pt;
+    color: #333333;
+}
+
+QLineEdit#lineSearch::placeholder {
+    color: #7A8CA4;
+}
+</string>
+              </property>
+              <property name="placeholderText">
+               <string>Buscar ficha geológica...</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QToolButton" name="btnMenu">
+              <property name="minimumSize">
+               <size>
+                <width>24</width>
+                <height>24</height>
+               </size>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>32</width>
+                <height>32</height>
+               </size>
+              </property>
+              <property name="toolTip">
+               <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Abrir menú&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">QToolButton#btnMenu {
+    background: #fdac11;
+    border-radius: 6px;
+    color: #FFFFFF;
+    border: 1px solid  #FFFFFF;
+}
+QToolButton#btnMenu:hover {
+    background-color: #fcc253;
+    border-radius: 6px;
+}
+</string>
+              </property>
+              <property name="text">
+               <string>☰</string>
+              </property>
+              <property name="iconSize">
+               <size>
+                <width>24</width>
+                <height>24</height>
+               </size>
+              </property>
+              <property name="autoRaise">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QFrame" name="greetingLayout">
+            <property name="styleSheet">
+             <string notr="true">QFrame#greetingLayout {
+    background: transparent;
+    border: none;
+}</string>
+            </property>
+            <property name="frameShape">
+             <enum>QFrame::Shape::NoFrame</enum>
+            </property>
+            <property name="frameShadow">
+             <enum>QFrame::Shadow::Raised</enum>
+            </property>
+            <layout class="QVBoxLayout" name="verticalLayout_3">
+             <property name="spacing">
+              <number>2</number>
+             </property>
+             <property name="leftMargin">
+              <number>8</number>
+             </property>
+             <property name="topMargin">
+              <number>4</number>
+             </property>
+             <property name="rightMargin">
+              <number>8</number>
+             </property>
+             <property name="bottomMargin">
+              <number>4</number>
+             </property>
+             <item>
+              <widget class="QLabel" name="lblGreeting">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="font">
+                <font>
+                 <pointsize>14</pointsize>
+                 <bold>true</bold>
+                </font>
+               </property>
+               <property name="styleSheet">
+                <string notr="true">background: transparent;
+</string>
+               </property>
+               <property name="locale">
+                <locale language="Spanish" country="Spain"/>
+               </property>
+               <property name="text">
+                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Hola, Admin&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="lblSubGreeting">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="font">
+                <font>
+                 <pointsize>10</pointsize>
+                 <bold>false</bold>
+                </font>
+               </property>
+               <property name="styleSheet">
+                <string notr="true">background: transparent;
+</string>
+               </property>
+               <property name="text">
+                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;¿Qué ficha quieres completar?&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QFrame" name="FrameContent">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+           <horstretch>0</horstretch>
+           <verstretch>1</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">/* ========= BASE (solo dentro de FrameContent) ========= */
+QFrame#FrameContent {
+    background: #FFFFFF;
+}
+
+/* Evita “fondos raros” del scroll (viewport) */
+QScrollArea#scrollAreaContent,
+QScrollArea#scrollAreaContent::viewport,
+QWidget#scrollWidget,
+QWidget#scrollAreaWidgetContents {
+    background: #FFFFFF;
+    border: none;
+}
+
+/* ========= TARJETA / CONTENEDOR ========= */
+QFrame#frameProfileCard {
+    background: #FFFFFF;
+    border: 1px solid rgba(0, 83, 129, 45);   /* azul oscuro suave */
+    border-top: 4px solid #FEAC10;            /* naranja */
+    border-radius: 18px;
+}
+
+/* ========= INPUTS ========= */
+QLineEdit {
+    background: #FFFFFF;
+    border: 1px solid rgba(0, 83, 129, 28);
+    border-radius: 10px;
+    padding: 10px 12px;
+    color: #0B1F33;
+}
+
+QLineEdit:hover {
+    border: 1px solid rgba(0, 141, 186, 70);  /* celeste */
+}
+
+QLineEdit:focus {
+    border: 2px solid #008DBA;                /* celeste */
+    padding: 9px 11px;                        /* compensa el borde 2px */
+}
+
+/* ========= BOTONES (base) ========= */
+QPushButton {
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-weight: 600;
+}
+
+/* Guardar (primario) */
+QPushButton#btnSaveProfile {
+    background: #005381;                      /* azul oscuro */
+    color: white;
+    border: 1px solid rgba(0,0,0,20);
+    border-left: 12px solid #FEAC10;          /* acento naranja visible */
+    padding-left: 18px;
+}
+
+QPushButton#btnSaveProfile:hover {
+    background: #008DBA;                      /* celeste */
+}
+
+QPushButton#btnSaveProfile:pressed {
+    background: #00456B;
+}
+
+/* Cambiar avatar (secundario outline) */
+QPushButton#btnChangeAvatar {
+    background: transparent;
+    color: #005381;
+    border: 2px solid #008DBA;                /* celeste */
+}
+
+QPushButton#btnChangeAvatar:hover {
+    background: rgba(0, 141, 186, 10);
+}
+
+QPushButton#btnChangeAvatar:pressed {
+    background: rgba(0, 141, 186, 18);
+}
+
+/* ========= AVATAR ========= */
+QLabel#lblAvatar {
+    background: #FFFFFF;
+    border: 2px solid rgba(254, 172, 16, 95); /* naranja */
+    border-radius: 14px;
+}
+
+
+/* Reset avatar (terciario) */
+QPushButton#btnResetAvatar {
+    background: transparent;
+    color: #7A8CA4;
+    border: 1px solid rgba(0, 83, 129, 25);
+}
+
+QPushButton#btnResetAvatar:hover {
+    background: rgba(0, 141, 186, 10);
+    color: #005381;
+}
+
+QPushButton#btnResetAvatar:pressed {
+    background: rgba(0, 141, 186, 18);
+}</string>
+         </property>
+         <property name="frameShape">
+          <enum>QFrame::Shape::StyledPanel</enum>
+         </property>
+         <property name="frameShadow">
+          <enum>QFrame::Shadow::Raised</enum>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_5">
+          <item>
+           <widget class="QScrollArea" name="scrollAreaContent">
+            <property name="frameShape">
+             <enum>QFrame::Shape::NoFrame</enum>
+            </property>
+            <property name="horizontalScrollBarPolicy">
+             <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
+            </property>
+            <property name="widgetResizable">
+             <bool>true</bool>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignmentFlag::AlignHCenter|Qt::AlignmentFlag::AlignTop</set>
+            </property>
+            <widget class="QWidget" name="scrollWidget">
+             <property name="geometry">
+              <rect>
+               <x>0</x>
+               <y>0</y>
+               <width>1187</width>
+               <height>419</height>
+              </rect>
+             </property>
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <layout class="QVBoxLayout" name="verticalLayout_14">
+              <property name="spacing">
+               <number>12</number>
+              </property>
+              <property name="sizeConstraint">
+               <enum>QLayout::SizeConstraint::SetMinAndMaxSize</enum>
+              </property>
+              <property name="leftMargin">
+               <number>20</number>
+              </property>
+              <property name="topMargin">
+               <number>20</number>
+              </property>
+              <property name="rightMargin">
+               <number>20</number>
+              </property>
+              <property name="bottomMargin">
+               <number>20</number>
+              </property>
+              <item>
+               <widget class="QFrame" name="frameProfileCard">
+                <property name="frameShape">
+                 <enum>QFrame::Shape::StyledPanel</enum>
+                </property>
+                <property name="frameShadow">
+                 <enum>QFrame::Shadow::Raised</enum>
+                </property>
+                <layout class="QHBoxLayout" name="horizontalLayout_2" stretch="3,1">
+                 <item>
+                  <widget class="QWidget" name="widget_2" native="true">
+                   <layout class="QVBoxLayout" name="verticalLayout_7">
+                    <item>
+                     <widget class="QLineEdit" name="txtName">
+                      <property name="placeholderText">
+                       <string>Nombre</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QLineEdit" name="txtEmail">
+                      <property name="placeholderText">
+                       <string>Correo</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QLineEdit" name="txtPhone">
+                      <property name="placeholderText">
+                       <string>Teléfono</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QPushButton" name="btnSaveProfile">
+                      <property name="text">
+                       <string>Guardar</string>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QWidget" name="widget" native="true">
+                   <layout class="QGridLayout" name="gridLayout">
+                    <item row="4" column="0">
+                     <widget class="QPushButton" name="btnCloseSesion">
+                      <property name="mouseTracking">
+                       <bool>true</bool>
+                      </property>
+                      <property name="styleSheet">
+                       <string notr="true">QPushButton#btnCloseSesion {
+    background: #FFFFFF;
+    color: #C62828;
+    border: 1px solid rgba(198,40,40,0.35);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-weight: 600;
+}
+QPushButton#btnCloseSesion:hover {
+    background: rgba(198,40,40,0.08);
+}
+QPushButton#btnCloseSesion:pressed {
+    background: rgba(198,40,40,0.14);
+}
+QPushButton#btnCloseSesion:disabled {
+    color: rgba(198,40,40,0.35);
+    border-color: rgba(198,40,40,0.18);
+    background: #F7F8FA;
+}
+</string>
+                      </property>
+                      <property name="text">
+                       <string>Cerrar Sesión</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item row="0" column="0">
+                     <widget class="QLabel" name="lblAvatar">
+                      <property name="minimumSize">
+                       <size>
+                        <width>96</width>
+                        <height>96</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>140</width>
+                        <height>140</height>
+                       </size>
+                      </property>
+                      <property name="styleSheet">
+                       <string notr="true">background:#F5F7FB;
+border:1px solid #D0D4E4;
+border-radius:48px;
+</string>
+                      </property>
+                      <property name="text">
+                       <string>TextLabel</string>
+                      </property>
+                      <property name="scaledContents">
+                       <bool>true</bool>
+                      </property>
+                      <property name="alignment">
+                       <set>Qt::AlignmentFlag::AlignCenter</set>
+                      </property>
+                     </widget>
+                    </item>
+                    <item row="1" column="0">
+                     <widget class="QPushButton" name="btnChangeAvatar">
+                      <property name="text">
+                       <string>Cambiar avatar</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item row="2" column="0">
+                     <widget class="QPushButton" name="btnResetAvatar">
+                      <property name="text">
+                       <string>Usar avatar por defecto</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item row="3" column="0">
+                     <widget class="QPushButton" name="btnOpenSesion">
+                      <property name="mouseTracking">
+                       <bool>true</bool>
+                      </property>
+                      <property name="styleSheet">
+                       <string notr="true">QPushButton#btnOpenSesion {
+    background-color: qlineargradient(
+        x1:0, y1:0, x2:0, y2:1,
+        stop:0 #147AA6,
+        stop:1 #0E5A7A
+    );
+    color: #FFFFFF;
+    border: 1px solid rgba(255,255,255,0.22);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-weight: 600;
+}
+
+QPushButton#btnOpenSesion:hover {
+    background-color: qlineargradient(
+        x1:0, y1:0, x2:0, y2:1,
+        stop:0 #1A8CC0,
+        stop:1 #11709A
+    );
+}
+
+QPushButton#btnOpenSesion:pressed {
+    background-color: #0B4761;
+}
+
+QPushButton#btnOpenSesion:disabled {
+    background-color: #E8EEF3;
+    color: rgba(27,42,78,0.45);
+    border: 1px solid rgba(208,212,228,0.9);
+}
+</string>
+                      </property>
+                      <property name="text">
+                       <string>Iniciar Sesión</string>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
+                 </item>
+                </layout>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QFrame" name="frameFooter">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">QFrame#frameFooter {
+    background-color: #005B97;  /* Azul igual al header */
+    border: none;
+    padding: 8px;
+}
+
+QToolButton {
+    background: transparent;
+    border: none;
+    padding: 10px;
+    icon-size: 28px;
+}
+
+QToolButton:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+}
+</string>
+         </property>
+         <property name="frameShape">
+          <enum>QFrame::Shape::StyledPanel</enum>
+         </property>
+         <property name="frameShadow">
+          <enum>QFrame::Shadow::Raised</enum>
+         </property>
+         <layout class="QHBoxLayout" name="horizontalLayout">
+          <property name="topMargin">
+           <number>5</number>
+          </property>
+          <property name="bottomMargin">
+           <number>5</number>
+          </property>
+          <item>
+           <widget class="QToolButton" name="btnHome">
+            <property name="text">
+             <string>...</string>
+            </property>
+            <property name="icon">
+             <iconset resource="resources.qrc">
+              <normaloff>:/icons/images/home.png</normaloff>:/icons/images/home.png</iconset>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="btnMap">
+            <property name="text">
+             <string>...</string>
+            </property>
+            <property name="icon">
+             <iconset resource="resources.qrc">
+              <normaloff>:/icons/images/location.png</normaloff>:/icons/images/location.png</iconset>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="btnDocs">
+            <property name="text">
+             <string>...</string>
+            </property>
+            <property name="icon">
+             <iconset resource="resources.qrc">
+              <normaloff>:/icons/images/description.png</normaloff>:/icons/images/description.png</iconset>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="btnProfile">
+            <property name="text">
+             <string>...</string>
+            </property>
+            <property name="icon">
+             <iconset resource="resources.qrc">
+              <normaloff>:/icons/images/account_circle.png</normaloff>:/icons/images/account_circle.png</iconset>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>1207</width>
+     <height>21</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+ </widget>
+ <resources>
+  <include location="resources.qrc"/>
+ </resources>
+ <connections/>
+</ui>

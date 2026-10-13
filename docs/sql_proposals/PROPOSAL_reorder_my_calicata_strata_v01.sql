@@ -1,0 +1,14 @@
+-- PROPUESTA (NO APLICADA). BLOCKED_BY_BACKEND_SCHEMA: InGePlus-Dev no expone
+-- un RPC para mover estratos (add_my_calicata_stratum_v03 solo agrega al final,
+-- update_my_calicata_stratum_v03 no cambia sequence_number). Android conserva el
+-- orden local por UUID y marca CONFLICT si difiere del remoto, sin tocar datos.
+--
+-- Contrato sugerido, mismo patrón CAS que el resto de Calicatas:
+--   reorder_my_calicata_strata_v01(
+--     p_project_id uuid, p_calicata_id uuid,
+--     p_expected_calicata_row_version bigint,
+--     p_stratum_ids uuid[]            -- orden completo deseado, sin omisiones
+--   ) returns table (calicata_row_version bigint)
+-- Reglas: mismo conjunto de UUID que calicata_strata de la calicata; reasigna
+-- sequence_number 1..n y recalcula from_depth_m/to_depth_m conservando los
+-- espesores; row_version + 1; 40001 si la versión esperada no coincide.

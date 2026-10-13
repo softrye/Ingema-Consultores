@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111F" stop-opacity="1"/>
+      <stop offset="1" stop-color="#0B1F35" stop-opacity="1"/>
+    </linearGradient>
+    <linearGradient id="bluegrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0087AE"/>
+      <stop offset="1" stop-color="#1B84FF"/>
+    </linearGradient>
+  </defs>
+  <rect x="44" y="44" width="424" height="424" rx="92" fill="url(#tile)" stroke="#203A56" stroke-width="4" filter="url(#shadow)"/>
+  <rect x="160" y="170" width="192" height="168" rx="18" fill="none" stroke="#7AB7FF" stroke-width="14"/><line x1="160" y1="220" x2="352" y2="220" stroke="#7AB7FF" stroke-width="12" stroke-linecap="round"/><circle cx="210" cy="260" r="8" fill="#1B84FF"/><circle cx="256" cy="260" r="8" fill="#6CCB5A"/><circle cx="302" cy="260" r="8" fill="#1B84FF"/>
+</svg>
