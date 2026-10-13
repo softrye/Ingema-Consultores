@@ -11,6 +11,7 @@
 #include <QLocationPermission>
 #include <QPermission>
 #include <QQuickWindow>
+#include <QQuickImageProvider>
 #include <QQuickStyle>
 #include <QTimer>
 #include <QtQuick/QSGRendererInterface>
