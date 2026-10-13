@@ -3,7 +3,7 @@
 #include <QQuickRhiItem>
 #include <QPointer>
 #include <QtQml/qqmlregistration.h>
-class RetroplasmaItem final : public QQuickRhiItem {
+class RetroplasmaItem : public QQuickRhiItem {
     Q_OBJECT
     QML_NAMED_ELEMENT(RetroplasmaView)
     Q_PROPERTY(RetroplasmaController* controller READ controller WRITE setController NOTIFY controllerChanged)
@@ -19,4 +19,6 @@ protected:
 private:
     QPointer<RetroplasmaController> m_controller;
     QMetaObject::Connection m_updateConnection;
+    QMetaObject::Connection m_presentConnection;
+    void connectPresentation();
 };

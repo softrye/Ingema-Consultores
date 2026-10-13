@@ -8,10 +8,11 @@
 #include <QTimer>
 #include <QHash>
 #include <QSet>
+#include <optional>
 #include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
-class RetroplasmaController final : public QObject {
+class RetroplasmaController : public QObject {
     Q_OBJECT
     QML_ANONYMOUS
     Q_PROPERTY(bool active READ active NOTIFY changed)
@@ -26,6 +27,8 @@ public:
     explicit RetroplasmaController(QObject *parent=nullptr);
     ~RetroplasmaController() override;
     bool active()const{return m_active;}
+    bool renderActive()const{return m_active&&m_appVisible;}
+    quint64 sceneRevision()const{return m_generation;}
     bool busy()const{return m_manifestBusy||!m_jobs.empty();}
     bool ready()const{return bool(m_scene);}
     bool navigationMode()const{return m_navigationMode;}
@@ -36,12 +39,15 @@ public:
     Q_INVOKABLE void open();
     Q_INVOKABLE void close();
     Q_INVOKABLE void loadScene(const QUrl &url);
+    Q_INVOKABLE void loadLocalScene(const QString &path);
+    Q_INVOKABLE void retryScene();
     Q_INVOKABLE bool command(const QString &name);
     Q_INVOKABLE void orbit(double dx,double dy);
     Q_INVOKABLE void pan(double dx,double dy);
     Q_INVOKABLE void zoom(double scale);
     Q_INVOKABLE bool goTo(double latitude,double longitude,double altitude=0);
     void setViewport(double width,double height);
+    void framePresented();
     inge::rp::Mat4 viewProjection()const{return m_camera.viewProjection(m_width/m_height);}
     std::vector<inge::rp::RenderTile> renderTiles()const{return m_renderTiles;}
     std::shared_ptr<inge::rp::MetricsMailbox> mailbox()const{return m_mailbox;}
@@ -57,6 +63,7 @@ private:
     struct CacheEntry {std::shared_ptr<const inge::rp::LoadedTile> tile;quint64 used=0;};
     std::shared_ptr<const inge::rp::RetroplasmaDataProvider> m_provider;
     std::shared_ptr<const inge::rp::Scene> m_scene;
+    QUrl m_sceneUrl;
     std::shared_ptr<inge::rp::MetricsMailbox> m_mailbox;
     std::shared_ptr<std::atomic_bool> m_manifestCancel;
     QThreadPool m_pool;
@@ -65,9 +72,10 @@ private:
     QHash<QString,QString> m_failed;
     std::vector<inge::rp::RenderTile> m_renderTiles;
     inge::rp::Camera m_camera;
+    std::optional<inge::rp::GeoPoint> m_pendingTarget;
     QTimer m_tick;
     QElapsedTimer m_clock,m_telemetryClock;
-    quint64 m_generation=0,m_usage=0,m_lastFrameCount=0;
+    quint64 m_generation=0,m_usage=0,m_presentedFrames=0,m_lastFrameCount=0;
     int m_ticks=0;
     double m_width=1,m_height=1,m_fps=0,m_frameMs=0;
     bool m_active=false,m_manifestBusy=false,m_navigationMode=false,m_appVisible=true;

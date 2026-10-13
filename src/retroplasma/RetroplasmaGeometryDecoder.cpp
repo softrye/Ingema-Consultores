@@ -44,7 +44,8 @@ bool decodeObj(const std::string &text,Geometry &out,std::string &error,const st
                         v.uv[0]=float(uvs[ti][0]);v.uv[1]=float(uvs[ti][1]);
                         std::uint32_t number=std::uint32_t(out.vertices.size());unique.emplace(key,number);out.vertices.push_back(v);needsNormal.push_back(ni<0);polygon.push_back(number);
                     }else polygon.push_back(found->second);
-                    if(polygon.size()>128||out.vertices.size()>200000)return fail("OBJ_FACE_OR_VERTEX_LIMIT");
+                    // Every supported backend accepts UInt16 indices; split larger assets into nodes.
+                    if(polygon.size()>128||out.vertices.size()>65535)return fail("OBJ_FACE_OR_VERTEX_LIMIT");
                 }
                 if(polygon.size()<3)return fail("OBJ_SHORT_FACE");
                 for(std::size_t i=1;i+1<polygon.size();++i){out.indices.insert(out.indices.end(),{polygon[0],polygon[i],polygon[i+1]});if(out.indices.size()>600000)return fail("OBJ_INDEX_LIMIT");}

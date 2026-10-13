@@ -10,6 +10,7 @@
 #include <QHash>
 #include <functional>
 #include <limits>
+#include <algorithm>
 
 namespace inge::rp {
 namespace {
@@ -23,6 +24,25 @@ QByteArray readBounded(const QString &path,qint64 limit,QString &error){QFile fi
 bool number(const QJsonValue &v,double &out){if(!v.isDouble())return false;out=v.toDouble();return std::isfinite(out);}
 bool bounds(const QJsonValue &value,Bounds &out){auto array=value.toArray();if(array.size()!=6)return false;double a[6];for(int i=0;i<6;++i)if(!number(array[i],a[i])||std::abs(a[i])>100000)return false;if(a[0]>a[3]||a[1]>a[4]||a[2]>a[5])return false;out={{a[0],a[2],-a[4]},{a[3],a[5],-a[1]}};return true;}
 bool contains(Bounds outer,Bounds inner){constexpr double tolerance=0.02;return inner.minimum.x>=outer.minimum.x-tolerance&&inner.minimum.y>=outer.minimum.y-tolerance&&inner.minimum.z>=outer.minimum.z-tolerance&&inner.maximum.x<=outer.maximum.x+tolerance&&inner.maximum.y<=outer.maximum.y+tolerance&&inner.maximum.z<=outer.maximum.z+tolerance;}
+// Children replace the entire parent. Verify their AABB union, including flat scenes.
+bool childrenCover(const Scene &scene,const Node &node){
+    const double lo[3]={node.bounds.minimum.x,node.bounds.minimum.y,node.bounds.minimum.z};
+    const double hi[3]={node.bounds.maximum.x,node.bounds.maximum.y,node.bounds.maximum.z};
+    std::vector<double> samples[3];
+    for(int axis=0;axis<3;++axis){
+        std::vector<double> edges{lo[axis],hi[axis]};
+        for(int child:node.children){const auto &b=scene.nodes[child].bounds;const double a[3]={b.minimum.x,b.minimum.y,b.minimum.z},z[3]={b.maximum.x,b.maximum.y,b.maximum.z};edges.push_back(std::clamp(a[axis],lo[axis],hi[axis]));edges.push_back(std::clamp(z[axis],lo[axis],hi[axis]));}
+        std::sort(edges.begin(),edges.end());edges.erase(std::unique(edges.begin(),edges.end()),edges.end());
+        for(std::size_t i=1;i<edges.size();++i)samples[axis].push_back((edges[i-1]+edges[i])*0.5);
+        if(samples[axis].empty())samples[axis].push_back(lo[axis]);
+    }
+    for(double x:samples[0])for(double y:samples[1])for(double z:samples[2]){
+        const Bounds point{{x,y,z},{x,y,z}};bool covered=false;
+        for(int child:node.children)if(contains(scene.nodes[child].bounds,point)){covered=true;break;}
+        if(!covered)return false;
+    }
+    return true;
+}
 }
 std::shared_ptr<const Scene> LocalSceneProvider::readScene(const QUrl &url,QString &error,const std::atomic_bool &cancel)const{
     error.clear();auto fail=[&](const char *code)->std::shared_ptr<const Scene>{error=QLatin1String(code);return {};};
@@ -54,8 +74,10 @@ std::shared_ptr<const Scene> LocalSceneProvider::readScene(const QUrl &url,QStri
         if(parents[i].isEmpty())scene->roots.push_back(int(i));
         else {if(!ids.contains(parents[i]))return fail("RP_PARENT_NOT_FOUND");int parent=ids.value(parents[i]);if(parent==int(i)||!contains(scene->nodes[parent].bounds,scene->nodes[i].bounds))return fail("RP_PARENT_BOUNDS_INVALID");scene->nodes[i].parent=parent;scene->nodes[parent].children.push_back(int(i));}
     }
+    for(const auto &node:scene->nodes)if(node.children.size()>8)return fail("RP_OCTREE_CHILD_LIMIT");
     std::vector<int> state(scene->nodes.size(),0);std::function<bool(int)> visit=[&](int index){if(state[index]==1)return false;if(state[index]==2)return true;state[index]=1;for(int child:scene->nodes[index].children)if(!visit(child))return false;state[index]=2;return true;};
     for(int i=0;i<int(scene->nodes.size());++i)if(!visit(i))return fail("RP_SPATIAL_CYCLE");
+    for(const auto &node:scene->nodes)if(!node.children.empty()&&!childrenCover(*scene,node))return fail("RP_CHILD_COVERAGE_INCOMPLETE");
     if(scene->roots.empty())return fail("RP_NO_ROOT_NODES");
     scene->bounds=scene->nodes[scene->roots[0]].bounds;
     for(int root:scene->roots){auto b=scene->nodes[root].bounds;scene->bounds.minimum={std::min(scene->bounds.minimum.x,b.minimum.x),std::min(scene->bounds.minimum.y,b.minimum.y),std::min(scene->bounds.minimum.z,b.minimum.z)};scene->bounds.maximum={std::max(scene->bounds.maximum.x,b.maximum.x),std::max(scene->bounds.maximum.y,b.maximum.y),std::max(scene->bounds.maximum.z,b.maximum.z)};}
