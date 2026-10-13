@@ -2,16 +2,21 @@
 
 **Objetivo:** motor GPU y carga de escena 3D texturizada georreferenciada en InGe+.
 **Spec:** ../../RETROPLASMA_AUDIT_20261013.md y solicitud P0 del usuario.
-**Ejecución:** directa, secuencial, sin APK/ADB/emulador; pruebas host permitidas.
+**Ejecución:** directa, secuencial, sin APK/ADB/emulador. El usuario revocó
+también la compilación host: la entrega final usa solo inspección estática.
 
 - [x] Fase1: audit ZIP, dependencias/licencias, backend real en fuentes y respaldo.
-- [ ] Fase2: módulo QQuickRhiItem, shaders propios, recursos GPU y sincronización.
-- [ ] Fase3: math/camera double, mallas OBJ, normales/UV, BC1 seguro y tests host.
-- [ ] Fase4: manifest/proveedor local asíncrono y escena autorizada texturizada.
-- [ ] Fase5: cámara única, gestos, navegación geográfica y límites near/far.
-- [ ] Fase6: conectar preset al Dock existente y retirar captura del flujo principal.
-- [ ] Fase7: árbol espacial/LOD, prioridad/cancelación, cache/telemetría/lifecycle.
-- [ ] Fase8: revisión secuencial, verificaciones, commits y guía Qt Creator.
+- [x] Fase2: fuentes QQuickRhiItem, shaders propios, recursos GPU y sincronización.
+- [x] Fase3: math/camera double, OBJ, normales/UV y BC1; tests fuente conservados.
+- [x] Fase4: manifest/proveedor local asíncrono y escena autorizada texturizada.
+- [x] Fase5: cámara única, gestos, navegación geográfica y límites near/far.
+- [x] Fase6: preset del Dock existente y captura movida a respaldo histórico.
+- [x] Fase7: árbol espacial/LOD, prioridad/cancelación, cache/telemetría/lifecycle.
+- [x] Fase8: revisión secuencial, verificación estática y guía Qt Creator.
+
+Estos checks acreditan implementación en fuentes. La ejecución Android está
+pendiente de la compilación/pruebas del usuario; no son PASS_ANDROID.
+NOT_IMPLEMENTED: semántica Protobuf RockTree, CRN, fuente remota y selector SAF.
 
 Archivos previstos: `src/retroplasma/{RetroplasmaMath,RetroplasmaCamera,
 RetroplasmaGeometryDecoder,RetroplasmaTextureDecoder,RetroplasmaScene,
