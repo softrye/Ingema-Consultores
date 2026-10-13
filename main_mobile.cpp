@@ -20,6 +20,7 @@
 #include "authsession.h"
 #include "betadiagnostics.h"
 #include "permissionhelper.h"
+#include "src/fusionbridge/FusionBridgeController.h"
 #include "docscontroller.h"
 #include "calicatadocument.h"
 #include "calicatacloudservice.h"
@@ -193,6 +194,7 @@ int main(int argc, char *argv[])
     // anteriores distingue una instalación nueva por los datos que estos crean.
     OnboardingState onboarding;
     PermissionHelper perms;
+    FusionBridgeController fusionBridge;
     FsUtil fs;
     // Auth subsystem initialization -> first completed authentication decision.
     startup.mark(StartupEvent::AUTH_START);
@@ -267,6 +269,7 @@ int main(int argc, char *argv[])
 
     qInfo() << "INGE_STARTUP_STAGE SERVICES_READY";
     QQmlApplicationEngine engine;
+    engine.addImageProvider(QStringLiteral("fusionbridge"), fusionBridge.createImageProvider());
     {
         class IdentifiedNetworkAccessManager final : public QNetworkAccessManager
         {
@@ -336,6 +339,7 @@ int main(int argc, char *argv[])
     renditionFlutterBridge->setCoreRemote(&coreRemote);
     engine.rootContext()->setContextProperty("FS", &fs);
     engine.rootContext()->setContextProperty("Perms", &perms);
+    engine.rootContext()->setContextProperty("FusionBridge", &fusionBridge);
     engine.rootContext()->setContextProperty("appCtx", ctx);
     engine.rootContext()->setContextProperty("auth", static_cast<QObject*>(ctx->auth()));
     engine.rootContext()->setContextProperty("onboarding", &onboarding);

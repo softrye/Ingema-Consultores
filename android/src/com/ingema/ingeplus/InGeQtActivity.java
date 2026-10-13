@@ -36,6 +36,7 @@ import androidx.biometric.BiometricManager;
 import androidx.webkit.WebViewAssetLoader;
 
 import org.qtproject.qt.android.bindings.QtActivity;
+import com.ingema.ingeplus.fusionbridge.FusionBridgeNative;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -454,6 +455,7 @@ public final class InGeQtActivity extends QtActivity {
         android.util.Log.i("InGeLifecycle",
                 "INGE_ACTIVITY_ON_RESUME instance=" + System.identityHashCode(this));
         activityResumed = true;
+        FusionBridgeNative.onHostResume();
         if (performanceRuntime != null)
             performanceRuntime.onTrimMemory(0);
         emitBetaDiagnostic("LIFECYCLE", "INFO", "ON_RESUME", null, null, null);
@@ -470,6 +472,7 @@ public final class InGeQtActivity extends QtActivity {
         android.util.Log.i("InGeLifecycle",
                 "INGE_ACTIVITY_ON_PAUSE instance=" + System.identityHashCode(this));
         activityResumed = false;
+        FusionBridgeNative.onHostPause();
         emitBetaPerformanceSample();
         performanceHandler.removeCallbacks(betaPerformanceSample);
         emitBetaDiagnostic("LIFECYCLE", "INFO", "ON_PAUSE", null, null, null);
@@ -1429,6 +1432,7 @@ public final class InGeQtActivity extends QtActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (FusionBridgeNative.onActivityResult(this, requestCode, resultCode, data)) return;
         if (GoogleDriveAuthorization.onActivityResult(this, requestCode, resultCode, data)) return;
         if (requestCode == BIOMETRIC_AUTH_REQUEST && pendingBiometricResult != null) {
             final java.util.function.Consumer<Boolean> result = pendingBiometricResult;
@@ -1526,6 +1530,7 @@ public final class InGeQtActivity extends QtActivity {
 
     @Override
     public void onDestroy() {
+        FusionBridgeNative.onHostDestroyed();
         emitBetaDiagnostic("LIFECYCLE", "INFO", "ON_DESTROY", null, null, null);
         performanceHandler.removeCallbacks(betaPerformanceSample);
         if (performanceRuntime != null)
