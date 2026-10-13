@@ -48,12 +48,6 @@ public:
     // Recordatorios diarios (InGeReminderScheduler): solo con una acción
     // pendiente verificable; enabled=false o pendingCount=0 los cancela.
     Q_INVOKABLE void updateReminders(bool enabled, int pendingCount);
-    // Visor InGe Earth (Cesium, WebView nativo existente).
-    // InGe Earth 4.0: márgenes en dp (franja del Dock global y barra de estado).
-    Q_INVOKABLE bool openEarthViewer(int bottomInsetDp = 0, int topInsetDp = 0);
-    // Acción del Dock hacia el mapa (window.InGeEarth.command).
-    Q_INVOKABLE void earthCommand(const QString &command, const QString &argsJson = QString());
-    Q_INVOKABLE void closeEarthViewer();
     // Háptica de pulsación prolongada (personalización del Home).
     Q_INVOKABLE void hapticLongPress();
 

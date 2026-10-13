@@ -556,7 +556,7 @@ Item {
         else if (k === "settings") navigate("settings")
         else if (k === "profile") navigate("profile")
     }
-    // Próximamente: InGe Earth y Rendiciones siguen en el código (Cesium,
+    // Rendiciones conserva sus servicios; Earth tiene una ruta propia (FusionBridge,
     // servicios, datos y puentes intactos); solo se suspende su entrada.
     function isComingSoon(kind) { return kind === "rendiciones_app" }
     function isComingSoonPage(target) { return target === "rendiciones" }
@@ -934,16 +934,9 @@ Item {
             title: "InGe Earth"
             Text {
                 width: parent.width
-                text: "Globo MapLibre GL JS con cartografía OpenFreeMap. Si el visor no aparece, ábrelo de nuevo. Usa Atrás para volver."
+                text: "FusionBridge Native: integración de Google Earth pendiente de un mecanismo compatible."
                 color: Qt.rgba(1, 1, 1, 0.8); font.family: home.fontFamily; font.pixelSize: 16 * home.u
                 wrapMode: Text.WordWrap
-            }
-            Item { width: 1; height: 8 * home.u }
-            Chip {
-                ui: home
-                label: "Abrir visor InGe Earth"
-                selected: true
-                onPicked: home.openEarthViewer()
             }
         }
         PageFrame {
@@ -1146,98 +1139,19 @@ Item {
         }
     }
 
-    // ================================ InGe Earth 4.0 (MapLibre GL JS)
-    // El visor es el WebView de InGeQtActivity (android/assets/ingeearth). Deja
-    // libre la franja inferior para el Dock global y el botón InGe IA de Qt.
-    // Sus herramientas son un preset del Dock (owner "earth", canal "qml"):
-    // DockCommandRouter -> PermissionHelper.earthCommand -> window.InGeEarth.command.
+    // InGe Earth: se conserva la navegación desde Home y Calicatas.
     property string earthReturnPage: "home"
-    property bool earthViewerActive: false
-    readonly property var earthDockPreset: [
-        {id: "earth.zoomIn", label: "Acercar", icon: "earth.zoomIn", command: "earth.zoomIn", priority: 1},
-        {id: "earth.zoomOut", label: "Alejar", icon: "earth.zoomOut", command: "earth.zoomOut", priority: 2},
-        {id: "earth.gps", label: "Mi ubicación (GPS)", icon: "earth.gps", command: "earth.gps", priority: 3},
-        {id: "earth.search", label: "Buscar coordenadas", icon: "earth.search", command: "earth.search", priority: 4},
-        {id: "earth.layers", label: "Capas", icon: "earth.layers", command: "earth.layers", priority: 5},
-        {id: "earth.globalView", label: "Vista global", icon: "earth.globe", command: "earth.globalView", priority: 6},
-        {id: "earth.rotate", label: "Rotar e inclinar", icon: "earth.rotate", command: "", priority: 7, children: [
-            {id: "earth.rotateLeft", label: "Girar 45° a la izquierda", icon: "earth.rotateLeft", command: "earth.rotateLeft"},
-            {id: "earth.rotateRight", label: "Girar 45° a la derecha", icon: "earth.rotate", command: "earth.rotateRight"},
-            {id: "earth.north", label: "Norte arriba", icon: "earth.north", command: "earth.north"},
-            {id: "earth.tilt3d", label: "Inclinar (vista 3D)", icon: "earth.tilt", command: "earth.tilt3d"},
-            {id: "earth.topView", label: "Vista cenital", icon: "earth.top", command: "earth.topView"}
-        ]},
-        {id: "earth.streetviewTool", label: "Street View", icon: "earth.streetview", command: "", priority: 8, children: [
-            {id: "earth.streetview", label: "Abrir Street View aquí", icon: "earth.streetview", command: "earth.streetview"},
-            {id: "earth.streetviewSettings", label: "Configurar proveedores", icon: "earth.settings", command: "earth.streetviewSettings"}
-        ]}
-    ]
+    property var earthRequestedTarget: ({})
     function openEarth(returnPage) {
         earthReturnPage = returnPage || "home"
+        earthRequestedTarget = ({})
         navigate("earth")
     }
     function openEarthAt(latitude, longitude, label, returnPage) {
         openEarth(returnPage)
-        if (isFinite(latitude) && isFinite(longitude) && typeof Perms !== "undefined" && Perms)
-            Perms.earthCommand("flyTo", JSON.stringify({ lat: Number(latitude), lon: Number(longitude),
-                                                         zoom: 17, label: String(label || "Calicata") }))
-    }
-    function openEarthViewer() {
-        if (typeof Perms === "undefined" || !Perms
-                || !Perms.openEarthViewer(Math.round(dockArea), Math.round(topInset))) {
-            notify("InGe Earth necesita el visor de Android (WebView).")
-            return false
-        }
-        earthViewerActive = true
-        if (dockCtx)
-            dockCtx.publishContext("earth", "earth/globe", earthDockPreset, "qml")
-        console.info("INGE_EARTH4_OPEN")
-        return true
-    }
-    function closeEarthViewer() {
-        if (!earthViewerActive)
-            return
-        earthViewerActive = false
-        if (typeof Perms !== "undefined" && Perms)
-            Perms.closeEarthViewer()
-        if (dockCtx)
-            dockCtx.clearContext("earth")
-        console.info("INGE_EARTH4_CLOSE")
-    }
-    Connections {
-        target: home
-        function onPageChanged() {
-            if (home.page === "earth") {
-                if (!home.earthViewerActive && home.visible)
-                    home.openEarthViewer()
-            } else if (home.earthViewerActive) {
-                home.closeEarthViewer()
-            }
-        }
-        // Sesión bloqueada o cerrada: el WebView nativo no puede quedar encima del acceso.
-        function onVisibleChanged() {
-            if (!home.visible)
-                home.closeEarthViewer()
-            else if (home.page === "earth" && !home.earthViewerActive)
-                home.openEarthViewer()
-        }
-    }
-    Connections {
-        target: home.dockRouter
-        ignoreUnknownSignals: true
-        function onQmlCommand(ownerId, contextId, commandId, dispatchId) {
-            if (ownerId !== "earth")
-                return
-            try {
-                var name = String(commandId)
-                if (name.indexOf("earth.") === 0)
-                    name = name.substring(6)
-                if (typeof Perms !== "undefined" && Perms)
-                    Perms.earthCommand(name, "")
-            } finally {
-                home.dockRouter.complete(dispatchId)
-            }
-        }
+        if (isFinite(latitude) && isFinite(longitude))
+            earthRequestedTarget = ({ latitude: Number(latitude), longitude: Number(longitude),
+                                      label: String(label || "Calicata") })
     }
 
     // ================================ Dock contextual global
@@ -1405,9 +1319,9 @@ Item {
     }
     readonly property var dockIconGlyphs: ({
         "earth.zoomIn": 0xE1B6, "earth.zoomOut": 0xE1B7, "earth.gps": 0xE1DB, "earth.search": 0xE151,
-        "earth.layers": 0xE529, "earth.globe": 0xE0E8, "earth.rotate": 0xE149, "earth.rotateLeft": 0xE148,
-        "earth.north": 0xE09B, "earth.tilt": 0xE2EA, "earth.top": 0xE536, "earth.streetview": 0xE21E,
-        "earth.settings": 0xE154,
+        "earth.pan": 0xE111, "earth.globe": 0xE0E8, "earth.rotate": 0xE149, "earth.rotateLeft": 0xE148,
+        "earth.north": 0xE09B, "earth.tilt": 0xE2EA, "earth.top": 0xE536,
+
         "documents.file": 0xE0CC, "documents.folder": 0xE0D7, "documents.open": 0xE247,
         "documents.template": 0xE207, "profile.user": 0xE617, "map.location": 0xE1DB,
         "nav.map": 0xE111, "nav.earth": 0xE1F3, "action.addStratum": 0xE529,

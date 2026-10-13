@@ -1386,46 +1386,6 @@ void PermissionHelper::setNativeStatus(const QString &status, const QString &err
     emit nativeLocationStatusChanged();
 }
 
-bool PermissionHelper::openEarthViewer(int bottomInsetDp, int topInsetDp)
-{
-#ifdef Q_OS_ANDROID
-    const jboolean shown = QJniObject::callStaticMethod<jboolean>(
-                "com/ingema/ingeplus/InGeQtActivity", "showEarthViewer", "(II)Z",
-                static_cast<jint>(qMax(0, bottomInsetDp)), static_cast<jint>(qMax(0, topInsetDp)));
-    clearJniException("InGeQtActivity.showEarthViewer");
-    return shown;
-#else
-    Q_UNUSED(bottomInsetDp)
-    Q_UNUSED(topInsetDp)
-    return false;
-#endif
-}
-
-void PermissionHelper::earthCommand(const QString &command, const QString &argsJson)
-{
-#ifdef Q_OS_ANDROID
-    const QJniObject javaCommand = QJniObject::fromString(command);
-    const QJniObject javaArgs = QJniObject::fromString(argsJson);
-    QJniObject::callStaticMethod<void>(
-                "com/ingema/ingeplus/InGeQtActivity", "earthCommand",
-                "(Ljava/lang/String;Ljava/lang/String;)V",
-                javaCommand.object<jstring>(), javaArgs.object<jstring>());
-    clearJniException("InGeQtActivity.earthCommand");
-#else
-    Q_UNUSED(command)
-    Q_UNUSED(argsJson)
-#endif
-}
-
-void PermissionHelper::closeEarthViewer()
-{
-#ifdef Q_OS_ANDROID
-    QJniObject::callStaticMethod<void>(
-                "com/ingema/ingeplus/InGeQtActivity", "hideEarthViewer", "()V");
-    clearJniException("InGeQtActivity.hideEarthViewer");
-#endif
-}
-
 void PermissionHelper::hapticLongPress()
 {
 #ifdef Q_OS_ANDROID

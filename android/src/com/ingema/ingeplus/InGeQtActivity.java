@@ -59,15 +59,10 @@ import org.json.JSONObject;
  * on demand and its document/location/export services stay in this class.
  */
 public final class InGeQtActivity extends QtActivity {
-    // InGe Earth 4.0: MapLibre GL JS + OpenFreeMap (android/assets/ingeearth).
-    // false = visor Cesium anterior (android/assets/cesium), conservado para reversión.
-    private static final boolean EARTH_ENGINE_MAPLIBRE = true;
-    private static final String MAPLIBRE_EARTH_ASSET_URL =
-            "https://appassets.androidplatform.net/assets/ingeearth/index.html";
-    private static final String CESIUM_EARTH_ASSET_URL =
-            "https://appassets.androidplatform.net/assets/cesium/index.html";
+    // Respaldo técnico Cesium. Home no invoca este visor; no es un fallback
+    // automático para FusionBridge Native.
     private static final String EARTH_ASSET_URL =
-            EARTH_ENGINE_MAPLIBRE ? MAPLIBRE_EARTH_ASSET_URL : CESIUM_EARTH_ASSET_URL;
+            "https://appassets.androidplatform.net/assets/cesium/index.html";
     private static final int LOCATION_PERMISSION_REQUEST = 8104;
     private static final int EARTH_IMPORT_REQUEST = 8105;
     private static final int EARTH_EXPORT_REQUEST = 8106;
@@ -146,69 +141,6 @@ public final class InGeQtActivity extends QtActivity {
         return true;
     }
 
-    // InGe Earth 4.0: el WebView deja libre la franja inferior del Dock global
-    // de Qt (los controles QML no pueden dibujarse sobre una vista nativa).
-    // Márgenes en dp (= px lógicos de Qt en Android).
-    private int earthBottomInsetDp = 0;
-    private int earthTopInsetDp = 0;
-    private final java.util.ArrayList<String> pendingEarthCommands = new java.util.ArrayList<>();
-
-    public static boolean showEarthViewer(int bottomInsetDp, int topInsetDp) {
-        final InGeQtActivity activity = current.get();
-        if (activity == null)
-            return false;
-        activity.runOnUiThread(() -> {
-            activity.earthBottomInsetDp = Math.max(0, bottomInsetDp);
-            activity.earthTopInsetDp = Math.max(0, topInsetDp);
-            activity.showEarthViewerOnUi();
-        });
-        return true;
-    }
-
-    // Acciones del Dock global hacia el mapa (window.InGeEarth.command). Si la
-    // página aún no cargó, se encolan y se ejecutan en onPageFinished.
-    public static void earthCommand(String command, String argsJson) {
-        final InGeQtActivity activity = current.get();
-        if (activity == null || command == null || command.isEmpty())
-            return;
-        activity.runOnUiThread(() -> activity.runEarthCommandOnUi(command, argsJson));
-    }
-
-    private void runEarthCommandOnUi(String command, String argsJson) {
-        final String script = "window.InGeEarth && window.InGeEarth.command("
-                + JSONObject.quote(command) + "," + JSONObject.quote(argsJson == null ? "" : argsJson) + ")";
-        final WebView webView = earthWebView;
-        if (webView == null || !earthWebViewLoaded) {
-            if (pendingEarthCommands.size() < 16)
-                pendingEarthCommands.add(script);
-            return;
-        }
-        webView.evaluateJavascript(script, null);
-    }
-
-    private void flushEarthCommands(WebView webView) {
-        for (String script : pendingEarthCommands)
-            webView.evaluateJavascript(script, null);
-        pendingEarthCommands.clear();
-    }
-
-    private void applyEarthInsets(WebView webView) {
-        final ViewGroup.LayoutParams params = webView.getLayoutParams();
-        if (!(params instanceof FrameLayout.LayoutParams))
-            return;
-        final FrameLayout.LayoutParams frame = (FrameLayout.LayoutParams) params;
-        final int bottom = Math.round(earthBottomInsetDp * getResources().getDisplayMetrics().density);
-        if (frame.bottomMargin != bottom) {
-            frame.bottomMargin = bottom;
-            webView.setLayoutParams(frame);
-        }
-    }
-
-    private void pushEarthInsets(WebView webView) {
-        webView.evaluateJavascript("window.InGeEarth && window.InGeEarth.setInsets({top:"
-                + earthTopInsetDp + ",bottom:0})", null);
-    }
-
     public static void hideEarthViewer() {
         final InGeQtActivity activity = current.get();
         if (activity != null)
@@ -247,13 +179,6 @@ public final class InGeQtActivity extends QtActivity {
 
     private void dispatchInGeBack() {
         if (isEarthViewerVisible()) {
-            final WebView webView = earthWebView;
-            if (EARTH_ENGINE_MAPLIBRE && earthWebViewLoaded && webView != null) {
-                webView.evaluateJavascript(
-                        "(window.InGeEarth && window.InGeEarth.handleBack()) === true",
-                        value -> { if (!"true".equals(value)) dispatchQtBack(); });
-                return;
-            }
             hideEarthViewerOnUi();
             return;
         }
@@ -304,17 +229,15 @@ public final class InGeQtActivity extends QtActivity {
         final WebView webView = earthWebView;
         if (webView == null)
             return;
-        applyEarthInsets(webView);
         webView.setVisibility(View.VISIBLE);
         webView.bringToFront();
         webView.requestFocus();
         if (earthWebViewLoaded) {
             webView.evaluateJavascript(
                     "window.InGeEarthEngineSetVisible && window.InGeEarthEngineSetVisible(true)", null);
-            pushEarthInsets(webView);
         }
         android.util.Log.i("InGeEarthDirect", "INGE_EARTH_VIEWER_SHOWN loaded=" + earthWebViewLoaded
-                + " engine=" + (EARTH_ENGINE_MAPLIBRE ? "maplibre" : "cesium"));
+                + " engine=cesium_technical_backup");
     }
 
     private void hideEarthViewerOnUi() {
@@ -765,8 +688,6 @@ public final class InGeQtActivity extends QtActivity {
                 if (view.getVisibility() == View.VISIBLE)
                     view.evaluateJavascript(
                             "window.InGeEarthEngineSetVisible && window.InGeEarthEngineSetVisible(true)", null);
-                pushEarthInsets(view);
-                flushEarthCommands(view);
                 android.util.Log.i("InGeEarthDirect",
                         "INGE_EARTH_DIRECT_PAGE_LOADED url=" + url);
             }
