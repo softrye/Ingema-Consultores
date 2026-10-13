@@ -11,7 +11,6 @@
 #include <QLocationPermission>
 #include <QPermission>
 #include <QQuickWindow>
-#include <QQuickImageProvider>
 #include <QQuickStyle>
 #include <QTimer>
 #include <QtQuick/QSGRendererInterface>
@@ -21,7 +20,7 @@
 #include "authsession.h"
 #include "betadiagnostics.h"
 #include "permissionhelper.h"
-#include "src/fusionbridge/FusionBridgeController.h"
+#include "src/retroplasma/RetroplasmaController.h"
 #include "docscontroller.h"
 #include "calicatadocument.h"
 #include "calicatacloudservice.h"
@@ -174,7 +173,7 @@ int main(int argc, char *argv[])
 #ifdef Q_OS_ANDROID
     // P0 background: en Android priorizamos OpenGL ES para el scene graph Qt.
     // Evita QueuePresentKHR sobre una ANativeWindow ya destruida y mantiene
-    // un backend estable para el host Qt mientras InGe Earth usa Cesium.
+    // el backend existente compartido por Qt Quick y el visor nativo Earth.
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
 #else
     // Let Qt select the supported native Desktop backend (D3D11 on Windows).
@@ -195,7 +194,7 @@ int main(int argc, char *argv[])
     // anteriores distingue una instalación nueva por los datos que estos crean.
     OnboardingState onboarding;
     PermissionHelper perms;
-    FusionBridgeController fusionBridge;
+    RetroplasmaController earthNative;
     FsUtil fs;
     // Auth subsystem initialization -> first completed authentication decision.
     startup.mark(StartupEvent::AUTH_START);
@@ -270,7 +269,6 @@ int main(int argc, char *argv[])
 
     qInfo() << "INGE_STARTUP_STAGE SERVICES_READY";
     QQmlApplicationEngine engine;
-    engine.addImageProvider(QStringLiteral("fusionbridge"), fusionBridge.createImageProvider());
     {
         class IdentifiedNetworkAccessManager final : public QNetworkAccessManager
         {
@@ -340,7 +338,7 @@ int main(int argc, char *argv[])
     renditionFlutterBridge->setCoreRemote(&coreRemote);
     engine.rootContext()->setContextProperty("FS", &fs);
     engine.rootContext()->setContextProperty("Perms", &perms);
-    engine.rootContext()->setContextProperty("FusionBridge", &fusionBridge);
+    engine.rootContext()->setContextProperty("EarthNative", &earthNative);
     engine.rootContext()->setContextProperty("appCtx", ctx);
     engine.rootContext()->setContextProperty("auth", static_cast<QObject*>(ctx->auth()));
     engine.rootContext()->setContextProperty("onboarding", &onboarding);

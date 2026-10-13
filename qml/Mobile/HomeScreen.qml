@@ -503,10 +503,12 @@ Item {
         ScriptAction { script: home.optionsCard = null }
     }
     onUserIdChanged: {
-        FusionBridge.close()
+        EarthNative.close()
         earthRequestedTarget = ({})
         earthReturnPage = "home"
         earthDiagnosticsShown = false
+        earthCoordinateEntryShown = false
+        earthSourceEntryShown = false
         if (page === "earth") page = "home"
         closeMenu(true); editMode = false; optionsCard = null; sheetGrow = 0; overlayLevel = 0
         loadItems(); refreshGreeting(); syncReminders()
@@ -561,7 +563,7 @@ Item {
         else if (k === "settings") navigate("settings")
         else if (k === "profile") navigate("profile")
     }
-    // Solo Rendiciones mantiene la entrada en pausa; Earth usa FusionBridge.
+    // Solo Rendiciones mantiene la entrada en pausa; Earth usa Retroplasma.
     function isComingSoon(kind) { return kind === "rendiciones_app" }
     function isComingSoonPage(target) { return target === "rendiciones" }
     function notify(message) {
@@ -936,60 +938,22 @@ Item {
             ui: home
             shown: home.page === "earth"
             title: "InGe Earth"
-            Text {
+            Loader {
                 width: parent.width
-                text: FusionBridge.earthInstalled
-                      ? "Google Earth detectado · " + FusionBridge.earthVersion
-                      : "Google Earth no detectado. Revisa la instalación oficial en este perfil Android."
-                color: Qt.rgba(1, 1, 1, 0.8); font.family: home.fontFamily; font.pixelSize: 16 * home.u
-                wrapMode: Text.WordWrap
-            }
-            EarthSurfaceHost {
-                width: parent.width
-                height: Math.min(260 * home.u, home.height * 0.34)
-                bridge: FusionBridge
-                fontFamily: home.fontFamily
-                u: home.u
-            }
-            Text {
-                width: parent.width
-                text: "Integración interactiva bloqueada: falta un contrato autorizado para alojar la superficie y controlar Earth."
-                color: "#FFCF87"; font.family: home.fontFamily; font.pixelSize: 14 * home.u
-                wrapMode: Text.WordWrap
-            }
-            Text {
-                width: parent.width
-                visible: home.earthRequestedTarget.latitude !== undefined
-                text: visible ? "Destino de Calicatas conservado: " + home.earthRequestedTarget.latitude.toFixed(6)
-                                + ", " + home.earthRequestedTarget.longitude.toFixed(6)
-                                + ". No se ha enviado ni movido la cámara de Earth." : ""
-                color: "#B4C2D3"; font.family: home.fontFamily; font.pixelSize: 13 * home.u
-                wrapMode: Text.WordWrap
-            }
-            Text {
-                width: parent.width
-                text: "Prueba visual opcional: Android pedirá consentimiento. Selecciona solo Google Earth. Comprueba si sigue actualizándose al volver aquí o en pantalla dividida. La captura termina a los 60 segundos; zoom y gestos del Dock requieren un canal interactivo adicional."
-                color: "#B4C2D3"; font.family: home.fontFamily; font.pixelSize: 13 * home.u
-                wrapMode: Text.WordWrap
-            }
-            Chip {
-                ui: home
-                label: "Probar captura con consentimiento"
-                visible: FusionBridge.probeSupported && FusionBridge.earthInstalled
-                onPicked: FusionBridge.requestCaptureProbe()
-            }
-            Text {
-                width: parent.width
-                text: "Estado: " + FusionBridge.state + " · " + FusionBridge.detail
-                color: "#B4C2D3"; font.family: home.fontFamily; font.pixelSize: 12 * home.u
-                wrapMode: Text.WrapAnywhere
-            }
-            Text {
-                width: parent.width
-                visible: home.earthDiagnosticsShown
-                text: FusionBridge.diagnostics
-                color: "#B4C2D3"; font.family: home.fontFamily; font.pixelSize: 12 * home.u
-                wrapMode: Text.WrapAnywhere
+                active: home.page === "earth" && home.visible
+                sourceComponent: Component {
+                    RetroplasmaEarthView {
+                        controller: EarthNative
+                        u: home.u
+                        fontFamily: home.fontFamily
+                        viewportHeight: Math.max(240 * home.u, home.height * 0.50)
+                        diagnosticsShown: home.earthDiagnosticsShown
+                        coordinatesShown: home.earthCoordinatesShown
+                        coordinateEntryShown: home.earthCoordinateEntryShown
+                        sourceEntryShown: home.earthSourceEntryShown
+                        onCoordinateEntryFinished: home.earthCoordinateEntryShown = false
+                    }
+                }
             }
         }
         PageFrame {
@@ -1131,7 +1095,7 @@ Item {
             calicatasEditor.item.gpsEnabled = on && Perms.hasLocationPermission()
         }
         function onRequestOpenEarth(latitude, longitude, altitude, label) {
-            home.openEarthAt(latitude, longitude, label, "calicatas")
+            home.openEarthAt(latitude, longitude, label, "calicatas", altitude)
         }
         function onRequestOpenMap() { home.openEarth("calicatas") }
     }
@@ -1196,49 +1160,74 @@ Item {
     property string earthReturnPage: "home"
     property var earthRequestedTarget: ({})
     property bool earthDiagnosticsShown: false
+    property bool earthCoordinatesShown: true
+    property bool earthCoordinateEntryShown: false
+    property bool earthSourceEntryShown: false
+    property bool earthDockReady: false
+    property bool earthDockNavigation: false
     readonly property var earthDockPreset: [
-        {id: "earth.zoomIn", label: "Acercar (sin canal interactivo)", icon: "earth.zoomIn",
-         command: "earth.zoomIn", enabled: FusionBridge.interactive, priority: 1},
-        {id: "earth.zoomOut", label: "Alejar (sin canal interactivo)", icon: "earth.zoomOut",
-         command: "earth.zoomOut", enabled: FusionBridge.interactive, priority: 2},
-        {id: "earth.pan", label: "Desplazar", icon: "earth.pan", command: "", priority: 3, children: [
-            {id: "earth.panLeft", label: "Izquierda", icon: "earth.pan", command: "earth.panLeft", enabled: FusionBridge.interactive},
-            {id: "earth.panRight", label: "Derecha", icon: "earth.pan", command: "earth.panRight", enabled: FusionBridge.interactive},
-            {id: "earth.panUp", label: "Arriba", icon: "earth.pan", command: "earth.panUp", enabled: FusionBridge.interactive},
-            {id: "earth.panDown", label: "Abajo", icon: "earth.pan", command: "earth.panDown", enabled: FusionBridge.interactive}
+        {id: "earth.zoomIn", label: "Acercar", icon: "earth.zoomIn", command: "earth.zoomIn", enabled: earthDockReady, priority: 1},
+        {id: "earth.zoomOut", label: "Alejar", icon: "earth.zoomOut", command: "earth.zoomOut", enabled: earthDockReady, priority: 2},
+        {id: "earth.rotate", label: "Rotar e inclinar", icon: "earth.rotate", command: "", priority: 3, children: [
+            {id: "earth.rotateLeft", label: "Girar a la izquierda", icon: "earth.rotateLeft", command: "earth.rotateLeft", enabled: earthDockReady},
+            {id: "earth.rotateRight", label: "Girar a la derecha", icon: "earth.rotate", command: "earth.rotateRight", enabled: earthDockReady},
+            {id: "earth.tiltUp", label: "Elevar vista", icon: "earth.rotate", command: "earth.tiltUp", enabled: earthDockReady},
+            {id: "earth.tiltDown", label: "Bajar vista", icon: "earth.rotate", command: "earth.tiltDown", enabled: earthDockReady},
+            {id: "earth.north", label: "Orientar al norte", icon: "earth.pan", command: "earth.north", enabled: earthDockReady}
         ]},
-        {id: "earth.rotate", label: "Rotación", icon: "earth.rotate", command: "", priority: 4, children: [
-            {id: "earth.rotateLeft", label: "Girar a la izquierda", icon: "earth.rotateLeft", command: "earth.rotateLeft", enabled: FusionBridge.interactive},
-            {id: "earth.rotateRight", label: "Girar a la derecha", icon: "earth.rotate", command: "earth.rotateRight", enabled: FusionBridge.interactive}
+        {id: "earth.pan", label: "Desplazar", icon: "earth.pan", command: "", priority: 4, children: [
+            {id: "earth.panLeft", label: "Izquierda", icon: "earth.pan", command: "earth.panLeft", enabled: earthDockReady},
+            {id: "earth.panRight", label: "Derecha", icon: "earth.pan", command: "earth.panRight", enabled: earthDockReady},
+            {id: "earth.panUp", label: "Adelante", icon: "earth.pan", command: "earth.forward", enabled: earthDockReady},
+            {id: "earth.panDown", label: "Atrás", icon: "earth.pan", command: "earth.backward", enabled: earthDockReady}
         ]},
-        {id: "earth.diagnostics", label: "Diagnósticos FusionBridge", icon: "earth.diagnostics",
-         command: "earth.diagnostics", priority: 5}
+        {id: "earth.reset", label: "Vista inicial", icon: "earth.rotateLeft", command: "earth.reset", enabled: earthDockReady, priority: 5},
+        {id: "earth.goTo", label: "Ir a coordenadas", icon: "earth.pan", command: "earth.goTo", priority: 6},
+        {id: "earth.navigation", label: "Modo navegación", icon: "earth.pan", command: "earth.navigation", selected: earthDockNavigation, priority: 7},
+        {id: "earth.coordinates", label: "Mostrar coordenadas", icon: "earth.pan", command: "earth.coordinates", priority: 8},
+        {id: "earth.diagnostics", label: "Métricas del visor", icon: "earth.diagnostics", command: "earth.diagnostics", priority: 9},
+        {id: "earth.source", label: "Escena local", icon: "earth.diagnostics", command: "earth.source", priority: 10}
     ]
     function openEarth(returnPage) {
         earthReturnPage = returnPage || "home"
         earthRequestedTarget = ({})
         navigate("earth")
     }
-    function openEarthAt(latitude, longitude, label, returnPage) {
+    function openEarthAt(latitude, longitude, label, returnPage, altitude) {
         openEarth(returnPage)
         if (isFinite(latitude) && isFinite(longitude) && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180) {
+            var height = isFinite(altitude) ? Number(altitude) : 0
             earthRequestedTarget = ({ latitude: Number(latitude), longitude: Number(longitude),
-                                      label: String(label || "Calicata") })
-            FusionBridge.setTarget(Number(latitude), Number(longitude), String(label || "Calicata"))
+                                      altitude: height, label: String(label || "Calicata") })
+            EarthNative.goTo(Number(latitude), Number(longitude), height)
         }
+    }
+    function publishEarthDock() {
+        if (dockCtx) dockCtx.publishContext("earth", "earth/retroplasma", earthDockPreset, "qml")
     }
     function syncEarthSession() {
         if (page === "earth" && visible) {
-            FusionBridge.open()
+            EarthNative.open()
             if (earthRequestedTarget.latitude !== undefined)
-                FusionBridge.setTarget(earthRequestedTarget.latitude, earthRequestedTarget.longitude,
-                                       earthRequestedTarget.label)
-            if (dockCtx)
-                dockCtx.publishContext("earth", "earth/fusionbridge", earthDockPreset, "qml")
+                EarthNative.goTo(earthRequestedTarget.latitude, earthRequestedTarget.longitude, earthRequestedTarget.altitude)
+            earthDockReady = EarthNative.ready
+            earthDockNavigation = EarthNative.navigationMode
+            publishEarthDock()
         } else {
-            FusionBridge.close()
-            if (dockCtx)
-                dockCtx.clearContext("earth")
+            EarthNative.close()
+            if (dockCtx) dockCtx.clearContext("earth")
+        }
+    }
+    Connections {
+        target: EarthNative
+        function onChanged() {
+            if (home.page !== "earth" || !home.visible) return
+            // Telemetry must not regenerate the Dock every 500 ms or close Quick Bubble.
+            if (home.earthDockReady !== EarthNative.ready || home.earthDockNavigation !== EarthNative.navigationMode) {
+                home.earthDockReady = EarthNative.ready
+                home.earthDockNavigation = EarthNative.navigationMode
+                home.publishEarthDock()
+            }
         }
     }
     Connections {
@@ -1246,7 +1235,7 @@ Item {
         function onPageChanged() { home.syncEarthSession() }
         function onVisibleChanged() { home.syncEarthSession() }
     }
-    Component.onDestruction: FusionBridge.close()
+    Component.onDestruction: EarthNative.close()
     Connections {
         target: home.dockRouter
         ignoreUnknownSignals: true
@@ -1255,10 +1244,12 @@ Item {
             try {
                 if (home.page !== "earth" || !home.visible) return
                 var name = String(commandId)
-                if (name === "earth.diagnostics")
-                    home.earthDiagnosticsShown = !home.earthDiagnosticsShown
-                else if (!FusionBridge.command(name.indexOf("earth.") === 0 ? name.substring(6) : name))
-                    home.notify("Google Earth no ofrece un canal interactivo verificado para este control.")
+                if (name === "earth.diagnostics") home.earthDiagnosticsShown = !home.earthDiagnosticsShown
+                else if (name === "earth.coordinates") home.earthCoordinatesShown = !home.earthCoordinatesShown
+                else if (name === "earth.goTo") home.earthCoordinateEntryShown = !home.earthCoordinateEntryShown
+                else if (name === "earth.source") home.earthSourceEntryShown = !home.earthSourceEntryShown
+                else if (!EarthNative.command(name.indexOf("earth.") === 0 ? name.substring(6) : name))
+                    home.notify("La escena 3D aún no está disponible para este control.")
             } finally {
                 home.dockRouter.complete(dispatchId)
             }

@@ -357,8 +357,8 @@ if(INGE_BUILD_MOBILE)
             "${INGE_PROJECT_ROOT}/docscontroller.h"
             "${INGE_PROJECT_ROOT}/docscontroller.cpp"
         )
-        add_subdirectory(src/fusionbridge)
-        target_link_libraries(AppCalicatasMobile PRIVATE InGeFusionBridgeNative)
+        add_subdirectory(src/retroplasma)
+        target_link_libraries(AppCalicatasMobile PRIVATE InGeRetroplasma InGeRetroplasmaplugin)
         if(WIN32)
             set_target_properties(AppCalicatasMobile PROPERTIES OUTPUT_NAME AppCalicatasDemo)
             if(MINGW)
@@ -567,7 +567,7 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/Main.qml"
             "${MOBILE_QML_DIR}/AuroraField.qml"
             "${MOBILE_QML_DIR}/HomeScreen.qml"
-            "${MOBILE_QML_DIR}/EarthSurfaceHost.qml"
+            "${MOBILE_QML_DIR}/RetroplasmaEarthView.qml"
             "${MOBILE_QML_DIR}/AddToolPanel.qml"
             "${MOBILE_QML_DIR}/GlassSurface.qml"
             # Calicatas: editor original restaurado y sus dependencias reales.

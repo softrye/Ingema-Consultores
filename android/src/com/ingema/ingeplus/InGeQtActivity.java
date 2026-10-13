@@ -36,7 +36,6 @@ import androidx.biometric.BiometricManager;
 import androidx.webkit.WebViewAssetLoader;
 
 import org.qtproject.qt.android.bindings.QtActivity;
-import com.ingema.ingeplus.fusionbridge.FusionBridgeNative;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -56,12 +55,12 @@ import org.json.JSONObject;
 
 /**
  * Qt owns the Activity (minimal root window, Visual Zero 2026-10-10). No
- * Flutter surface is hosted here; the Cesium engine (Earth) is created only
- * on demand and its document/location/export services stay in this class.
+ * Flutter surface is hosted here. Historical Cesium helpers and the shared
+ * document/location/export services stay in this class.
  */
 public final class InGeQtActivity extends QtActivity {
     // Respaldo técnico Cesium. Home no invoca este visor; no es un fallback
-    // automático para FusionBridge Native.
+    // automático para el visor nativo Retroplasma.
     private static final String EARTH_ASSET_URL =
             "https://appassets.androidplatform.net/assets/cesium/index.html";
     private static final int LOCATION_PERMISSION_REQUEST = 8104;
@@ -455,7 +454,6 @@ public final class InGeQtActivity extends QtActivity {
         android.util.Log.i("InGeLifecycle",
                 "INGE_ACTIVITY_ON_RESUME instance=" + System.identityHashCode(this));
         activityResumed = true;
-        FusionBridgeNative.onHostResume();
         if (performanceRuntime != null)
             performanceRuntime.onTrimMemory(0);
         emitBetaDiagnostic("LIFECYCLE", "INFO", "ON_RESUME", null, null, null);
@@ -472,7 +470,6 @@ public final class InGeQtActivity extends QtActivity {
         android.util.Log.i("InGeLifecycle",
                 "INGE_ACTIVITY_ON_PAUSE instance=" + System.identityHashCode(this));
         activityResumed = false;
-        FusionBridgeNative.onHostPause();
         emitBetaPerformanceSample();
         performanceHandler.removeCallbacks(betaPerformanceSample);
         emitBetaDiagnostic("LIFECYCLE", "INFO", "ON_PAUSE", null, null, null);
@@ -1432,7 +1429,6 @@ public final class InGeQtActivity extends QtActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (FusionBridgeNative.onActivityResult(this, requestCode, resultCode, data)) return;
         if (GoogleDriveAuthorization.onActivityResult(this, requestCode, resultCode, data)) return;
         if (requestCode == BIOMETRIC_AUTH_REQUEST && pendingBiometricResult != null) {
             final java.util.function.Consumer<Boolean> result = pendingBiometricResult;
@@ -1530,7 +1526,6 @@ public final class InGeQtActivity extends QtActivity {
 
     @Override
     public void onDestroy() {
-        FusionBridgeNative.onHostDestroyed();
         emitBetaDiagnostic("LIFECYCLE", "INFO", "ON_DESTROY", null, null, null);
         performanceHandler.removeCallbacks(betaPerformanceSample);
         if (performanceRuntime != null)
