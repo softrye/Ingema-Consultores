@@ -423,7 +423,9 @@ android {
 
 
 
-    compileSdkVersion androidCompileSdkVersion
+    // Flutter release AAR and plugins require API 37. Qt may generate androidCompileSdkVersion=android-34 in Release.
+    // Keep targetSdkVersion unchanged; this only fixes the compilation API.
+    compileSdkVersion 37
 
 
 
