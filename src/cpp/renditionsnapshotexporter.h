@@ -10,6 +10,8 @@ struct SnapshotExportModel {
     int version = 0;
     double totalPen = 0, totalUsd = 0;
     QVariantList expenses, attachments;
+    QVariantMap funding, exchangeRate;
+    bool financialSupplements = false;
     static bool fromReceived(const QVariantMap &received, SnapshotExportModel *model, QString *error);
     QString fileBaseName() const;
 };

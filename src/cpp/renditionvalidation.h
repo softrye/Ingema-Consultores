@@ -4,6 +4,7 @@
 #include <QVariantList>
 #include <QRegularExpression>
 #include <cmath>
+#include "renditionmoney.h"
 
 namespace RenditionValidation {
 inline bool meaningfulText(const QString &value) {
@@ -38,10 +39,9 @@ inline QString expense(const QVariantMap &draft, const QVariantMap &row) {
     if (!draft.value(QStringLiteral("projectIds")).toList().contains(row.value(QStringLiteral("projectId"))))
         return QStringLiteral("El proyecto del gasto debe estar asociado a la rendición.");
     const auto amount = row.value(QStringLiteral("amount")).toString();
-    static const QRegularExpression decimal(QStringLiteral("^[0-9]+(\\.[0-9]{1,2})?$"));
-    const double number = amount.toDouble();
-    if (!decimal.match(amount).hasMatch() || !std::isfinite(number) || number <= 0 || number > 999999999999.99)
-        return QStringLiteral("El monto debe ser positivo, con un máximo de dos decimales.");
+    const auto rounded = RenditionMoney::cents(amount);
+    if (!rounded || *rounded <= 0 || *rounded > 99999999999999LL)
+        return QStringLiteral("El monto redondeado debe ser positivo y estar dentro del límite admitido.");
     const auto currency = row.value(QStringLiteral("currencyCode")).toString();
     if (currency != QLatin1String("PEN") && currency != QLatin1String("USD"))
         return QStringLiteral("Moneda no admitida.");
@@ -63,7 +63,13 @@ inline void totals(QVariantMap &draft) {
         const auto row = value.toMap();
         if (row.value(QStringLiteral("archived")).toBool()) continue;
         ++count;
-        const auto cents = qRound64(row.value(QStringLiteral("amount")).toDouble() * 100);
+        const auto parsed = RenditionMoney::cents(row.value(QStringLiteral("amount")).toString());
+        if (!parsed) { draft.insert(QStringLiteral("accountingError"), QStringLiteral("INVALID_AMOUNT")); return; }
+        const auto cents = *parsed;
+        if ((row.value(QStringLiteral("currencyCode")).toString() == QLatin1String("PEN") && cents > std::numeric_limits<qint64>::max() - pen)
+            || (row.value(QStringLiteral("currencyCode")).toString() == QLatin1String("USD") && cents > std::numeric_limits<qint64>::max() - usd)) {
+            draft.insert(QStringLiteral("accountingError"), QStringLiteral("MONEY_OVERFLOW")); return;
+        }
         if (row.value(QStringLiteral("currencyCode")).toString() == QLatin1String("PEN")) pen += cents;
         if (row.value(QStringLiteral("currencyCode")).toString() == QLatin1String("USD")) usd += cents;
         const auto review = row.value(QStringLiteral("reviewStatus"), QStringLiteral("PENDIENTE")).toString();

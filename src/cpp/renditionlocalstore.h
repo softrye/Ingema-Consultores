@@ -32,6 +32,13 @@ public:
     bool saveEditorDraft(const QString &key, const QVariantMap &draft);
 
     Q_INVOKABLE void reload();
+    bool saveFinancial(const QString &localId, const QString &kind,
+                       const QVariantMap &values, qint64 expectedRowVersion);
+    bool markFinancialState(const QString &localId, const QString &kind,
+                            const QString &requestId, const QString &state,
+                            const QString &error = {});
+    bool markFinancialSynced(const QString &localId, const QString &kind,
+                             const QString &requestId, const QVariantMap &remote);
     Q_INVOKABLE QString createDraft(const QString &periodStart,
                                     const QString &periodEnd,
                                     const QVariantList &projectIds,

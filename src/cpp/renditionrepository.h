@@ -59,6 +59,8 @@ public:
     QVariantMap documentCapabilities() const { return m_documentCapabilities; }
 
     Q_INVOKABLE void clear();
+    void setFinancial(const QString &kind, const QVariantMap &operation);
+    void requestExchangeQuote(const QString &requestId, const QString &renditionId);
     // Administrative V2 adapter; contracts verified in InGePlus-Dev.
     void receivedCommand(const QString &requestId, const QString &operation,
                          const QVariantMap &arguments);
@@ -150,6 +152,7 @@ public:
                                        qint64 expectedRowVersion);
 
 signals:
+    void financialSaved(const QVariantMap &result);
     void expensesLoaded(const QString &renditionId, const QVariantList &rows);
     void attachmentsLoaded(const QString &renditionId, const QVariantList &rows);
     void summaryLoaded(const QString &renditionId, const QVariantMap &summary);
@@ -213,6 +216,7 @@ private:
 
     int m_pendingRequests = 0;
     quint64 m_requestEpoch = 0;
+    quint64 m_detailRequestSerial = 0;
     QString m_lastError;
     QVariantList m_renditions;
     QVariantList m_projects;

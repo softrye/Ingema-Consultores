@@ -1,5 +1,7 @@
 #include "renditionlocalstore.h"
 #include "renditionvalidation.h"
+#include "renditionmoney.h"
+#include <QTimeZone>
 #include "renditioncontract.h"
 #include "renditionattachmentcontract.h"
 
@@ -106,6 +108,9 @@ bool RenditionLocalStore::removeDraft(const QString &localId)
     auto draft = m_renditions[index].toMap();
     if (draft.value(QStringLiteral("archived")).toBool()) return true;
     if (!assertDraftStatus(draft)) return false;
+    if (draft.value("status").toString() != "BORRADOR" || !draft.value("currentVersionId").toString().isEmpty()) {
+        setLastError(QStringLiteral("Sólo se elimina un borrador sin versiones presentadas.")); return false;
+    }
     const auto remote = draft.value(QStringLiteral("remoteId")).toString();
     if (stateOf(draft) == QLatin1String(Conflict) || stateOf(draft) == QLatin1String(NeedsReconciliation)) {
         setLastError(QStringLiteral("Sincroniza y revisa los cambios antes de eliminar el borrador.")); return false;
@@ -225,6 +230,8 @@ void RenditionLocalStore::reload()
             markExpenseState(aggregate, child, operation == QLatin1String("expense_create") ? QString::fromLatin1(Error) : QString::fromLatin1(NeedsReconciliation), message);
         else if (operation == QLatin1String("present"))
             markPresentationState(aggregate, QString::fromLatin1(NeedsReconciliation), message);
+        else if (operation == "funding_set" || operation == "exchange_set")
+            markFinancialState(aggregate, operation, entry.value("requestId").toString(), QString::fromLatin1(Error), message);
         else if (operation.startsWith(QLatin1String("rendition_")))
             markRenditionState(aggregate, operation == QLatin1String("rendition_create") ? QString::fromLatin1(Error) : QString::fromLatin1(NeedsReconciliation), message);
     }
@@ -549,8 +556,7 @@ bool RenditionLocalStore::stageLocalOnlyChanges(bool requireDocumentLocation)
     bool changed = false;
     for (int renditionRow = 0; renditionRow < m_renditions.size(); ++renditionRow) {
         QVariantMap draft = m_renditions.at(renditionRow).toMap();
-        if (draft.value(QStringLiteral("status")).toString()
-            != QLatin1String("BORRADOR"))
+        if (!RenditionContract::canEditWorkingCopy(draft))
             continue;
 
         const QString localId = draft.value(QStringLiteral("localId")).toString();
@@ -970,6 +976,9 @@ void RenditionLocalStore::mergeRemoteRenditions(const QVariantList &remoteRows)
                 {QStringLiteral("totalUsd"), valueFor(remote, QStringLiteral("totalUsd"), QStringLiteral("total_usd"))},
                 {QStringLiteral("expenseCount"), valueFor(remote, QStringLiteral("expenseCount"), QStringLiteral("expense_count"))},
                 {QStringLiteral("status"), remote.value(QStringLiteral("status"), QStringLiteral("BORRADOR"))},
+                {QStringLiteral("canEditContent"), remote.value(QStringLiteral("canEditContent"), false)},
+                {QStringLiteral("funding"), remote.value(QStringLiteral("funding"))},
+                {QStringLiteral("exchangeRate"), remote.value(QStringLiteral("exchangeRate"))},
                 {QStringLiteral("syncState"), QString::fromLatin1(Synced)},
                 {QStringLiteral("updatedAt"), valueFor(remote, QStringLiteral("updatedAt"), QStringLiteral("updated_at"))},
                 {QStringLiteral("expenses"), QVariantList{}}
@@ -979,9 +988,17 @@ void RenditionLocalStore::mergeRemoteRenditions(const QVariantList &remoteRows)
             continue;
         }
         QVariantMap draft = m_renditions.at(index).toMap();
+        draft.insert(QStringLiteral("canEditContent"), remote.value(QStringLiteral("canEditContent"), false));
+        draft.insert(QStringLiteral("isBlocked"), remote.value(QStringLiteral("is_blocked"), false));
+
+        for (const auto &key : {QStringLiteral("funding"),QStringLiteral("exchangeRate")}) {
+            const auto kind=key=="funding" ? QStringLiteral("funding_set") : QStringLiteral("exchange_set");
+            const int op=outboxIndex(kind,draft.value("localId").toString());
+            const bool pending=op>=0 && m_outbox[op].toMap().value("state")!=QLatin1String(Synced);
+            if (remote.contains(key) && !pending) draft.insert(key,remote.value(key));
+        }
         const QString localState = stateOf(draft);
-        if (draft.value(QStringLiteral("status")).toString() == QLatin1String("PRESENTADA")
-            && !draft.value(QStringLiteral("currentVersionId")).toString().isEmpty())
+        if (draft.value(QStringLiteral("isSnapshot")).toBool())
             continue;
         const qint64 localVersion = draft.value(
             QStringLiteral("rowVersion")).toLongLong();
@@ -994,7 +1011,7 @@ void RenditionLocalStore::mergeRemoteRenditions(const QVariantList &remoteRows)
         if (localVersion > 0 && observedVersion < localVersion)
             continue;
         if (localState == QLatin1String(NeedsReconciliation)
-            && remoteStatus == QLatin1String("BORRADOR") && observedVersion == localVersion) {
+            && RenditionContract::canEditWorkingCopy(remote) && observedVersion == localVersion) {
             // The failed CAS did not commit. Replay the original intention;
             // never advance its expected version to conceal a remote edit.
             draft.insert(QStringLiteral("syncState"), QString::fromLatin1(PendingUpdate));
@@ -1033,7 +1050,7 @@ void RenditionLocalStore::mergeRemoteRenditions(const QVariantList &remoteRows)
             const qint64 observedVersion = valueFor(
                 remote, QStringLiteral("rowVersion"),
                 QStringLiteral("row_version")).toLongLong();
-            if (remoteStatus == QLatin1String("PRESENTADA")) {
+            if (remoteStatus == QLatin1String("PRESENTADA") || remoteStatus == QLatin1String("EN_REVISION")) {
                 presentationResolved = true;
                 draft.insert(QStringLiteral("syncState"), QString::fromLatin1(Synced));
                 draft.insert(QStringLiteral("versionId"), valueFor(
@@ -1044,7 +1061,7 @@ void RenditionLocalStore::mergeRemoteRenditions(const QVariantList &remoteRows)
                                 QString::fromLatin1(Synced));
             } else if ((presentationState == QLatin1String(NeedsReconciliation)
                         || presentationState == QLatin1String(Error))
-                       && remoteStatus == QLatin1String("BORRADOR")
+                       && RenditionContract::canEditWorkingCopy(remote)
                        && observedVersion == expectedVersion) {
                 draft.insert(QStringLiteral("syncState"), QString::fromLatin1(Synced));
                 draft.remove(QStringLiteral("syncError"));
@@ -1055,6 +1072,9 @@ void RenditionLocalStore::mergeRemoteRenditions(const QVariantList &remoteRows)
         }
         if (localState == QLatin1String(Synced) || presentationResolved) {
             draft.insert(QStringLiteral("rowVersion"), observedVersion);
+            draft.insert(QStringLiteral("status"), remoteStatus);
+            draft.insert(QStringLiteral("currentVersionId"), remote.value(QStringLiteral("currentVersionId")));
+            draft.insert(QStringLiteral("versionNumber"), remote.value(QStringLiteral("versionNumber")));
             draft.insert(QStringLiteral("periodStart"), valueFor(remote, QStringLiteral("periodStart"), QStringLiteral("period_start")));
             draft.insert(QStringLiteral("periodEnd"), valueFor(remote, QStringLiteral("periodEnd"), QStringLiteral("period_end")));
             draft.insert(QStringLiteral("projectIds"), valueFor(remote, QStringLiteral("projectIds"), QStringLiteral("project_ids")));
@@ -1070,8 +1090,8 @@ void RenditionLocalStore::mergeRemoteRenditions(const QVariantList &remoteRows)
             draft.insert(QStringLiteral("serverRowVersion"), observedVersion);
             if ((localVersion > 0 && observedVersion > 0
                  && localVersion != observedVersion)
-                || remoteStatus != QLatin1String("BORRADOR")) {
-                const QString message = remoteStatus != QLatin1String("BORRADOR")
+                || !RenditionContract::canEditWorkingCopy(remote)) {
+                const QString message = !RenditionContract::canEditWorkingCopy(remote)
                     ? QStringLiteral(
                           "La rendición cambió de estado en Web mientras había cambios locales.")
                     : QStringLiteral(
@@ -1101,7 +1121,7 @@ void RenditionLocalStore::mergeRemoteExpenses(
     QVariantList expenses = draft.value(QStringLiteral("expenses")).toList();
     QSet<QString> remoteIds;
     if (draft.value(QStringLiteral("archived")).toBool()
-        || (draft.value(QStringLiteral("status")).toString() == QLatin1String("PRESENTADA")
+        || (draft.value(QStringLiteral("isSnapshot")).toBool()
             && draft.value(QStringLiteral("expensesLoaded")).toBool())) return;
     for (const QVariant &value : remoteRows) {
         const QVariantMap remote = value.toMap();
@@ -1467,9 +1487,8 @@ QString RenditionLocalStore::presentationBlocker(const QString &localId) const
     if (activeExpenses == 0) return QStringLiteral("Agrega al menos un gasto antes de presentar.");
     if (draft.isEmpty())
         return QStringLiteral("La rendición local ya no existe.");
-    if (draft.value(QStringLiteral("status"), QStringLiteral("BORRADOR"))
-            .toString().toUpper() != QLatin1String("BORRADOR")) {
-        return QStringLiteral("Sólo una rendición BORRADOR puede presentarse.");
+    if (!RenditionContract::canEditWorkingCopy(draft)) {
+        return QStringLiteral("La copia no conserva permiso efectivo de edición para presentarse.");
     }
     if (draft.value(QStringLiteral("remoteId")).toString().isEmpty()
         || draft.value(QStringLiteral("rowVersion")).toLongLong() <= 0) {
@@ -1514,6 +1533,133 @@ QString RenditionLocalStore::presentationBlocker(const QString &localId) const
     return {};
 }
 
+
+bool RenditionLocalStore::saveFinancial(const QString &localId, const QString &kind,
+                                      const QVariantMap &values, qint64 expectedRowVersion)
+{
+    const int index = renditionIndex(localId);
+    if (index < 0 || (kind != "funding_set" && kind != "exchange_set")) return false;
+    auto draft = m_renditions[index].toMap();
+    if (stateOf(draft)==QLatin1String(Conflict) || stateOf(draft)==QLatin1String(NeedsReconciliation)
+        || stateOf(draft)==QLatin1String(Syncing)) {
+        setLastError(QStringLiteral("FINANCIAL_PENDING: reconcile before editing"));return false;
+    }
+    if (!assertDraftStatus(draft) || expectedRowVersion != draft.value("rowVersion").toLongLong()) {
+        setLastError(QStringLiteral("ROW_VERSION_CONFLICT: reopen the working copy")); return false;
+    }
+    const int existing = outboxIndex(kind, localId);
+    if (existing >= 0 && m_outbox[existing].toMap().value("state") != QLatin1String(Synced)) {
+        setLastError(QStringLiteral("FINANCIAL_PENDING: synchronize or reconcile the saved intention first")); return false;
+    }
+    QVariantMap payload;
+    const auto decimal = [](qint64 scaled, int places) { return QString::number(scaled / (places == 2 ? 100LL : 1000000LL)) + '.' + QString::number(scaled % (places == 2 ? 100LL : 1000000LL)).rightJustified(places,'0'); };
+    if (kind == "funding_set") {
+        const auto pen = RenditionMoney::cents(values.value("pen", "0").toString());
+        const auto usd = RenditionMoney::cents(values.value("usd", "0").toString());
+        const bool enabled = values.value("enabled").toBool();
+        if (!pen || !usd || *pen < 0 || *usd < 0 || *pen > 99999999999999LL || *usd > 99999999999999LL
+            || (enabled && *pen == 0 && *usd == 0) || (!enabled && (*pen != 0 || *usd != 0))) {
+            setLastError(QStringLiteral("RENDITION_INVALID_FUND")); return false;
+        }
+        payload = {{"enabled",enabled},{"pen",decimal(*pen,2)},{"usd",decimal(*usd,2)}};
+    } else {
+        const QString mode = values.value("mode").toString();
+        const QString text = values.value("rate").toString();
+        const auto rate = text.isEmpty() ? std::optional<qint64>{} : RenditionMoney::scaled(text,6);
+        const auto date = QDate::fromString(values.value("quoted_on").toString(),Qt::ISODate);
+        const auto today = QDateTime::currentDateTimeUtc().toTimeZone(QTimeZone("America/Lima")).date();
+        if ((mode != "AUTOMATIC" && mode != "MANUAL") || (!text.isEmpty() && (!rate || *rate <= 0 || *rate > 999999000000LL))
+            || (mode == "AUTOMATIC" && (!rate || !date.isValid() || date > today || date < today.addDays(-45)))
+            || (mode == "MANUAL" && !values.value("quoted_on").toString().isEmpty())) {
+            setLastError(QStringLiteral("RENDITION_INVALID_EXCHANGE_MODE")); return false;
+        }
+        payload = {{"rate",rate ? QVariant(decimal(*rate,6)) : QVariant()}, {"mode",mode},
+                   {"quoted_on",mode == "AUTOMATIC" ? QVariant(date.toString(Qt::ISODate)) : QVariant()},
+                   {"source",mode == "AUTOMATIC" ? "BCRP_SBS_VENTA" : "MANUAL"},
+                   {"checked_at",values.value("checked_at")}};
+    }
+    const auto oldRows = m_renditions, oldOutbox = m_outbox;
+    const auto oldSequence = m_nextSequence;
+    draft.insert(kind == "funding_set" ? "funding" : "exchangeRate",payload);
+    draft.insert("financialRevision", draft.value("financialRevision").toLongLong() + 1);
+    draft.insert("syncState",QString::fromLatin1(PendingUpdate));
+    draft.insert("updatedAt",nowUtc());
+    m_renditions[index] = draft;
+    payload.insert("expectedRowVersion",expectedRowVersion);
+    upsertOutbox(kind,localId,draft.value("remoteId").toString(),{},newUuid(),payload,QString::fromLatin1(PendingUpdate));
+    // A confirmed previous intention cannot keep its attempt counter.
+    auto entry = m_outbox[outboxIndex(kind,localId)].toMap(); entry.insert("attempts",0);
+    entry.insert("sequence",m_nextSequence++);
+    m_outbox[outboxIndex(kind,localId)] = entry;
+    if (persist()) return true;
+    m_renditions=oldRows;m_outbox=oldOutbox;m_nextSequence=oldSequence;return false;
+}
+
+bool RenditionLocalStore::markFinancialState(const QString &localId, const QString &kind,
+    const QString &requestId, const QString &state, const QString &error)
+{
+    const int index=renditionIndex(localId), op=outboxIndex(kind,localId);
+    if (index<0 || op<0 || m_outbox[op].toMap().value("requestId")!=requestId
+        || m_outbox[op].toMap().value("state")==QLatin1String(Synced)) return false;
+    const auto oldRows=m_renditions,oldOutbox=m_outbox;
+    auto draft=m_renditions[index].toMap();draft.insert("syncState",state);
+    if (error.isEmpty()) draft.remove("syncError");else draft.insert("syncError",error);
+    m_renditions[index]=draft;
+    if (state==QLatin1String(Syncing) && m_outbox[op].toMap().value("attempts").toInt()==0) {
+        auto entry=m_outbox[op].toMap();auto payload=entry.value("payload").toMap();
+        payload.insert("expectedRowVersion",draft.value("rowVersion"));entry.insert("payload",payload);
+        entry.insert("payloadHash",QString::fromLatin1(payloadHash(payload)));m_outbox[op]=entry;
+    }
+    markOutboxState(kind,localId,{},state,error);
+    if (persist()) return true;
+    m_renditions=oldRows;m_outbox=oldOutbox;return false;
+}
+
+bool RenditionLocalStore::markFinancialSynced(const QString &localId, const QString &kind,
+    const QString &requestId, const QVariantMap &remote)
+{
+    const int index=renditionIndex(localId), op=outboxIndex(kind,localId);
+    if (index<0 || op<0 || m_outbox[op].toMap().value("requestId")!=requestId
+        || m_outbox[op].toMap().value("state")==QLatin1String(Synced)) return false;
+    auto draft=m_renditions[index].toMap();
+    const auto payload=m_outbox[op].toMap().value("payload").toMap();
+    const auto version=remoteRowVersion(remote,0);
+    if (remoteId(remote)!=draft.value("remoteId").toString() || version<=0
+        || version<payload.value("expectedRowVersion").toLongLong()) {
+        setLastError(QStringLiteral("INVALID_RESPONSE: financial identity/version"));return false;
+    }
+    if (kind=="funding_set") {
+        if (!remote.contains("enabled") || remote.value("enabled")!=payload.value("enabled")
+            || RenditionMoney::cents(remote.value("pen").toString())!=RenditionMoney::cents(payload.value("pen").toString())
+            || RenditionMoney::cents(remote.value("usd").toString())!=RenditionMoney::cents(payload.value("usd").toString())) return false;
+    } else if (remote.value("mode")!=payload.value("mode") || remote.value("quoted_on").toString()!=payload.value("quoted_on").toString()
+        || RenditionMoney::scaled(remote.value("rate").toString(),6)!=RenditionMoney::scaled(payload.value("rate").toString(),6)) return false;
+    const auto oldRows=m_renditions,oldOutbox=m_outbox;
+    draft.insert(kind=="funding_set" ? "funding" : "exchangeRate",remote);
+    draft.insert("financialConfirmedBase",payload.value("expectedRowVersion"));
+    draft.insert("financialConfirmedVersion",version);
+    draft.insert("rowVersion",qMax(version,draft.value("rowVersion").toLongLong()));
+    markOutboxState(kind,localId,{},QString::fromLatin1(Synced));
+    bool pending=false;
+    for (int i=0;i<m_outbox.size();++i) {
+        auto entry=m_outbox[i].toMap();
+        if (entry.value("aggregateLocalId")!=localId || entry.value("state")==QLatin1String(Synced)) continue;
+        pending=true;
+        // Only intentions never sent can follow a version confirmed by OUR preceding write.
+        // A retry's CAS, request_id and payload must remain byte-for-byte stable.
+        if (entry.value("attempts").toInt()==0) {
+            auto next=entry.value("payload").toMap();
+            if (next.contains("expectedRowVersion")) next.insert("expectedRowVersion",draft.value("rowVersion"));
+            if (next.contains("expectedRenditionRowVersion")) next.insert("expectedRenditionRowVersion",draft.value("rowVersion"));
+            entry.insert("payload",next);entry.insert("payloadHash",QString::fromLatin1(payloadHash(next)));m_outbox[i]=entry;
+        }
+    }
+    draft.insert("syncState",QString::fromLatin1(pending ? PendingUpdate : Synced));draft.remove("syncError");
+    m_renditions[index]=draft;
+    if (persist()) return true;
+    m_renditions=oldRows;m_outbox=oldOutbox;return false;
+}
+
 QVariantList RenditionLocalStore::pendingOperations() const
 {
     QVariantList operations;
@@ -1525,7 +1671,8 @@ QVariantList RenditionLocalStore::pendingOperations() const
         // la confirmación humana, reutilizando su request_id persistido.
         if (operation == QLatin1String("present"))
             continue;
-        const bool idempotent = operation == QLatin1String("rendition_create")
+        const bool idempotent = operation == "funding_set" || operation == "exchange_set"
+            || operation == QLatin1String("rendition_create")
             || operation == QLatin1String("rendition_delete")
             || operation == QLatin1String("expense_delete")
             || operation == QLatin1String("expense_create")
@@ -1555,11 +1702,10 @@ QVariantList RenditionLocalStore::pendingOperations() const
             if (confirmedId.isEmpty() || confirmedId == draft.value(QStringLiteral("remoteId")).toString()) continue;
             payload.insert(QStringLiteral("expenseRemoteId"), confirmedId);
         }
-        if ((draft.value(QStringLiteral("status")).toString() != QLatin1String("BORRADOR")
-             || !draft.value(QStringLiteral("currentVersionId")).toString().isEmpty())
-            && operation != QLatin1String("present"))
+        if (!RenditionContract::canEditWorkingCopy(draft)
+            && operation != QLatin1String("present") && operation != QLatin1String("rendition_delete"))
             continue;
-        if ((operation == QLatin1String("expense_create")
+        if ((operation == "funding_set" || operation == "exchange_set" || operation == QLatin1String("expense_create")
              || operation.startsWith(QLatin1String("attachment_")))
             && draft.value(QStringLiteral("remoteId")).toString().isEmpty())
             continue;
@@ -1574,6 +1720,8 @@ QVariantList RenditionLocalStore::pendingOperations() const
                            ? aggregateLocalId
                            : item.value(QStringLiteral("childLocalId")));
         payload.insert(QStringLiteral("renditionRemoteId"), draft.value(QStringLiteral("remoteId")));
+        if ((operation == "funding_set" || operation == "exchange_set") && item.value("attempts").toInt()==0)
+            payload.insert("expectedRowVersion",draft.value("rowVersion"));
         operations.append(payload);
     }
     return operations;
@@ -1603,6 +1751,7 @@ bool RenditionLocalStore::markRenditionSynced(const QString &localId,
         return false;
     }
     draft.insert(QStringLiteral("remoteId"), id);
+    if (remote.contains("can_edit_content")) draft.insert(QStringLiteral("canEditContent"), remote.value("can_edit_content"));
     draft.insert(QStringLiteral("visibleCode"), valueFor(remote, QStringLiteral("visibleCode"), QStringLiteral("visible_code")));
     draft.insert(QStringLiteral("status"), remote.value(QStringLiteral("status"), draft.value(QStringLiteral("status"))));
     draft.insert(QStringLiteral("rowVersion"), remoteRowVersion(remote,
@@ -1611,6 +1760,14 @@ bool RenditionLocalStore::markRenditionSynced(const QString &localId,
     draft.insert(QStringLiteral("updatedAt"), nowUtc());
     draft.remove(QStringLiteral("syncError"));
     m_renditions[index] = draft;
+    for (int i=0;i<m_outbox.size();++i) {
+        auto entry=m_outbox[i].toMap();const auto kind=entry.value("operation").toString();
+        if (entry.value("aggregateLocalId")==localId && (kind=="funding_set" || kind=="exchange_set")
+            && entry.value("attempts").toInt()==0 && entry.value("state")!=QLatin1String(Synced)) {
+            auto payload=entry.value("payload").toMap();payload.insert("expectedRowVersion",draft.value("rowVersion"));
+            entry.insert("payload",payload);entry.insert("payloadHash",QString::fromLatin1(payloadHash(payload)));m_outbox[i]=entry;
+        }
+    }
     markOutboxState(QStringLiteral("rendition_create"), localId, {},
                     QString::fromLatin1(Synced));
     markOutboxState(QStringLiteral("rendition_update"), localId, {},
@@ -1689,11 +1846,12 @@ bool RenditionLocalStore::markRenditionPresented(const QString &localId,
         return false;
     QVariantMap draft = m_renditions.at(index).toMap();
     if (remoteId(remote) != draft.value(QStringLiteral("remoteId")).toString()
-        || remote.value(QStringLiteral("status")).toString() != QLatin1String("PRESENTADA")) {
+        || (remote.value(QStringLiteral("status")).toString() != QLatin1String("PRESENTADA")
+            && remote.value(QStringLiteral("status")).toString() != QLatin1String("EN_REVISION"))) {
         setLastError(QStringLiteral("La respuesta de presentación no corresponde a esta rendición."));
         return false;
     }
-    draft.insert(QStringLiteral("status"), QStringLiteral("PRESENTADA"));
+    draft.insert(QStringLiteral("status"), remote.value(QStringLiteral("status")));
     draft.insert(QStringLiteral("syncState"), QString::fromLatin1(Synced));
     draft.insert(QStringLiteral("rowVersion"),
                  remoteRowVersion(remote, draft.value(QStringLiteral("rowVersion")).toLongLong()));
@@ -1814,6 +1972,14 @@ bool RenditionLocalStore::markExpenseSynced(const QString &renditionLocalId,
         draft.insert(QStringLiteral("rowVersion"), qMax(headerVersion.toLongLong(),
                      draft.value(QStringLiteral("rowVersion")).toLongLong()));
     m_renditions[index] = draft;
+    for (int i=0;i<m_outbox.size();++i) {
+        auto entry=m_outbox[i].toMap();const auto kind=entry.value("operation").toString();
+        if (entry.value("aggregateLocalId")==renditionLocalId && (kind=="funding_set" || kind=="exchange_set")
+            && entry.value("attempts").toInt()==0 && entry.value("state")!=QLatin1String(Synced)) {
+            auto payload=entry.value("payload").toMap();payload.insert("expectedRowVersion",draft.value("rowVersion"));
+            entry.insert("payload",payload);entry.insert("payloadHash",QString::fromLatin1(payloadHash(payload)));m_outbox[i]=entry;
+        }
+    }
     markOutboxState(QStringLiteral("expense_create"), renditionLocalId,
                     expenseLocalId, QString::fromLatin1(Synced));
     markOutboxState(QStringLiteral("expense_update"), renditionLocalId,
@@ -1972,12 +2138,9 @@ void RenditionLocalStore::rebuildLegacyOutbox()
 
 bool RenditionLocalStore::assertDraftStatus(const QVariantMap &rendition)
 {
-    if (!rendition.isEmpty() && !rendition.value(QStringLiteral("archived")).toBool()
-        && rendition.value(QStringLiteral("currentVersionId")).toString().isEmpty()
-        && rendition.value(QStringLiteral("status"), QStringLiteral("BORRADOR")).toString()
-        == QLatin1String("BORRADOR"))
+    if (!rendition.isEmpty() && RenditionContract::canEditWorkingCopy(rendition))
         return true;
-    setLastError(QStringLiteral("Una rendición no BORRADOR es inmutable."));
+    setLastError(QStringLiteral("Esta copia no tiene permiso efectivo de edición."));
     return false;
 }
 

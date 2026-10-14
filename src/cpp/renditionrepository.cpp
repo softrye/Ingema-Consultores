@@ -17,6 +17,10 @@
 #include <QPointer>
 #include <QTimer>
 #include <QUrl>
+#include <QUrlQuery>
+#ifndef INGEPLUS_WEB_API_ORIGIN
+#define INGEPLUS_WEB_API_ORIGIN ""
+#endif
 
 namespace {
 
@@ -79,6 +83,58 @@ RenditionRepository::RenditionRepository(QObject *parent)
     }
 }
 
+
+void RenditionRepository::setFinancial(const QString &kind, const QVariantMap &op)
+{
+    QVariantMap args{{"p_rendition_id",op.value("renditionRemoteId")},
+                     {"p_expected_row_version",op.value("expectedRowVersion")},
+                     {"p_request_id",op.value("requestId")}};
+    QString rpc;
+    if (kind=="funding_set") {
+        rpc="set_rendition_funding_v01";args.insert("p_enabled",op.value("enabled"));
+        args.insert("p_pen",op.value("pen"));args.insert("p_usd",op.value("usd"));
+    } else if (kind=="exchange_set") {
+        rpc="set_rendition_exchange_rate_v02";args.insert("p_rate",op.value("rate"));
+        args.insert("p_mode",op.value("mode"));args.insert("p_quoted_on",op.value("quoted_on"));
+    } else { emit operationFailed(kind,"UNKNOWN_OPERATION","Unsupported financial operation");return; }
+    callRpc(kind,rpc,args,[this](const QVariant &payload) { emit financialSaved(firstRow(payload)); });
+}
+
+void RenditionRepository::requestExchangeQuote(const QString &requestId, const QString &renditionId)
+{
+    const QString operation="received/"+requestId;
+    auto *session=appContext() ? appContext()->auth() : nullptr;
+    auto *client=supabase();
+    if (!client || !session || !session->logged() || session->accessToken().isEmpty()) {
+        emit operationFailed(operation,"AUTH_REQUIRED","Sign in before requesting a quote");return;
+    }
+    QUrl origin(qEnvironmentVariable("INGEPLUS_WEB_API_ORIGIN",QStringLiteral(INGEPLUS_WEB_API_ORIGIN)));
+    const bool loopback=origin.host()=="127.0.0.1" || origin.host()=="localhost" || origin.host()=="::1";
+    if (!origin.isValid() || origin.host().isEmpty() || (!origin.path().isEmpty() && origin.path()!="/")
+        || !origin.userInfo().isEmpty() || origin.hasQuery() || origin.hasFragment()
+        || (origin.scheme()!="https" && !(origin.scheme()=="http" && loopback))) {
+        emit operationFailed(operation,"QUOTE_ORIGIN_NOT_CONFIGURED","Configure the authenticated DEV Web API origin; saved rate is retained");return;
+    }
+    origin.setPath("/api/renditions/exchange-rate");QUrlQuery query;query.addQueryItem("renditionId",renditionId);origin.setQuery(query);
+    QNetworkRequest request(origin);request.setRawHeader("Authorization",("Bearer "+session->accessToken()).toUtf8());
+    request.setRawHeader("Accept","application/json");request.setTransferTimeout(15000);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,QNetworkRequest::ManualRedirectPolicy);
+    auto *reply=client->nam()->get(request);const auto epoch=m_requestEpoch;beginRequest();
+    connect(reply,&QNetworkReply::finished,this,[this,reply,epoch,requestId,operation] {
+        endRequest();const int status=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const auto raw=reply->readAll();const auto error=reply->error();reply->deleteLater();
+        if (epoch!=m_requestEpoch) return;
+        if (error!=QNetworkReply::NoError || status!=200 || raw.size()>100000) {
+            emit operationFailed(operation,status==401 ? "AUTH_REQUIRED" : status==403 ? "FORBIDDEN" : "QUOTE_UNAVAILABLE","Quote unavailable; saved rate is retained");return;
+        }
+        QJsonParseError parse;const auto json=QJsonDocument::fromJson(raw,&parse);
+        if (parse.error!=QJsonParseError::NoError || !json.isObject()) {
+            emit operationFailed(operation,"INVALID_RESPONSE","Invalid quote; saved rate is retained");return;
+        }
+        emit receivedResult(requestId,"exchangeQuote",json.object().toVariantMap());
+    });
+}
+
 void RenditionRepository::clear()
 {
     ++m_requestEpoch;
@@ -116,7 +172,7 @@ void RenditionRepository::listRenditions(int limit,
                                          const QString &afterUpdatedAt,
                                          const QString &afterId)
 {
-    callRpc(QStringLiteral("list"), QStringLiteral("list_my_renditions_v01"), {
+    callRpc(QStringLiteral("list"), QStringLiteral("list_renditions_effective_v06"), {
         {QStringLiteral("p_limit"), qBound(1, limit, 100)},
         {QStringLiteral("p_after_updated_at"), nullableText(afterUpdatedAt)},
         {QStringLiteral("p_after_id"), nullableText(afterId)}
@@ -147,11 +203,30 @@ void RenditionRepository::listRenditions(int limit,
 
 void RenditionRepository::getRendition(const QString &renditionId)
 {
-    callRpc(QStringLiteral("get"), QStringLiteral("get_my_rendition_v01"), {
+    const auto serial = ++m_detailRequestSerial;
+    callRpc(QStringLiteral("get"), QStringLiteral("get_rendition_effective_v06"), {
         {QStringLiteral("p_rendition_id"), renditionId}
-    }, [this](const QVariant &payload) {
+    }, [this, renditionId, serial](const QVariant &payload) {
+        if (serial != m_detailRequestSerial) return;
         m_currentRendition = firstRow(payload);
+        m_currentRendition.remove("financialVersionId");
         emit currentRenditionChanged();
+        const auto status = m_currentRendition.value("status").toString();
+        const bool workingCopy = status == "BORRADOR" || status == "OBSERVADO";
+        // READ users also read the current working supplement, never a stale
+        // frozen fund merely because they cannot edit the working copy.
+        const auto versionId = workingCopy ? QVariant{} : nullableText(m_currentRendition.value("current_version_id").toString());
+        for (const auto &supplement : {QStringLiteral("funding"), QStringLiteral("exchangeRate")}) {
+            const auto rpc = supplement == "funding" ? QStringLiteral("get_rendition_funding_v01") : QStringLiteral("get_rendition_exchange_rate_v02");
+            callRpc(supplement + "_read", rpc, {{"p_rendition_id", renditionId}, {"p_version_id", versionId}},
+                [this, serial, supplement, versionId](const QVariant &value) {
+                    if (serial != m_detailRequestSerial) return;
+                    m_currentRendition.insert(supplement, firstRow(value));
+                    if (!versionId.isNull() && m_currentRendition.contains("funding") && m_currentRendition.contains("exchangeRate"))
+                        m_currentRendition.insert("financialVersionId", versionId);
+                    emit currentRenditionChanged();
+                });
+        }
     });
 }
 
@@ -193,7 +268,17 @@ void RenditionRepository::createRendition(const QString &requestId,
     }
     callRpc(QStringLiteral("create"), rpcName, arguments,
             [this](const QVariant &payload) {
-        emit renditionCreated(firstRow(payload));
+        const auto confirmed = firstRow(payload);
+        const auto id = confirmed.value("rendition_id", confirmed.value("id")).toString();
+        // CREATE confirms identity, not an ACL capability. Read the effective
+        // capability before enabling pending local expenses on the new remote root.
+        callRpc(QStringLiteral("create"), QStringLiteral("get_rendition_effective_v06"), {{"p_rendition_id", id}},
+            [this, confirmed](const QVariant &contextPayload) {
+                auto result = confirmed;
+                const auto context = firstRow(contextPayload);
+                result.insert("can_edit_content", context.value("can_edit_content", false));
+                emit renditionCreated(result);
+            });
     });
 }
 
@@ -510,7 +595,7 @@ void RenditionRepository::presentRendition(const QString &renditionId,
                                            const QString &requestId)
 {
     callRpc(QStringLiteral("present"),
-            QStringLiteral("present_my_rendition_v01"), {
+            QStringLiteral("present_my_rendition_v02"), {
         {QStringLiteral("p_rendition_id"), renditionId},
         {QStringLiteral("p_expected_row_version"), expectedRowVersion},
         {QStringLiteral("p_request_id"), requestId}
@@ -751,7 +836,23 @@ void RenditionRepository::receivedCommand(const QString &requestId,
         return;
     }
     callRpc(correlation, rpc, params, [this, requestId, operation](const QVariant &payload) {
-        emit receivedResult(requestId, operation, payload);
+        if (operation != "receivedQuery") { emit receivedResult(requestId, operation, payload); return; }
+        auto row = firstRow(payload);
+        const auto renditionId = row.value("rendition_id");
+        const auto versionId = row.value("rendition_version_id");
+        if (renditionId.toString().isEmpty() || versionId.toString().isEmpty()) {
+            emit operationFailed("received/" + requestId, "SNAPSHOT_REQUIRED", "Versión confirmada requerida."); return;
+        }
+        // Supplements are fetched for this immutable version, never the current draft.
+        callRpc("received/" + requestId, "get_rendition_funding_v01", {{"p_rendition_id",renditionId},{"p_version_id",versionId}},
+            [this, requestId, operation, row, renditionId, versionId](const QVariant &fund) mutable {
+                row.insert("funding", firstRow(fund));
+                callRpc("received/" + requestId, "get_rendition_exchange_rate_v02", {{"p_rendition_id",renditionId},{"p_version_id",versionId}},
+                    [this, requestId, operation, row, versionId](const QVariant &rate) mutable {
+                        row.insert("exchangeRate", firstRow(rate)); row.insert("financialVersionId", versionId);
+                        emit receivedResult(requestId, operation, row);
+                    });
+            });
     });
 }
 

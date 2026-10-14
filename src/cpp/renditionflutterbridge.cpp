@@ -6,6 +6,7 @@
 #include "renditionrepository.h"
 #include "renditionsynccontroller.h"
 #include "renditionsnapshotexporter.h"
+#include "renditioncontract.h"
 
 #include <QJsonDocument>
 #include <QDateTime>
@@ -56,6 +57,7 @@ RenditionFlutterBridge::RenditionFlutterBridge(
             [this](const QString &id, const QString &operation, const QVariant &payload) {
         if (!m_receivedRequests.contains(id)) return;
         const QVariantMap expected = m_receivedRequests.take(id);
+        if (operation == QLatin1String("exchangeQuote")) { sendResult(id, payload.toMap()); return; }
         const QVariantList rows = payload.metaType().id() == QMetaType::QVariantList
             ? payload.toList() : QVariantList{payload};
         if (operation == QLatin1String("folderCapabilities")) {
@@ -334,6 +336,29 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
     const QString operation = request.value(QStringLiteral("operation")).toString();
     const QVariantMap arguments = request.value(QStringLiteral("arguments")).toMap();
 
+    // Cotización BCRP/SBS: la Web la obtiene en su API autenticada; Android solo
+    // la consulta (nunca la inventa). Sin origen configurado falla y conserva el tipo guardado.
+    if (operation == QLatin1String("exchangeQuote")) {
+        m_receivedRequests.insert(requestId, arguments);
+        m_repository->requestExchangeQuote(requestId, arguments.value(QStringLiteral("renditionId")).toString());
+        return;
+    }
+    // Fondo compartido (funding_set) o tipo de cambio (exchange_set): intención local
+    // durable con request_id y CAS; se sincroniza por el outbox (set_rendition_*).
+    if (operation == QLatin1String("saveFinancial")) {
+        const auto localId = arguments.value(QStringLiteral("localId")).toString();
+        if (!m_store->saveFinancial(localId, arguments.value(QStringLiteral("kind")).toString(),
+                                    arguments.value(QStringLiteral("values")).toMap(),
+                                    arguments.value(QStringLiteral("expectedRowVersion")).toLongLong())) {
+            sendError(requestId, QStringLiteral("FINANCIAL_SAVE_FAILED"), m_store->lastError());
+            return;
+        }
+        publishStateNow();
+        sendResult(requestId, {{QStringLiteral("pendingSync"), true},
+                               {QStringLiteral("current"), m_store->rendition(localId)}});
+        m_syncController->synchronize();
+        return;
+    }
     if (operation == QLatin1String("saveEditorDraft")) {
         if (m_store->saveEditorDraft(arguments.value(QStringLiteral("key")).toString(),
                                      arguments.value(QStringLiteral("draft")).toMap())) sendResult(requestId);
@@ -633,11 +658,10 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
             return;
         }
         const QVariantMap draft = m_store->rendition(m_selectedLocalId);
-        if (draft.isEmpty()
-            || draft.value(QStringLiteral("status")).toString()
-                   != QLatin1String("BORRADOR")) {
+        // Permiso efectivo del servidor (can_edit_content), no el nombre del estado.
+        if (draft.isEmpty() || !RenditionContract::canEditWorkingCopy(draft)) {
             sendError(requestId, QStringLiteral("PRESENT_NOT_ALLOWED"),
-                      QStringLiteral("Sólo una rendición BORRADOR puede presentarse."));
+                      QStringLiteral("La copia no conserva permiso efectivo de edición."));
             return;
         }
         if (m_repository->busy() || m_syncController->busy()
@@ -708,7 +732,8 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
         const auto draft = m_store->rendition(m_selectedLocalId);
         const auto remoteId = draft.value(QStringLiteral("remoteId")).toString();
         const auto versionId = draft.value(QStringLiteral("currentVersionId")).toString();
-        if (draft.value(QStringLiteral("status")).toString() != QLatin1String("PRESENTADA")
+        if ((draft.value(QStringLiteral("status")).toString() == QLatin1String("BORRADOR")
+             || draft.value(QStringLiteral("status")).toString() == QLatin1String("OBSERVADO"))
             || remoteId.isEmpty() || versionId.isEmpty()) {
             sendError(requestId, QStringLiteral("SNAPSHOT_REQUIRED"), QStringLiteral("Abre una rendición presentada con versión confirmada."));
             return;
@@ -717,6 +742,17 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
             auto row = entry.toMap();
             if (row.value(QStringLiteral("id")).toString() != versionId
                 || row.value(QStringLiteral("rendition_id")).toString() != remoteId) continue;
+            // Fondo y tipo de cambio congelados de ESTA versión (nunca los del borrador).
+            const auto frozen = m_repository->currentRendition();
+            if (frozen.value(QStringLiteral("id")).toString() != remoteId
+                || frozen.value(QStringLiteral("financialVersionId")).toString() != versionId) {
+                sendError(requestId, QStringLiteral("SNAPSHOT_REQUIRED"),
+                          QStringLiteral("Sincroniza la versión y sus suplementos antes de exportar."));
+                return;
+            }
+            row.insert(QStringLiteral("funding"), frozen.value(QStringLiteral("funding")));
+            row.insert(QStringLiteral("exchangeRate"), frozen.value(QStringLiteral("exchangeRate")));
+            row.insert(QStringLiteral("financialVersionId"), versionId);
             row.insert(QStringLiteral("rendition_version_id"), versionId);
             const auto header = row.value(QStringLiteral("snapshot_payload")).toMap().value(QStringLiteral("rendition")).toMap();
             row.insert(QStringLiteral("visible_code"), header.value(QStringLiteral("visible_code")));

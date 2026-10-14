@@ -3,6 +3,19 @@
 #include <QVariantList>
 
 namespace RenditionContract {
+inline bool canEditWorkingCopy(const QVariantMap &row) {
+    const auto version = row.value("row_version", row.value("rowVersion"));
+    if (version.isValid() && (version.toLongLong() < 0 || version.toLongLong() > 9007199254740991LL)) return false;
+    const auto status = row.value("status", "BORRADOR").toString().toUpper();
+    if (row.value("archived").toBool() || row.value("is_blocked", row.value("isBlocked")).toBool()
+        || row.value("isSnapshot").toBool() || (status != "BORRADOR" && status != "OBSERVADO")) return false;
+    if (row.contains("can_edit_content") || row.contains("canEditContent")) {
+        const auto permission = row.value("can_edit_content", row.value("canEditContent"));
+        return permission.metaType().id() == QMetaType::Bool && permission.toBool();
+    }
+    return status == "BORRADOR" && row.value("remoteId").toString().isEmpty()
+        && row.value("currentVersionId").toString().isEmpty() && !row.contains("id");
+}
 // List and detail RPCs have different shapes. Missing detail fields are not
 // deletions: preserve local values, while explicit projects=[] remains empty.
 inline QVariantMap normalize(const QVariantMap &row, const QVariantMap &saved = {}) {
@@ -12,7 +25,7 @@ inline QVariantMap normalize(const QVariantMap &row, const QVariantMap &saved = 
         {"primaryProjectName", "primary_project_name"}, {"totalPen", "total_pen"},
         {"totalUsd", "total_usd"}, {"expenseCount", "expense_count"},
         {"versionNumber", "version_number"}, {"currentVersionId", "current_version_id"},
-        {"baseCurrency", "base_currency_code"}, {"periodStart", "period_start"},
+        {"baseCurrency", "base_currency_code"}, {"canEditContent", "can_edit_content"}, {"periodStart", "period_start"},
         {"periodEnd", "period_end"}, {"createdAt", "created_at"}, {"updatedAt", "updated_at"}
     };
     for (auto it = aliases.cbegin(); it != aliases.cend(); ++it) {
@@ -36,6 +49,8 @@ inline QVariantMap normalize(const QVariantMap &row, const QVariantMap &saved = 
     }
     if (row.contains("current_version_number")) result.insert("versionNumber", row.value("current_version_number"));
     result.insert("currentVersionNumber", result.value("versionNumber"));
+    // An incomplete list response cannot preserve a stale positive authorization.
+    if (!row.contains("canEditContent") && !row.contains("can_edit_content")) result.insert("canEditContent", false);
     return result;
 }
 }

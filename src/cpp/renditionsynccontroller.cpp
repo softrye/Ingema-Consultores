@@ -44,6 +44,7 @@ RenditionSyncController::RenditionSyncController(
         setBusy(false);
         setLastError({});
     });
+    connect(m_repository, &RenditionRepository::financialSaved, this, &RenditionSyncController::finishCurrent);
     connect(m_repository, &RenditionRepository::renditionCreated,
             this, &RenditionSyncController::finishCurrent);
     connect(m_repository, &RenditionRepository::renditionEdited,
@@ -200,6 +201,13 @@ void RenditionSyncController::processNext()
     const QString localId = m_current.value(QStringLiteral("localId")).toString();
     const QString aggregateLocalId = m_current.value(
         QStringLiteral("aggregateLocalId"), localId).toString();
+
+    if (kind=="funding_set" || kind=="exchange_set") {
+        if (!m_store->markFinancialState(aggregateLocalId,kind,m_current.value("requestId").toString(),"SYNCING")) {
+            failCurrent("LOCAL_PERSISTENCE_FAILED",m_store->lastError());return;
+        }
+        m_repository->setFinancial(kind,m_current);return;
+    }
     if (kind == QLatin1String("rendition_delete")) {
         if (!m_store->markRenditionSyncing(aggregateLocalId)) { failCurrent("LOCAL_PERSISTENCE_FAILED", m_store->lastError()); return; }
         m_repository->deleteDraft(m_current.value(QStringLiteral("remoteId")).toString(),
@@ -312,7 +320,12 @@ void RenditionSyncController::finishCurrent(const QVariantMap &remote)
     const QString localId = m_current.value(QStringLiteral("localId")).toString();
     const QString aggregateLocalId = m_current.value(
         QStringLiteral("aggregateLocalId"), localId).toString();
-    if (kind == QLatin1String("rendition_delete")) {
+
+    if (kind=="funding_set" || kind=="exchange_set") {
+        if (!m_store->markFinancialSynced(aggregateLocalId,kind,m_current.value("requestId").toString(),remote)) {
+            failCurrent("INVALID_RESPONSE",m_store->lastError());return;
+        }
+    } else if (kind == QLatin1String("rendition_delete")) {
         if (!m_store->markDraftDeleted(aggregateLocalId, remote)) { failCurrent("INVALID_RESPONSE", m_store->lastError()); return; }
     } else if (kind.startsWith(QLatin1String("expense_"))) {
         if (!m_store->markExpenseSynced(aggregateLocalId, localId, remote)) {
@@ -364,7 +377,13 @@ void RenditionSyncController::failCurrent(const QString &code,
         state = ambiguous ? QString::fromLatin1(NeedsReconciliation) : state;
     }
 
-    if (kind == QLatin1String("attachment_reserve")) {
+
+    if (kind=="funding_set" || kind=="exchange_set") {
+        // Both financial RPCs deduplicate BEFORE CAS. Ambiguous failures replay
+        // the original request, not a rebased or newly generated intention.
+        state=conflict ? QString::fromLatin1(Conflict) : QString::fromLatin1(Error);
+        m_store->markFinancialState(aggregateLocalId,kind,m_current.value("requestId").toString(),state,message);
+    } else if (kind == QLatin1String("attachment_reserve")) {
         const QString phase = m_current.value(
             QStringLiteral("phase"), QStringLiteral("RESERVE")).toString();
         if (conflict)

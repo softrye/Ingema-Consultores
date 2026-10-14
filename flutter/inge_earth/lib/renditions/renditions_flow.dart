@@ -6,6 +6,7 @@
 // (RenditionFlutterBridge::submit).
 import 'dart:math';
 
+import 'rendition_money.dart';
 import 'renditions_bridge.dart' show RenditionCommandException;
 import 'renditions_models.dart';
 import 'v2/received/received_models.dart';
@@ -391,3 +392,157 @@ JsonMap attachSupportArgs({
         'documentNumber': documentNumber,
       },
     };
+
+// ------------------------------------------- Fondo y tipo de cambio (V02)
+// Reglas extraídas del panel financiero del Android madre (ingeplus), sin
+// widgets. La escritura es siempre `saveFinancial` (outbox nativo con
+// request_id y CAS); Dart nunca escribe en Supabase ni inventa cotizaciones.
+
+const financialKinds = <String>{'funding_set', 'exchange_set'};
+
+String financialDraftKey(String renditionLocalId) => 'financial:$renditionLocalId';
+
+/// Escritura financiera permitida: permiso efectivo, sin conflicto ni envío
+/// en curso, y la misma identidad abierta.
+bool financialWritable(RenditionData? current, {String? openLocalId, bool busy = false}) =>
+    current != null &&
+    (openLocalId == null || openLocalId == current.localId) &&
+    !current.readOnly &&
+    !current.hasConflict &&
+    current.syncState != 'SYNCING' &&
+    !busy;
+
+/// Fondo deshabilitado se envía como 0/0 (contrato set_rendition_funding_v01).
+JsonMap fundingValues({required bool enabled, required String pen, required String usd}) => {
+      'enabled': enabled,
+      'pen': enabled ? pen.trim() : '0',
+      'usd': enabled ? usd.trim() : '0',
+    };
+
+JsonMap manualExchangeValues(String rate) =>
+    {'mode': 'MANUAL', 'rate': rate.trim().replaceAll(',', '.'), 'quoted_on': null};
+
+/// Validación previa (C++ y el servidor vuelven a validar); null = válido.
+String? fundingError(JsonMap values) {
+  if (values['enabled'] != true) return null;
+  for (final currency in const ['pen', 'usd']) {
+    try {
+      if (moneyCents('${values[currency]}') < 0) return 'El fondo no puede ser negativo.';
+    } on FormatException {
+      return 'Fondo ${currency.toUpperCase()} no válido.';
+    }
+  }
+  return null;
+}
+
+String? manualRateError(String rate) {
+  try {
+    final micro = decimalScaled(rate.trim().replaceAll(',', '.'), 6);
+    if (micro <= BigInt.zero || micro > BigInt.from(999999000000)) {
+      return 'Tipo de cambio fuera de rango.';
+    }
+    return null;
+  } on FormatException {
+    return 'Tipo de cambio no válido.';
+  }
+}
+
+/// Argumentos de `saveFinancial`; el CAS es la versión vista al editar.
+JsonMap saveFinancialArgs({
+  required String renditionLocalId,
+  required String kind,
+  required JsonMap values,
+  required int expectedRowVersion,
+}) {
+  if (!financialKinds.contains(kind)) {
+    throw RenditionCommandException('INVALID_FINANCIAL_KIND', 'Operación financiera no válida: $kind');
+  }
+  return {
+    'localId': renditionLocalId,
+    'kind': kind,
+    'values': values,
+    'expectedRowVersion': expectedRowVersion,
+  };
+}
+
+/// Día calendario de Lima (UTC-5, sin horario de verano) en ISO.
+String limaDay(DateTime now) =>
+    now.toUtc().subtract(const Duration(hours: 5)).toIso8601String().substring(0, 10);
+
+/// Cotización automática BCRP/SBS venta devuelta por `exchangeQuote`.
+/// Rechaza otra fuente, fecha futura o con más de 45 días, tipo fuera de
+/// rango o sin hora de consulta: nunca se sustituye por cero ni se inventa.
+JsonMap automaticExchangeValues(JsonMap quote, DateTime now) {
+  final quoted = DateTime.tryParse('${quote['quotedOn']}');
+  final today = DateTime.parse(limaDay(now));
+  var micro = BigInt.zero;
+  try {
+    micro = decimalScaled(quote['rate'] ?? '', 6);
+  } on FormatException {
+    micro = BigInt.zero;
+  }
+  if (quote['source'] != 'BCRP_SBS_VENTA' ||
+      quoted == null ||
+      quoted.isAfter(today) ||
+      today.difference(quoted) > const Duration(days: 45) ||
+      micro <= BigInt.zero ||
+      micro > BigInt.from(999999000000) ||
+      DateTime.tryParse('${quote['checkedAt']}') == null) {
+    throw const RenditionCommandException(
+      'INVALID_QUOTE',
+      'Cotización no válida; se conserva el cambio guardado.',
+    );
+  }
+  return {
+    'mode': 'AUTOMATIC',
+    'rate': '${quote['rate']}',
+    'quoted_on': quote['quotedOn'],
+    'checked_at': quote['checkedAt'],
+  };
+}
+
+/// Consultar cotización: sólo en modo automático, con escritura vigente,
+/// identidad remota y estado SYNCED; como máximo cada 5 min y, tras un
+/// éxito del mismo día, cada hora (salvo [force]).
+bool quoteRefreshDue({
+  required RenditionData current,
+  required bool automatic,
+  required bool dirty,
+  required DateTime now,
+  DateTime? lastAttempt,
+  DateTime? lastSuccess,
+  String? lastQuoteDay,
+  bool force = false,
+}) {
+  if (!automatic ||
+      !financialWritable(current) ||
+      current.remoteId.isEmpty ||
+      current.syncState != 'SYNCED' ||
+      (!force && dirty)) {
+    return false;
+  }
+  if (force) return true;
+  if (lastAttempt != null && now.difference(lastAttempt) < const Duration(minutes: 5)) {
+    return false;
+  }
+  return !(lastQuoteDay == limaDay(now) &&
+      lastSuccess != null &&
+      now.difference(lastSuccess) < const Duration(hours: 1));
+}
+
+/// Una cotización tardía sólo se aplica si nada cambió mientras llegaba:
+/// misma identidad, misma versión (CAS), misma edición y misma sesión.
+bool quoteStillApplicable({
+  required RenditionData before,
+  required RenditionData? now,
+  required int revisionBefore,
+  required int revisionNow,
+  required int sessionBefore,
+  required int sessionNow,
+}) =>
+    now != null &&
+    financialWritable(now) &&
+    now.localId == before.localId &&
+    now.rowVersion == before.rowVersion &&
+    revisionBefore == revisionNow &&
+    sessionBefore == sessionNow;

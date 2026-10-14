@@ -1,4 +1,5 @@
 #include "renditionsnapshotexporter.h"
+#include "renditionmoney.h"
 
 #include <QFileInfo>
 #include <QFont>
@@ -69,6 +70,17 @@ bool SnapshotExportModel::fromReceived(const QVariantMap &received, SnapshotExpo
         result.expenses.append(expense);
     }
     result.attachments = snapshot.value(QStringLiteral("attachments")).toList();
+    if (received.contains("funding") || received.contains("exchangeRate")) {
+        result.funding = received.value("funding").toMap(); result.exchangeRate = received.value("exchangeRate").toMap();
+        if (received.value("financialVersionId").toString()!=result.versionId
+            || text(result.funding,"rendition_id")!=text(received,"rendition_id")
+            || text(result.exchangeRate,"rendition_id")!=text(received,"rendition_id")
+            || !RenditionMoney::cents(result.funding.value("pen").toString())
+            || !RenditionMoney::cents(result.funding.value("usd").toString())) {
+            *error = QStringLiteral("Suplementos no corresponden a la versión inmutable."); return false;
+        }
+        result.financialSupplements = true;
+    }
     *model = result;
     return true;
 }
@@ -140,6 +152,11 @@ bool RenditionSnapshotExporter::write(const SnapshotExportModel &m, const QStrin
             else xlsx.currentWorksheet()->writeString(row, 2, item.second.toString(), cell);
             ++row;
         }
+        if (m.financialSupplements) {
+            const QList<QPair<QString,QString>> financial = {{"Fondo PEN",text(m.funding,"pen")},{"Fondo USD",text(m.funding,"usd")},
+                {"Tipo de cambio",text(m.exchangeRate,"rate")},{"Modo",text(m.exchangeRate,"mode")},{"Fecha cotización",text(m.exchangeRate,"quoted_on")}};
+            for (const auto &item : financial) { xlsx.currentWorksheet()->writeString(row,1,item.first,cell); xlsx.currentWorksheet()->writeString(row++,2,item.second,cell); }
+        }
         xlsx.setColumnWidth(1, 22);
         xlsx.setColumnWidth(2, 75);
         if (xlsx.saveAs(path)) return true;
@@ -174,6 +191,10 @@ bool RenditionSnapshotExporter::write(const SnapshotExportModel &m, const QStrin
     field(QStringLiteral("Versión"), QString::number(m.version));
     field(QStringLiteral("Hash de versión"), m.hash);
     field(QStringLiteral("Totales"), QStringLiteral("PEN %1 | USD %2").arg(m.totalPen, 0, 'f', 2).arg(m.totalUsd, 0, 'f', 2));
+    if (m.financialSupplements) {
+        field("Fondo PEN / USD",text(m.funding,"pen")+" / "+text(m.funding,"usd"));
+        field("Tipo de cambio congelado",text(m.exchangeRate,"rate")+" | "+text(m.exchangeRate,"mode")+" | "+text(m.exchangeRate,"quoted_on"));
+    }
     html += QStringLiteral("<h2>GASTOS</h2>");
     int index = 0;
     for (const auto &entry : m.expenses) {
