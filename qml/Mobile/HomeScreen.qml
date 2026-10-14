@@ -4,6 +4,7 @@ import QtQuick.Shapes
 import QtCore
 import InGe 1.0
 import "lib/AccountText.js" as AccountText
+import "renditions" as Renditions
 
 // Home V1 de InGe+ (2026-10-12; Preview 1). Fondo fotográfico real
 // (assets/home, fotos originales del usuario), saludo verificado, tarjetas de
@@ -58,10 +59,6 @@ Item {
     property string calicataProjectId: ""
     property var selectedCalicata: null
     function navigate(target) {
-        if (isComingSoonPage(target)) {           // ninguna ruta del Home lo elude
-            notifyComingSoon(target)
-            return
-        }
         addOpen = false
         page = target
     }
@@ -96,6 +93,12 @@ Item {
             return true
         if ((page === "calicatas" || page === "earth") && dockPath.length > 0) {   // submenú del dock
             dockPath = dockPath.slice(0, -1)
+            return true
+        }
+        if (page === "rendiciones") {
+            // Atrás recorre la pila interna de Rendiciones antes de volver al Home.
+            if (renditionsLoader.item && renditionsLoader.item.handleBack()) return true
+            page = "home"
             return true
         }
         if (page === "calicatas" && calicatasEditor.item) {
@@ -556,7 +559,7 @@ Item {
         var k = it.kind
         if (k === "calicatas_app" || k === "calicatas") openCalicatas("", "")
         else if (k === "calicatasProject") openCalicatas(it.targetId, "")
-        else if (k === "rendiciones_app") notifyComingSoon(k)
+        else if (k === "rendiciones_app") navigate("rendiciones")
         else if (k === "earth_app") openEarth("home")
         else if (k === "drive_app") navigate("drive")
         else if (k === "project" || k === "calicatasProject") openCalicatas(it.targetId, "")
@@ -564,16 +567,11 @@ Item {
         else if (k === "settings") navigate("settings")
         else if (k === "profile") navigate("profile")
     }
-    // Solo Rendiciones mantiene la entrada en pausa; Earth usa Retroplasma.
-    function isComingSoon(kind) { return kind === "rendiciones_app" }
-    function isComingSoonPage(target) { return target === "rendiciones" }
+    // Ningún módulo en pausa: Rendiciones es una subapp QML real (2026-10-14).
+    function isComingSoon(kind) { return false }
     function notify(message) {
         iaStatus = message
         iaStatusTimer.restart()
-    }
-    function notifyComingSoon(target) {
-        notify((target === "earth" || target === "earth_app" ? "InGe Earth" : "Rendiciones")
-               + " estará disponible próximamente.")
     }
     function glyphFor(kind) {
         if (kind === "rendiciones_app") return 0xE3D3
@@ -962,10 +960,36 @@ Item {
                 }
             }
         }
+        // Subapp Rendiciones: QML nativo sobre RenditionsUi -> bridge -> dominio.
+        // Se conserva cargada tras la primera apertura (borradores y navegación).
+        Loader {
+            id: renditionsLoader
+            anchors.fill: parent
+            active: home.page === "rendiciones" || home.renditionsEverLoaded
+            visible: home.page === "rendiciones" && status === Loader.Ready
+            enabled: visible
+            sourceComponent: Component {
+                Renditions.RenditionsApp {
+                    ui: home
+                    ctl: typeof RenditionsUi !== "undefined" ? RenditionsUi : null
+                    active: home.page === "rendiciones"
+                    onRequestBack: home.page = "home"
+                }
+            }
+            onStatusChanged: {
+                if (status === Loader.Ready) {
+                    home.renditionsEverLoaded = true
+                } else if (status === Loader.Error) {
+                    console.error("INGE_RENDITIONS_LOAD_ERROR renditions/RenditionsApp.qml")
+                    home.page = "home"
+                    home.notify("No se pudo abrir Rendiciones. Revisa el registro de la aplicación.")
+                }
+            }
+        }
         PageFrame {
             ui: home
-            shown: home.page === "rendiciones" || home.page === "drive"
-            title: home.page === "drive" ? "InGe Drive" : "Rendiciones"
+            shown: home.page === "drive"
+            title: "InGe Drive"
             Text {
                 width: parent.width
                 text: "Los servicios de este módulo siguen activos; su interfaz está pendiente de integración."
@@ -1055,6 +1079,7 @@ Item {
     // Se conserva cargado tras la primera apertura (como AppShell): volver al
     // inicio no reinicia formularios ni pierde borradores.
     property bool calicatasEditorEverLoaded: false
+    property bool renditionsEverLoaded: false
     Loader {
         id: calicatasEditor
         z: 60

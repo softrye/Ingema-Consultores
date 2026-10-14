@@ -625,6 +625,27 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/lib/CalicataWorkspaceLogic.js"
             "${MOBILE_QML_DIR}/lib/AccountText.js"
             "${MOBILE_QML_DIR}/lib/PhotoEditSchema.js"
+            # Rendiciones: subapp QML nativa (RenditionsUi -> RenditionFlutterBridge).
+            "${MOBILE_QML_DIR}/renditions/RStyle.js"
+            "${MOBILE_QML_DIR}/renditions/RButton.qml"
+            "${MOBILE_QML_DIR}/renditions/RField.qml"
+            "${MOBILE_QML_DIR}/renditions/RSelect.qml"
+            "${MOBILE_QML_DIR}/renditions/RDateField.qml"
+            "${MOBILE_QML_DIR}/renditions/RChip.qml"
+            "${MOBILE_QML_DIR}/renditions/RBadge.qml"
+            "${MOBILE_QML_DIR}/renditions/RCard.qml"
+            "${MOBILE_QML_DIR}/renditions/RConfirm.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionsApp.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionsHome.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionEditor.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionDetail.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionExpenses.qml"
+            "${MOBILE_QML_DIR}/renditions/ExpenseEditor.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionFinancial.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionDocuments.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionReview.qml"
+            "${MOBILE_QML_DIR}/renditions/ReviewPanel.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionReceived.qml"
         )
 
         # Acceso (Login V1): tipografia corporativa Rubik (SIL OFL) y simbolo

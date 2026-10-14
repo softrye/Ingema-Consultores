@@ -59,7 +59,8 @@ constexpr qsizetype kMaximumImportedPhotoBytes = 64 * 1024 * 1024;
 
 bool validPhotoTarget(int targetIdx)
 {
-    return targetIdx >= 1 && targetIdx <= 3;
+    // 1..3: fotografías de Calicatas. 101: sustento de un gasto de Rendiciones.
+    return (targetIdx >= 1 && targetIdx <= 3) || targetIdx == 101;
 }
 
 QString photoImportRoot()

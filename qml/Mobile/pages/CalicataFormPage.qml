@@ -7690,6 +7690,7 @@ Item {
         ignoreUnknownSignals: true
 
         function onPhotoSelected(targetIdx, localUrl, sourceKind) {
+            if (targetIdx < 1 || targetIdx > 3) return   // slot de otra subapp (Rendiciones)
             if (root._logoRequestPending
                     && targetIdx === root._logoPickerIndex(root._pendingLogoPickTarget)
                     && sourceKind === "gallery") {
@@ -7721,6 +7722,7 @@ Item {
         }
 
         function onPhotoSelectionCanceled(targetIdx, sourceKind) {
+            if (targetIdx < 1 || targetIdx > 3) return
             if (root._logoRequestPending
                     && targetIdx === root._logoPickerIndex(root._pendingLogoPickTarget)
                     && sourceKind === "gallery") {
@@ -7739,6 +7741,7 @@ Item {
         }
 
         function onPhotoSelectionError(targetIdx, code, message) {
+            if (targetIdx < 1 || targetIdx > 3) return
             if (root._logoRequestPending
                     && targetIdx === root._logoPickerIndex(root._pendingLogoPickTarget)) {
                 root._releasePendingLogoRequest()
