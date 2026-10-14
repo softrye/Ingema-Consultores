@@ -9,6 +9,8 @@ qt_add_qml_module(InGeRetroplasma STATIC
         RetroplasmaMath.h RetroplasmaMath.cpp
         RetroplasmaPlanet.h RetroplasmaPlanet.cpp
         RetroplasmaPlanetProvider.h RetroplasmaPlanetProvider.cpp
+        RetroplasmaGeoDocument.h RetroplasmaGeoDocument.cpp
+        RetroplasmaGeoController.cpp
         RetroplasmaCamera.h RetroplasmaCamera.cpp
         RetroplasmaGeometryDecoder.h RetroplasmaGeometryDecoder.cpp
         RetroplasmaTextureDecoder.h RetroplasmaTextureDecoder.cpp
@@ -19,7 +21,7 @@ qt_add_qml_module(InGeRetroplasma STATIC
         RetroplasmaItem.h RetroplasmaItem.cpp
 )
 target_include_directories(InGeRetroplasma PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(InGeRetroplasma PUBLIC Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Concurrent Qt6::Network PRIVATE Qt6::GuiPrivate)
+target_link_libraries(InGeRetroplasma PUBLIC Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Concurrent Qt6::Network PRIVATE Qt6::GuiPrivate Qt6::CorePrivate)
 target_compile_features(InGeRetroplasma PUBLIC cxx_std_17)
 qt_add_shaders(InGeRetroplasma rp_shaders
     PREFIX /inge/retroplasma

@@ -26,7 +26,7 @@ RetroplasmaController::~RetroplasmaController(){close();m_pool.waitForDone();}
 void RetroplasmaController::open(){if(m_active)return;m_active=true;m_mailbox=std::make_shared<inge::rp::MetricsMailbox>();m_presentedFrames=m_lastFrameCount=0;m_fps=m_frameMs=0;m_clock.restart();m_telemetryClock.start();if(m_appVisible)m_tick.start();openPlanet();emit changed();}
 void RetroplasmaController::openPlanet(){m_preservedCamera.reset();loadScene(QUrl(QStringLiteral("inge-earth://global")));}
 void RetroplasmaController::setPlanetImagery(const QString &layer,const QString &date){
-    if(!m_active||(layer!=QLatin1String("blue-marble")&&layer!=QLatin1String("landsat")))return;
+    if(!m_active||(layer!=QLatin1String("blue-marble")&&layer!=QLatin1String("landsat")&&layer!=QLatin1String("sentinel")))return;
     if(m_scene&&m_scene->planetary)m_preservedCamera=m_camera;
     QUrl url(QStringLiteral("inge-earth://global"));QUrlQuery q;q.addQueryItem(QStringLiteral("layer"),layer);if(!date.isEmpty())q.addQueryItem(QStringLiteral("date"),date);url.setQuery(q);loadScene(url);
 }
@@ -41,18 +41,22 @@ void RetroplasmaController::loadScene(const QUrl &url){
     connect(watcher,&QFutureWatcher<SceneResult>::finished,this,[this,watcher,generation,cancel](){
         auto result=watcher->result();watcher->deleteLater();if(generation!=m_generation||cancel->load()||!m_active)return;
         m_manifestBusy=false;m_scene=result.first;
-        if(!m_scene)m_status=result.second;else {if(m_scene->planetary){if(m_preservedCamera)m_camera=*m_preservedCamera;else m_camera.resetPlanet(true);}else m_camera.reset(m_scene->bounds,true);m_preservedCamera.reset();if(m_pendingTarget){auto point=*m_pendingTarget;m_pendingTarget.reset();goTo(point.latitude,point.longitude,point.altitude);}m_status=QStringLiteral("Cargando mallas y texturas…");schedule();}
+        if(!m_scene)m_status=result.second;else {if(m_scene->planetary){if(m_preservedCamera)m_camera=*m_preservedCamera;else m_camera.framePlanet(m_width/m_height,true);}else m_camera.reset(m_scene->bounds,true);m_preservedCamera.reset();if(m_pendingTarget){auto point=*m_pendingTarget;m_pendingTarget.reset();goTo(point.latitude,point.longitude,point.altitude);}m_status=QStringLiteral("Cargando mallas y texturas…");schedule();}
         emit renderChanged();emit changed();
     });
     watcher->setFuture(QtConcurrent::run(&m_pool,[provider,url,cancel](){SceneResult result;try{if(!cancel->load())result.first=provider->readScene(url,result.second,*cancel);}catch(...){result.second=QStringLiteral("RP_SCENE_READ_OR_MEMORY_ERROR");}return result;}));
     emit renderChanged();emit changed();
 }
-void RetroplasmaController::setViewport(double width,double height){m_width=std::max(1.0,width);m_height=std::max(1.0,height);}
+void RetroplasmaController::setViewport(double width,double height,double pixelRatio){m_width=std::max(1.0,width);m_height=std::max(1.0,height);m_pixelRatio=std::clamp(pixelRatio,1.0,4.0);}
 void RetroplasmaController::framePresented(){if(renderActive())++m_presentedFrames;}
 void RetroplasmaController::tick(){
     if(!m_active||!m_appVisible)return;
     double dt=m_clock.restart()/1000.0;m_camera.step(std::min(dt,0.1));
     if(++m_ticks%6==0)schedule();
+    if(m_ticks%30==0&&(!m_geoLayers.empty()||!m_measureLine.points.empty())){
+        double width=std::clamp(m_camera.pose().distance*2*std::tan(22.5*inge::rp::Radians)/m_height*3,10.0,30000.0);
+        if(m_geoWidth==0||width/m_geoWidth>1.25||width/m_geoWidth<.8)rebuildGeoTiles();
+    }
     if(m_telemetryClock.elapsed()>=500){quint64 frames=m_presentedFrames;double ms=m_telemetryClock.restart();m_fps=ms>0?(frames-m_lastFrameCount)*1000.0/ms:0;m_frameMs=m_fps>0?1000.0/m_fps:0;m_lastFrameCount=frames;emit changed();}
     emit renderChanged();
 }
@@ -94,13 +98,17 @@ void RetroplasmaController::schedule(){
     else m_status=m_jobs.empty()?m_scene->title:QStringLiteral("Escena visible · refinando LOD…");
 }
 inge::rp::Schedule RetroplasmaController::chooseTiles(const QHash<QString,std::shared_ptr<const inge::rp::LoadedTile>> &resident)const{
-    return m_scene->planetary?inge::rp::RetroplasmaTileScheduler::selectPlanet(*m_scene,viewProjection(),m_camera.eye(),m_height,resident,QString::number(m_generation)):inge::rp::RetroplasmaTileScheduler::select(*m_scene,viewProjection(),m_camera.eye(),m_height,resident,QString::number(m_generation));
+    return m_scene->planetary?inge::rp::RetroplasmaTileScheduler::selectPlanet(*m_scene,viewProjection(),m_camera.eye(),m_height*m_pixelRatio,resident,QString::number(m_generation)):inge::rp::RetroplasmaTileScheduler::select(*m_scene,viewProjection(),m_camera.eye(),m_height,resident,QString::number(m_generation));
 }
 void RetroplasmaController::trimCache(const QSet<QString> &protectedKeys){
     std::size_t bytes=0;for(const auto &entry:m_cache)bytes+=entry.tile->bytes;
     while(bytes>CacheLimit){auto candidate=m_cache.end();for(auto it=m_cache.begin();it!=m_cache.end();++it)if(!protectedKeys.contains(it.key())&&(candidate==m_cache.end()||it.value().used<candidate.value().used))candidate=it;if(candidate==m_cache.end()){m_status=QStringLiteral("RP_VISIBLE_CPU_CACHE_LIMIT");break;}bytes-=candidate.value().tile->bytes;m_cache.erase(candidate);}
 }
-void RetroplasmaController::orbit(double dx,double dy){if(m_active&&std::isfinite(dx)&&std::isfinite(dy))m_camera.orbit(-dx*0.006,dy*0.006);}
+void RetroplasmaController::orbit(double dx,double dy){
+    if(!m_active||!std::isfinite(dx)||!std::isfinite(dy))return;
+    double speed=m_camera.planetary()?std::clamp(m_camera.pose().distance/inge::rp::EarthRadius*.002,1e-6,.006):.006;
+    m_camera.orbit(-dx*speed,dy*speed);
+}
 void RetroplasmaController::pan(double dx,double dy){if(m_active)m_camera.pan(-dx,dy);}
 void RetroplasmaController::zoom(double scale){if(m_active&&std::isfinite(scale)&&scale>0)m_camera.zoom(1/scale);}
 void RetroplasmaController::rotateView(double radians){if(m_active)m_camera.rotateHeading(radians);}
@@ -124,7 +132,7 @@ bool RetroplasmaController::command(const QString &name){
     else if(name==QLatin1String("tiltUp"))m_camera.orbit(0,0.15);else if(name==QLatin1String("tiltDown"))m_camera.orbit(0,-0.15);
     else if(name==QLatin1String("panLeft"))m_camera.pan(-50,0);else if(name==QLatin1String("panRight"))m_camera.pan(50,0);
     else if(name==QLatin1String("panUp")||name==QLatin1String("forward"))m_camera.pan(0,50);else if(name==QLatin1String("panDown")||name==QLatin1String("backward"))m_camera.pan(0,-50);
-    else if(name==QLatin1String("reset")){if(m_scene->planetary)m_camera.resetPlanet();else m_camera.reset(m_scene->bounds);}else if(name==QLatin1String("north"))m_camera.north();else return false;
+    else if(name==QLatin1String("reset")){if(m_scene->planetary)m_camera.framePlanet(m_width/m_height);else m_camera.reset(m_scene->bounds);}else if(name==QLatin1String("north"))m_camera.north();else return false;
     emit renderChanged();return true;
 }
 QString RetroplasmaController::coordinates()const{if(!m_scene)return {};auto point=m_scene->planetary?m_camera.planetTarget():inge::rp::ecefToGeodetic(inge::rp::enuToEcef(inge::rp::renderToEnu(m_camera.pose().focus),m_scene->origin));return QStringLiteral("%1°, %2° · objetivo %3 m · cámara %4 m").arg(point.latitude,0,'f',6).arg(point.longitude,0,'f',6).arg(point.altitude,0,'f',1).arg(m_camera.pose().distance,0,'f',1);}

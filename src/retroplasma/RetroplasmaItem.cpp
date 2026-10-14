@@ -146,11 +146,11 @@ public:
     ~Renderer()override{clearGpu();}
 };
 }
-RetroplasmaItem::RetroplasmaItem(QQuickItem *parent):QQuickRhiItem(parent){setAlphaBlending(false);setSampleCount(1);connect(this,&QQuickItem::windowChanged,this,[this](QQuickWindow *){connectPresentation();});}
+RetroplasmaItem::RetroplasmaItem(QQuickItem *parent):QQuickRhiItem(parent){setAlphaBlending(false);setSampleCount(1);connect(this,&QQuickItem::windowChanged,this,[this](QQuickWindow *){connectPresentation();if(m_controller)m_controller->setViewport(width(),height(),window()?window()->effectiveDevicePixelRatio():1);});}
 void RetroplasmaItem::connectPresentation(){
     QObject::disconnect(m_presentConnection);
     if(window()&&m_controller){auto controller=m_controller;m_presentConnection=connect(window(),&QQuickWindow::frameSwapped,this,[controller](){if(controller)controller->framePresented();},Qt::QueuedConnection);}
 }
-void RetroplasmaItem::setController(RetroplasmaController *controller){if(m_controller==controller)return;QObject::disconnect(m_updateConnection);m_controller=controller;if(controller){m_updateConnection=connect(controller,&RetroplasmaController::renderChanged,this,[this](){update();});controller->setViewport(width(),height());}connectPresentation();emit controllerChanged();update();}
+void RetroplasmaItem::setController(RetroplasmaController *controller){if(m_controller==controller)return;QObject::disconnect(m_updateConnection);m_controller=controller;if(controller){m_updateConnection=connect(controller,&RetroplasmaController::renderChanged,this,[this](){update();});controller->setViewport(width(),height(),window()?window()->effectiveDevicePixelRatio():1);}connectPresentation();emit controllerChanged();update();}
 QQuickRhiItemRenderer *RetroplasmaItem::createRenderer(){return new Renderer;}
-void RetroplasmaItem::geometryChange(const QRectF &now,const QRectF &before){QQuickRhiItem::geometryChange(now,before);if(m_controller)m_controller->setViewport(now.width(),now.height());}
+void RetroplasmaItem::geometryChange(const QRectF &now,const QRectF &before){QQuickRhiItem::geometryChange(now,before);if(m_controller)m_controller->setViewport(now.width(),now.height(),window()?window()->effectiveDevicePixelRatio():1);}

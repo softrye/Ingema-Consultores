@@ -2,6 +2,7 @@
 #include "RetroplasmaCamera.h"
 #include "RetroplasmaDataProvider.h"
 #include "RetroplasmaTileScheduler.h"
+#include "RetroplasmaGeoDocument.h"
 #include <QObject>
 #include <QFutureWatcher>
 #include <QThreadPool>
@@ -24,6 +25,11 @@ class RetroplasmaController : public QObject {
     Q_PROPERTY(QString sourceName READ sourceName NOTIFY changed)
     Q_PROPERTY(QString coordinates READ coordinates NOTIFY changed)
     Q_PROPERTY(QVariantMap metrics READ metrics NOTIFY changed)
+    Q_PROPERTY(QVariantMap cameraInfo READ cameraInfo NOTIFY changed)
+    Q_PROPERTY(QVariantList geoLayers READ geoLayers NOTIFY geoChanged)
+    Q_PROPERTY(QString documentMessage READ documentMessage NOTIFY geoChanged)
+    Q_PROPERTY(double measurementKm READ measurementKm NOTIFY geoChanged)
+    Q_PROPERTY(bool measuring READ measuring NOTIFY geoChanged)
 public:
     explicit RetroplasmaController(QObject *parent=nullptr);
     ~RetroplasmaController() override;
@@ -37,6 +43,22 @@ public:
     QString sourceName()const;
     QString coordinates()const;
     QVariantMap metrics()const;
+    QVariantMap cameraInfo()const;
+    QVariantList geoLayers()const;
+    QString documentMessage()const{return m_documentMessage;}
+    double measurementKm()const{return m_measurementKm;}
+    bool measuring()const{return m_measuring;}
+    Q_INVOKABLE bool importDocument(const QString &path);
+    Q_INVOKABLE QString exportDocument(const QString &folder,const QString &name,bool kmz=false);
+    Q_INVOKABLE void setLayerVisible(const QString &id,bool visible);
+    Q_INVOKABLE void removeGeoLayer(const QString &id);
+    Q_INVOKABLE void clearGeoLayers();
+    Q_INVOKABLE void centerGeoLayer(const QString &id,int feature=-1);
+    Q_INVOKABLE void addPlace(const QString &name);
+    Q_INVOKABLE void beginMeasure();
+    Q_INVOKABLE void cancelMeasure();
+    Q_INVOKABLE bool selectPosition(double x,double y,bool marker=false);
+    Q_INVOKABLE double scaleMetres(double pixels)const;
     Q_INVOKABLE void open();
     Q_INVOKABLE void close();
     Q_INVOKABLE void loadScene(const QUrl &url);
@@ -50,16 +72,26 @@ public:
     Q_INVOKABLE void zoom(double scale);
     Q_INVOKABLE void rotateView(double radians);
     Q_INVOKABLE bool goTo(double latitude,double longitude,double altitude=0);
-    void setViewport(double width,double height);
+    void setViewport(double width,double height,double pixelRatio=1);
     void framePresented();
     inge::rp::Mat4 viewProjection()const{return m_camera.viewProjection(m_width/m_height);}
     inge::rp::Vec3 viewLight()const{return m_scene&&m_scene->planetary?inge::rp::normalized(m_camera.eye()):inge::rp::Vec3{.25,1,.4};}
-    std::vector<inge::rp::RenderTile> renderTiles()const{return m_renderTiles;}
+    std::vector<inge::rp::RenderTile> renderTiles()const{auto result=m_renderTiles;if(m_scene&&m_scene->planetary)result.insert(result.end(),m_geoTiles.begin(),m_geoTiles.end());return result;}
     std::shared_ptr<inge::rp::MetricsMailbox> mailbox()const{return m_mailbox;}
 signals:
     void changed();
     void renderChanged();
+    void geoChanged();
 private:
+    struct GeoLayer {QString id;inge::rp::GeoDocument document;bool visible=true;};
+    void rebuildGeoTiles();
+    std::vector<GeoLayer> m_geoLayers;
+    std::vector<inge::rp::RenderTile> m_geoTiles;
+    inge::rp::GeoFeature m_measureLine;
+    bool m_measuring=false;
+    double m_measurementKm=0,m_geoWidth=0;
+    quint64 m_geoRevision=0;
+    QString m_documentMessage;
     void tick();
     void schedule();
     void cancelJobs();
@@ -84,7 +116,7 @@ private:
     QElapsedTimer m_clock,m_telemetryClock;
     quint64 m_generation=0,m_usage=0,m_presentedFrames=0,m_lastFrameCount=0;
     int m_ticks=0;
-    double m_width=1,m_height=1,m_fps=0,m_frameMs=0;
+    double m_width=1,m_height=1,m_pixelRatio=1,m_fps=0,m_frameMs=0;
     bool m_active=false,m_manifestBusy=false,m_navigationMode=false,m_appVisible=true;
     QString m_status=QStringLiteral("CLOSED");
 };
