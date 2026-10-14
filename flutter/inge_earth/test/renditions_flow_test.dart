@@ -191,14 +191,14 @@ void main() {
       {'field': 'ruc', 'value': '1', 'valid': true, 'confidence': .69},
       {'field': 'concept', 'value': 'x', 'valid': false, 'confidence': .99},
       {'field': 'igv', 'value': '2', 'valid': true, 'confidence': .9, 'conflict': true},
-    ]});
+    ]}, aiEnabled: true);
     expect(patches.map((p) => p.field), ['amount']);
     expect(patches.single.sourceAttachment, 'a, b');
     expect(untouchedDefaultField('expenseDate', isNew: true, date: 'd', periodStart: 'd', currency: 'USD'), true);
     expect(untouchedDefaultField('currencyCode', isNew: true, date: 'x', periodStart: 'd', currency: 'PEN'), true);
     expect(untouchedDefaultField('currencyCode', isNew: false, date: 'x', periodStart: 'd', currency: 'PEN'), false);
     final history = [for (var i = 0; i < 25; i++) ExpenseData({'localId': 'h$i'})];
-    final args = coreAnalyzeArgs(attachments: [], projectId: 'p', entityId: 'i',
+    final args = coreAnalyzeArgs(aiEnabled: true, attachments: [], projectId: 'p', entityId: 'i',
         renditionLocalId: 'r', currentFields: {}, periodStart: 's', periodEnd: 'e',
         categories: [], supportTypes: [], paymentMethods: [], history: history, savedId: 'h0');
     final context = args['context'] as JsonMap;

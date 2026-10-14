@@ -6,6 +6,7 @@
 // (RenditionFlutterBridge::submit).
 import 'dart:math';
 
+import 'rendition_features.dart';
 import 'rendition_money.dart';
 import 'renditions_bridge.dart' show RenditionCommandException;
 import 'renditions_models.dart';
@@ -287,8 +288,11 @@ List<ExpenseData> duplicateExpenses(List<ExpenseData> expenses, String savedId,
             similarExpense({...values, 'attachments': pendingAttachments}, e.raw))
         .toList();
 
-/// Contexto de `coreAnalyze` para el análisis de comprobantes.
+/// Contexto de `coreAnalyze` para el análisis de comprobantes. Con la IA de
+/// Rendiciones desactivada (por defecto) lanza AI_DISABLED: ningún
+/// comprobante se prepara para un proveedor IA.
 JsonMap coreAnalyzeArgs({
+  bool aiEnabled = renditionsAiEnabled,
   required List<JsonMap> attachments,
   required String projectId,
   required String entityId,
@@ -301,7 +305,9 @@ JsonMap coreAnalyzeArgs({
   required List<JsonMap> paymentMethods,
   required List<ExpenseData> history,
   required String savedId,
-}) => {
+}) {
+  ensureRenditionsAi(enabled: aiEnabled);
+  return {
       'attachments': attachments,
       'context': {
         'project_id': projectId, 'entity_id': entityId,
@@ -318,11 +324,16 @@ JsonMap coreAnalyzeArgs({
             history.where((e) => e.localId != savedId).take(20).map((e) => e.raw).toList(),
       },
     };
+}
 
 /// Propuestas del análisis aplicables automáticamente: válidas, sin
-/// conflicto y con confianza >= 0,70.
-List<SuggestedExpensePatch> acceptedReceiptPatches(JsonMap result) =>
-    jsonRows(result['fields'])
+/// conflicto y con confianza >= 0,70. Smart Fill automático desactivado con
+/// la IA de Rendiciones: ninguna propuesta se aplica sola.
+List<SuggestedExpensePatch> acceptedReceiptPatches(JsonMap result,
+        {bool aiEnabled = renditionsAiEnabled}) =>
+    !aiEnabled
+        ? const <SuggestedExpensePatch>[]
+        : jsonRows(result['fields'])
         .where((r) =>
             r['conflict'] != true &&
             r['valid'] == true &&

@@ -1,3 +1,4 @@
+import '../../rendition_features.dart';
 import '../../renditions_models.dart';
 import 'package:flutter/services.dart';
 
@@ -87,6 +88,8 @@ class LocalReceiptAnalysis implements ReceiptAnalysisAdapter {
   static const channel = MethodChannel('inge.renditions/host');
   @override
   Future<List<SuggestedExpensePatch>> analyze(JsonMap attachment) async {
+    // Smart Fill desactivado con la IA de Rendiciones (rendition_features.dart).
+    ensureRenditionsAi();
     final nativeText = textField(attachment, 'nativeText', 'text');
     if (nativeText.isNotEmpty) return parseReceipt({'text': nativeText}, textField(attachment, 'localId'));
     final path = textField(attachment, 'localUri', 'local_uri');

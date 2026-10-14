@@ -7,6 +7,7 @@
 #include "renditionsynccontroller.h"
 #include "renditionsnapshotexporter.h"
 #include "renditioncontract.h"
+#include "renditionfeatures.h"
 
 #include <QJsonDocument>
 #include <QDateTime>
@@ -627,6 +628,13 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
     }
 
     if (operation == QLatin1String("coreAnalyze")) {
+        // IA de Rendiciones desactivada (RenditionFeatures::aiEnabled): ningún
+        // comprobante sale hacia un proveedor IA; el gasto se completa a mano.
+        if (!RenditionFeatures::aiEnabled) {
+            sendError(requestId, QString::fromLatin1(RenditionFeatures::aiDisabledCode),
+                      QString::fromUtf8(RenditionFeatures::aiDisabledMessage));
+            return;
+        }
         if (!m_core) { sendError(requestId,"AI_UNAVAILABLE","InGe Core no disponible"); return; }
         m_coreRequests.insert(requestId);
         m_core->analyzeEvidence(requestId,arguments.value("attachments").toList(),
