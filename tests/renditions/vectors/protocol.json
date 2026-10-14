@@ -1,0 +1,220 @@
+{
+  "version": "0.1.0",
+  "scope": "Synthetic local validation fixtures; CAS/idempotency scenarios describe required server behavior, not a live DB test.",
+  "schemaCases": [
+    {
+      "id": "UUID-CANONICAL",
+      "definition": "uuid",
+      "value": "00000000-0000-4000-8000-000000000900",
+      "valid": true
+    },
+    {
+      "id": "UUID-UPPERCASE",
+      "definition": "uuid",
+      "value": "00000000-0000-4000-8000-00000000090A",
+      "valid": false
+    },
+    {
+      "id": "REQUEST-NIL",
+      "definition": "requestId",
+      "value": "00000000-0000-0000-0000-000000000000",
+      "valid": false
+    },
+    {
+      "id": "CAS-VALID",
+      "definition": "rowVersion",
+      "value": 7,
+      "valid": true
+    },
+    {
+      "id": "CAS-UNSAFE",
+      "definition": "rowVersion",
+      "value": 9007199254740992,
+      "valid": false
+    },
+    {
+      "id": "STATE-READ-LEGACY",
+      "definition": "readableState",
+      "value": "PRESENTADA",
+      "valid": true
+    },
+    {
+      "id": "STATE-WRITE-LEGACY",
+      "definition": "activeState",
+      "value": "PRESENTADA",
+      "valid": false
+    },
+    {
+      "id": "ACCESS-READ",
+      "definition": "access",
+      "value": "READ",
+      "valid": true
+    },
+    {
+      "id": "ACCESS-OWNER-IS-NOT-ACL",
+      "definition": "access",
+      "value": "OWNER",
+      "valid": false
+    },
+    {
+      "id": "ATTACHMENT-BUCKET",
+      "definition": "attachmentStorageProjection",
+      "value": {
+        "storage_bucket": "project-files",
+        "storage_path": "synthetic/fixture"
+      },
+      "valid": true
+    },
+    {
+      "id": "ATTACHMENT-PRIVATE-BUCKET",
+      "definition": "attachmentStorageProjection",
+      "value": {
+        "storage_bucket": "unknown",
+        "storage_path": "synthetic/fixture"
+      },
+      "valid": false
+    },
+    {
+      "id": "SNAPSHOT",
+      "definition": "snapshotProjection",
+      "value": {
+        "expenses": []
+      },
+      "valid": true
+    }
+  ],
+  "uuidCases": [
+    {
+      "value": "00000000-0000-4000-8000-000000000900",
+      "valid": true
+    },
+    {
+      "value": "BAD-UUID",
+      "valid": false
+    }
+  ],
+  "stateCases": [
+    {
+      "id": "LOCAL-DRAFT",
+      "status": "BORRADOR",
+      "androidReadOnly": false
+    },
+    {
+      "id": "REMOTE-NO-CAPABILITY",
+      "status": "BORRADOR",
+      "remoteId": "synthetic",
+      "androidReadOnly": true
+    },
+    {
+      "id": "OBSERVADO-WRITE",
+      "status": "OBSERVADO",
+      "can_edit_content": true,
+      "androidReadOnly": false
+    },
+    {
+      "id": "OBSERVADO-READ",
+      "status": "OBSERVADO",
+      "can_edit_content": false,
+      "androidReadOnly": true
+    },
+    {
+      "id": "SNAPSHOT",
+      "status": "OBSERVADO",
+      "can_edit_content": true,
+      "isSnapshot": true,
+      "androidReadOnly": true
+    },
+    {
+      "id": "BLOCKED",
+      "status": "BORRADOR",
+      "can_edit_content": true,
+      "is_blocked": true,
+      "androidReadOnly": true
+    },
+    {
+      "id": "REVIEW",
+      "status": "EN_REVISION",
+      "can_edit_content": true,
+      "androidReadOnly": true
+    },
+    {
+      "id": "APPROVED",
+      "status": "APROBADO",
+      "can_edit_content": true,
+      "androidReadOnly": true
+    }
+  ],
+  "conflictCases": [
+    {
+      "state": "CONFLICT",
+      "conflict": true
+    },
+    {
+      "state": "NEEDS_RECONCILIATION",
+      "conflict": true
+    },
+    {
+      "state": "SYNCED",
+      "conflict": false
+    }
+  ],
+  "attachmentCases": [
+    {
+      "status": "READY",
+      "bucket": "project-files"
+    },
+    {
+      "status": "PENDING_UPLOAD",
+      "bucket": "project-files"
+    },
+    {
+      "status": "FAILED",
+      "bucket": "project-files"
+    }
+  ],
+  "exchangeCases": [
+    {
+      "pen": 75,
+      "usd": 20,
+      "rate": 3.75,
+      "expectedPen": 150,
+      "expectedUsd": 40
+    },
+    {
+      "pen": 0.01,
+      "usd": 0,
+      "rate": 2,
+      "expectedPen": 0.01,
+      "expectedUsd": 0.01
+    }
+  ],
+  "casCases": [
+    {
+      "expected": 7,
+      "actual": 8,
+      "error": "RENDITION_VERSION_CONFLICT"
+    }
+  ],
+  "idempotencyCases": [
+    {
+      "sameRequest": true,
+      "samePayload": false,
+      "error": "RENDITION_IDEMPOTENCY_CONFLICT"
+    }
+  ],
+  "snapshotCases": [
+    {
+      "payload": {
+        "expenses": [
+          {
+            "amount": 1.01,
+            "currency_code": "PEN",
+            "expense_date": "2026-10-01",
+            "review_status": "VALIDADO"
+          }
+        ]
+      },
+      "expectedPen": 1.01
+    }
+  ]
+}
