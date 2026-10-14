@@ -3,7 +3,7 @@
 #include <QUrl>
 #include <atomic>
 namespace inge::rp {
-// Provider boundary is independent of camera/RHI. No remote endpoint is used.
+// Provider boundary is independent of camera/RHI. LocalSceneProvider stays local-only.
 class RetroplasmaDataProvider {
 public:
     virtual ~RetroplasmaDataProvider()=default;

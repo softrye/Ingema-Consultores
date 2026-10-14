@@ -31,6 +31,7 @@ class Renderer final : public QQuickRhiItemRenderer {
     std::vector<inge::rp::RenderTile> m_selected;
     std::shared_ptr<inge::rp::MetricsMailbox> m_mailbox;
     inge::rp::Mat4 m_camera;
+    inge::rp::Vec3 m_light{.25,1,.4};
     QShader m_vertex,m_fragment;
     QString m_error;
     bool m_active=false;
@@ -47,7 +48,7 @@ class Renderer final : public QQuickRhiItemRenderer {
         if(controller&&m_sceneRevision!=controller->sceneRevision()){
             m_sceneRevision=controller->sceneRevision();m_sceneChanged=true;
         }
-        if(controller){m_selected=controller->renderTiles();m_camera=controller->viewProjection();m_mailbox=controller->mailbox();}
+        if(controller){m_selected=controller->renderTiles();m_camera=controller->viewProjection();m_light=controller->viewLight();m_mailbox=controller->mailbox();}
         else {m_selected.clear();m_mailbox.reset();}
     }
     void publish(inge::rp::RenderMetrics stats,QElapsedTimer &clock){
@@ -129,7 +130,7 @@ class Renderer final : public QQuickRhiItemRenderer {
         }
         QMatrix4x4 matrix;for(int r=0;r<4;++r)for(int c=0;c<4;++c)matrix(r,c)=float(m_camera.at(r,c));
         matrix=m_rhi->clipSpaceCorrMatrix()*matrix;
-        float uniform[20];std::copy(matrix.constData(),matrix.constData()+16,uniform);uniform[16]=0.25f;uniform[17]=1;uniform[18]=0.4f;uniform[19]=0;
+        float uniform[20];std::copy(matrix.constData(),matrix.constData()+16,uniform);uniform[16]=float(m_light.x);uniform[17]=float(m_light.y);uniform[18]=float(m_light.z);uniform[19]=0;
         uploads->updateDynamicBuffer(m_uniform.get(),0,80,uniform);
         cb->beginPass(renderTarget(),QColor(12,23,34),{1.0f,0},uploads);
         const auto size=renderTarget()->pixelSize();cb->setViewport({0,0,float(size.width()),float(size.height())});

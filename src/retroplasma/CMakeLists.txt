@@ -1,4 +1,4 @@
-find_package(Qt6 6.9.3 REQUIRED COMPONENTS Core Gui Qml Quick Concurrent ShaderTools)
+find_package(Qt6 6.9.3 REQUIRED COMPONENTS Core Gui Qml Quick Concurrent Network ShaderTools)
 qt_add_qml_module(InGeRetroplasma STATIC
     URI InGe.Retroplasma
     VERSION 1.0
@@ -7,6 +7,8 @@ qt_add_qml_module(InGeRetroplasma STATIC
     RESOURCE_PREFIX /qt/qml
     SOURCES
         RetroplasmaMath.h RetroplasmaMath.cpp
+        RetroplasmaPlanet.h RetroplasmaPlanet.cpp
+        RetroplasmaPlanetProvider.h RetroplasmaPlanetProvider.cpp
         RetroplasmaCamera.h RetroplasmaCamera.cpp
         RetroplasmaGeometryDecoder.h RetroplasmaGeometryDecoder.cpp
         RetroplasmaTextureDecoder.h RetroplasmaTextureDecoder.cpp
@@ -17,7 +19,7 @@ qt_add_qml_module(InGeRetroplasma STATIC
         RetroplasmaItem.h RetroplasmaItem.cpp
 )
 target_include_directories(InGeRetroplasma PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(InGeRetroplasma PUBLIC Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Concurrent PRIVATE Qt6::GuiPrivate)
+target_link_libraries(InGeRetroplasma PUBLIC Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Concurrent Qt6::Network PRIVATE Qt6::GuiPrivate)
 target_compile_features(InGeRetroplasma PUBLIC cxx_std_17)
 qt_add_shaders(InGeRetroplasma rp_shaders
     PREFIX /inge/retroplasma
@@ -27,7 +29,7 @@ qt_add_shaders(InGeRetroplasma rp_shaders
     FILES shaders/terrain.vert shaders/terrain.frag
 )
 # Explicit source resources; no network content or generated frames.
-file(GLOB RP_SAMPLE_ASSETS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/resources/sample/*")
+file(GLOB RP_SAMPLE_ASSETS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/resources/sample/*" "${CMAKE_CURRENT_SOURCE_DIR}/resources/earth/*")
 qt_add_resources(InGeRetroplasma rp_samples
     PREFIX /inge/retroplasma
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"

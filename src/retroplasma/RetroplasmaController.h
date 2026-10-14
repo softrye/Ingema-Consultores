@@ -1,6 +1,7 @@
 #pragma once
 #include "RetroplasmaCamera.h"
 #include "RetroplasmaDataProvider.h"
+#include "RetroplasmaTileScheduler.h"
 #include <QObject>
 #include <QFutureWatcher>
 #include <QThreadPool>
@@ -33,7 +34,7 @@ public:
     bool ready()const{return bool(m_scene);}
     bool navigationMode()const{return m_navigationMode;}
     QString status()const{return m_status;}
-    QString sourceName()const{return m_scene?m_scene->source:QString();}
+    QString sourceName()const;
     QString coordinates()const;
     QVariantMap metrics()const;
     Q_INVOKABLE void open();
@@ -41,14 +42,18 @@ public:
     Q_INVOKABLE void loadScene(const QUrl &url);
     Q_INVOKABLE void loadLocalScene(const QString &path);
     Q_INVOKABLE void retryScene();
+    Q_INVOKABLE void openPlanet();
+    Q_INVOKABLE void setPlanetImagery(const QString &layer,const QString &date=QString());
     Q_INVOKABLE bool command(const QString &name);
     Q_INVOKABLE void orbit(double dx,double dy);
     Q_INVOKABLE void pan(double dx,double dy);
     Q_INVOKABLE void zoom(double scale);
+    Q_INVOKABLE void rotateView(double radians);
     Q_INVOKABLE bool goTo(double latitude,double longitude,double altitude=0);
     void setViewport(double width,double height);
     void framePresented();
     inge::rp::Mat4 viewProjection()const{return m_camera.viewProjection(m_width/m_height);}
+    inge::rp::Vec3 viewLight()const{return m_scene&&m_scene->planetary?inge::rp::normalized(m_camera.eye()):inge::rp::Vec3{.25,1,.4};}
     std::vector<inge::rp::RenderTile> renderTiles()const{return m_renderTiles;}
     std::shared_ptr<inge::rp::MetricsMailbox> mailbox()const{return m_mailbox;}
 signals:
@@ -59,6 +64,7 @@ private:
     void schedule();
     void cancelJobs();
     void trimCache(const QSet<QString> &protectedKeys);
+    inge::rp::Schedule chooseTiles(const QHash<QString,std::shared_ptr<const inge::rp::LoadedTile>> &)const;
     struct Job {std::shared_ptr<std::atomic_bool> cancelled;};
     struct CacheEntry {std::shared_ptr<const inge::rp::LoadedTile> tile;quint64 used=0;};
     std::shared_ptr<const inge::rp::RetroplasmaDataProvider> m_provider;
@@ -73,6 +79,7 @@ private:
     std::vector<inge::rp::RenderTile> m_renderTiles;
     inge::rp::Camera m_camera;
     std::optional<inge::rp::GeoPoint> m_pendingTarget;
+    std::optional<inge::rp::Camera> m_preservedCamera;
     QTimer m_tick;
     QElapsedTimer m_clock,m_telemetryClock;
     quint64 m_generation=0,m_usage=0,m_presentedFrames=0,m_lastFrameCount=0;
