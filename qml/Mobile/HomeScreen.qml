@@ -111,7 +111,7 @@ Item {
         else if (addOpen) { closeAdd(); return true }
         else if (selectedCalicata) { selectedCalicata = null; return true }
         else if (page === "calicatas" && calicataProjectId.length > 0) { calicataProjectId = ""; return true }
-        else if (page === "earth") { page = earthReturnPage; earthReturnPage = "home"; return true }
+        else if (page === "earth") { if (earthNativeLoader.item && earthNativeLoader.item.handleBack()) return true; page = earthReturnPage; earthReturnPage = "home"; return true }
         else if (page !== "home") { page = "home"; return true }
         else return false
     }
@@ -503,6 +503,7 @@ Item {
         ScriptAction { script: home.optionsCard = null }
     }
     onUserIdChanged: {
+        EarthNative.clearGeoLayers()
         EarthNative.close()
         earthRequestedTarget = ({})
         earthReturnPage = "home"
@@ -934,27 +935,25 @@ Item {
                 }
             }
         }
-        PageFrame {
-            ui: home
-            shown: home.page === "earth"
-            title: "InGe Earth"
-            Loader {
-                id: earthNativeLoader
-                width: parent.width
-                active: home.page === "earth" && home.visible
-                sourceComponent: Component {
-                    RetroplasmaEarthView {
-                        controller: EarthNative
-                        otherGpsClientActive: function() { return home.page === "calicatas" && calicatasEditor.item && calicatasEditor.item.gpsEnabled }
-                        u: home.u
-                        fontFamily: home.fontFamily
-                        viewportHeight: Math.max(240 * home.u, home.height * 0.50)
-                        diagnosticsShown: home.earthDiagnosticsShown
-                        coordinatesShown: home.earthCoordinatesShown
-                        coordinateEntryShown: home.earthCoordinateEntryShown
-                        sourceEntryShown: home.earthSourceEntryShown
-                        onCoordinateEntryFinished: home.earthCoordinateEntryShown = false
-                    }
+        Loader {
+            id: earthNativeLoader
+            anchors.fill: parent
+            active: home.page === "earth" && home.visible
+            visible: active
+            sourceComponent: Component {
+                RetroplasmaEarthView {
+                    controller: EarthNative
+                    otherGpsClientActive: function() { return home.page === "calicatas" && calicatasEditor.item && calicatasEditor.item.gpsEnabled }
+                    u: home.u
+                    fontFamily: home.fontFamily
+                    safeTop: home.topInset
+                    safeBottom: Qt.inputMethod.visible ? 14 * home.u : home.dockArea
+                    reducedMotion: home.reducedMotion
+                    diagnosticsShown: home.earthDiagnosticsShown
+                    coordinatesShown: home.earthCoordinatesShown
+                    coordinateEntryShown: home.earthCoordinateEntryShown
+                    sourceEntryShown: home.earthSourceEntryShown
+                    onCoordinateEntryFinished: home.earthCoordinateEntryShown = false
                 }
             }
         }
@@ -1168,13 +1167,15 @@ Item {
     property bool earthDockReady: false
     property bool earthDockNavigation: false
     readonly property var earthDockPreset: [
+        {id: "earth.files", label: "KML / KMZ / Drive", icon: "earth.diagnostics", command: "earth.files", priority: 13},
+        {id: "earth.measure", label: "Medir distancia", icon: "earth.pan", command: "earth.measure", priority: 14},
         {id: "earth.zoomIn", label: "Acercar", icon: "earth.zoomIn", command: "earth.zoomIn", enabled: earthDockReady, priority: 1},
         {id: "earth.zoomOut", label: "Alejar", icon: "earth.zoomOut", command: "earth.zoomOut", enabled: earthDockReady, priority: 2},
-        {id: "earth.rotate", label: "Rotar e inclinar", icon: "earth.rotate", command: "", priority: 3, children: [
+        {id: "earth.rotate", label: "Girar planeta", icon: "earth.rotate", command: "", priority: 3, children: [
             {id: "earth.rotateLeft", label: "Girar a la izquierda", icon: "earth.rotateLeft", command: "earth.rotateLeft", enabled: earthDockReady},
             {id: "earth.rotateRight", label: "Girar a la derecha", icon: "earth.rotate", command: "earth.rotateRight", enabled: earthDockReady},
-            {id: "earth.tiltUp", label: "Elevar vista", icon: "earth.rotate", command: "earth.tiltUp", enabled: earthDockReady},
-            {id: "earth.tiltDown", label: "Bajar vista", icon: "earth.rotate", command: "earth.tiltDown", enabled: earthDockReady},
+            {id: "earth.tiltUp", label: "Mover vista al norte", icon: "earth.rotate", command: "earth.tiltUp", enabled: earthDockReady},
+            {id: "earth.tiltDown", label: "Mover vista al sur", icon: "earth.rotate", command: "earth.tiltDown", enabled: earthDockReady},
             {id: "earth.north", label: "Orientar al norte", icon: "earth.pan", command: "earth.north", enabled: earthDockReady}
         ]},
         {id: "earth.pan", label: "Desplazar", icon: "earth.pan", command: "", priority: 4, children: [
@@ -1188,9 +1189,9 @@ Item {
         {id: "earth.navigation", label: "Modo navegación", icon: "earth.pan", command: "earth.navigation", selected: earthDockNavigation, priority: 7},
         {id: "earth.coordinates", label: "Mostrar coordenadas", icon: "earth.pan", command: "earth.coordinates", priority: 8},
         {id: "earth.diagnostics", label: "Métricas del visor", icon: "earth.diagnostics", command: "earth.diagnostics", priority: 9},
-        {id: "earth.source", label: "Imágenes NASA / escenas", icon: "earth.diagnostics", command: "earth.source", priority: 10},
+        {id: "earth.source", label: "Capas y fuentes", icon: "earth.diagnostics", command: "earth.source", priority: 10},
         {id: "earth.gps", label: "Mi ubicación GPS", icon: "earth.pan", command: "earth.gps", priority: 11},
-        {id: "earth.places", label: "Lugares", icon: "earth.pan", command: "", priority: 12, children: [
+        {id: "earth.places", label: "Lugares", icon: "earth.pan", command: "earth.savedPlaces", priority: 12, children: [
             {id: "earth.southAmerica", label: "Sudamérica", icon: "earth.pan", command: "earth.southAmerica", enabled: earthDockReady},
             {id: "earth.peru", label: "Perú", icon: "earth.pan", command: "earth.peru", enabled: earthDockReady},
             {id: "earth.lima", label: "Lima", icon: "earth.pan", command: "earth.lima", enabled: earthDockReady}
@@ -1252,10 +1253,11 @@ Item {
             try {
                 if (home.page !== "earth" || !home.visible) return
                 var name = String(commandId)
-                if (name === "earth.diagnostics") home.earthDiagnosticsShown = !home.earthDiagnosticsShown
+                if (name === "earth.diagnostics" && earthNativeLoader.item) earthNativeLoader.item.showSheet("info")
                 else if (name === "earth.coordinates") home.earthCoordinatesShown = !home.earthCoordinatesShown
-                else if (name === "earth.goTo") home.earthCoordinateEntryShown = !home.earthCoordinateEntryShown
-                else if (name === "earth.source") home.earthSourceEntryShown = !home.earthSourceEntryShown
+                else if (name === "earth.goTo" && earthNativeLoader.item) earthNativeLoader.item.showSheet("search")
+                else if (name === "earth.source" && earthNativeLoader.item) earthNativeLoader.item.showSheet("layers")
+                else if (earthNativeLoader.item && (name === "earth.files" || name === "earth.measure" || name === "earth.savedPlaces")) earthNativeLoader.item.showSheet(name === "earth.savedPlaces" ? "places" : name.substring(6))
                 else if (name === "earth.gps" && earthNativeLoader.item) earthNativeLoader.item.requestGps()
                 else if (!EarthNative.command(name.indexOf("earth.") === 0 ? name.substring(6) : name))
                     home.notify("La escena 3D aún no está disponible para este control.")

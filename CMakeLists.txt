@@ -254,6 +254,9 @@ if(INGE_BUILD_MOBILE)
     # Calicatas: editor original restaurado (Qt Quick Controls, estilo Basic)
     # y sus recursos con las rutas qrc originales.
     find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS QuickControls2)
+    if(QT_VERSION_MAJOR GREATER_EQUAL 6)
+        find_package(Qt6 REQUIRED COMPONENTS QuickDialogs2)
+    endif()
     set(INGE_MOBILE_CALICATAS_QRC "${INGE_PROJECT_ROOT}/resources_mobile_calicatas.qrc")
 
     set(MOBILE_SOURCES
@@ -522,7 +525,7 @@ if(INGE_BUILD_MOBILE)
 
         if(QT_VERSION_MAJOR GREATER_EQUAL 6)
             target_include_directories(AppCalicatasMobile PRIVATE "${INGE_PROJECT_ROOT}/src/documents")
-            target_link_libraries(AppCalicatasMobile PRIVATE Qt6::GuiPrivate)
+            target_link_libraries(AppCalicatasMobile PRIVATE Qt6::GuiPrivate Qt6::QuickDialogs2)
         endif()
 
         if(ANDROID)
@@ -568,6 +571,7 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/AuroraField.qml"
             "${MOBILE_QML_DIR}/HomeScreen.qml"
             "${MOBILE_QML_DIR}/RetroplasmaEarthView.qml"
+            "${MOBILE_QML_DIR}/EarthDocumentSheet.qml"
             "${MOBILE_QML_DIR}/AddToolPanel.qml"
             "${MOBILE_QML_DIR}/GlassSurface.qml"
             # Calicatas: editor original restaurado y sus dependencias reales.
