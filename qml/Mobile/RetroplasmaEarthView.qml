@@ -1,14 +1,26 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Effects
 import InGe.Retroplasma 1.0
 
 // One native GPU viewport; forms and telemetry remain ordinary Qt Quick.
+// UX 5.0: sin barras superiores/inferiores propias. Buscar, Lugares, Medir,
+// Archivos, Info, Fuentes y Herramientas se abren desde "···" del Dock global
+// (HomeScreen.earthDockPreset); aquí quedan los seis controles Liquid Glass.
 Item {
     id: root
     required property var controller
     property real u: 1
     property string fontFamily: ""
+    property string iconFamily: ""          // Lucide, la misma fuente del Dock
+    property bool lowCostGlass: false       // gama baja: sin captura del globo
+    property color glassTint: Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.42)
+    property var requestedTarget: ({})      // destino pedido por Calicatas/Home
+    property var selectedTarget: ({})       // último destino real: GPS, coordenadas o petición
+    onRequestedTargetChanged: if (requestedTarget && requestedTarget.latitude !== undefined) selectedTarget = requestedTarget
+    property string filesIntent: ""
+    property string searchMessage: ""
     property real viewportHeight: height // compatibility; rendering always fills this Item
     property real safeTop: 36 * u
     property real safeBottom: 110 * u
@@ -19,6 +31,12 @@ Item {
     property var permissions: Perms
     onSheetChanged: if (sheet === "files") filesInitialized = true
     function showSheet(name) { sheet = name }
+    // Archivos desde el Dock: import | drive | save | export (el panel aplica la intención al cargar).
+    function openFiles(intent) {
+        filesIntent = intent || ""
+        showSheet("files")
+        if (filesLoader.documentPanel && filesIntent.length) { filesLoader.documentPanel.applyIntent(filesIntent); filesIntent = "" }
+    }
     function handleBack() {
         if (sheet.length) { sheet = ""; coordinateEntryFinished(); return true }
         if (controller.measuring) { controller.cancelMeasure(); return true }
@@ -36,6 +54,7 @@ Item {
     property bool gpsStartedTracking: false
     property var otherGpsClientActive: function() { return false }
     property string gpsMessage: ""
+    property string gpsState: "idle"        // idle | searching | fixed | error
     function finishGps() {
         gpsTimeout.stop()
         gpsRequested = false
@@ -46,6 +65,7 @@ Item {
         gpsStartedTracking = gpsStartedTracking || !root.permissions.nativeTracking
         if (!root.permissions.requestImmediateLocationUpdate()) {
             gpsMessage = root.permissions.nativeLocationError || "Activa la ubicación del dispositivo."
+            gpsState = "error"
             finishGps()
         } else {
             gpsMessage = "Buscando posición GPS…"
@@ -55,6 +75,8 @@ Item {
     function requestGps() {
         if (gpsRequested) return
         gpsRequested = true
+        gpsMessage = "Buscando posición GPS…"   // antes del estado: la confirmación nunca muestra el fix anterior
+        gpsState = "searching"
         if (!root.permissions.hasLocationPermission()) {
             gpsMessage = "Autoriza ubicación precisa para centrar el planeta."
             root.permissions.requestLocationPermission()
@@ -65,10 +87,14 @@ Item {
         if (!gpsRequested || !root.permissions.nativeHasFix || Date.now() - root.permissions.nativeTimestampMs > 30000) return
         if (controller.goTo(root.permissions.nativeLatitude, root.permissions.nativeLongitude, isFinite(root.permissions.nativeAltitude) ? root.permissions.nativeAltitude : 0)) {
             gpsMessage = "GPS · precisión " + Number(root.permissions.nativeAccuracy).toFixed(0) + " m"
+            selectedTarget = { latitude: root.permissions.nativeLatitude, longitude: root.permissions.nativeLongitude,
+                               altitude: isFinite(root.permissions.nativeAltitude) ? root.permissions.nativeAltitude : 0,
+                               label: "mi ubicación" }
+            gpsState = "fixed"
             finishGps()
         }
     }
-    Timer { id: gpsTimeout; interval: 30000; onTriggered: { root.gpsMessage = "No se obtuvo una posición reciente. Reintenta GPS."; root.finishGps() } }
+    Timer { id: gpsTimeout; interval: 30000; onTriggered: { root.gpsMessage = "No se obtuvo una posición reciente. Reintenta GPS."; root.gpsState = "error"; root.finishGps() } }
     Connections {
         target: root.permissions
         function onNativePermissionChanged() {
@@ -81,19 +107,6 @@ Item {
     }
     Component.onDestruction: finishGps()
 
-    component FloatButton: Rectangle {
-        id: action
-        property string label: ""
-        property string glyph: label
-        signal activated()
-        width: 48 * root.u; height: 48 * root.u; radius: 24 * root.u
-        color: tap.pressed ? "#E0E9F6" : "#F5F8FC"
-        Accessible.role: Accessible.Button
-        Accessible.name: label
-        Accessible.onPressAction: activated()
-        Text { font.family: root.fontFamily; anchors.centerIn: parent; text: action.glyph; color: "#163451"; font.pixelSize: 17 * root.u; font.bold: true }
-        TapHandler { id: tap; onTapped: action.activated() }
-    }
     Rectangle { anchors.fill: parent; color: "#070F1E" }
     RetroplasmaView {
         id: viewport
@@ -134,78 +147,356 @@ Item {
         }
         WheelHandler { target: null; onWheel: function(event) { root.controller.zoom(Math.exp(event.angleDelta.y / 600)); event.accepted = true } }
     }
-    Rectangle {
-        id: searchPill
-        x: 16 * root.u; y: root.safeTop + 12 * root.u
-        width: parent.width - 32 * root.u; height: 52 * root.u; radius: 26 * root.u; color: "#F5F8FC"
-        Accessible.role: Accessible.Button; Accessible.name: "Buscar coordenadas o lugares"
-        Accessible.onPressAction: root.showSheet("search")
-        Text { font.family: root.fontFamily; anchors.left: parent.left; anchors.leftMargin: 20 * root.u; anchors.verticalCenter: parent.verticalCenter; text: "InGe Earth  |  Buscar lugar"; color: "#344A62"; font.pixelSize: 15 * root.u }
-        TapHandler { onTapped: root.showSheet("search") }
+    // ================================================ Cámara: estado compartido
+    // Los seis controles y el Dock usan los mismos métodos del controlador
+    // (command/goTo); la cámara nativa ya interpola cada objetivo.
+    readonly property bool planetReady: controller.ready
+    readonly property real cameraAltitude: Number(controller.cameraInfo.cameraAltitude) || 0
+    readonly property real rawHeading: Number(controller.cameraInfo.heading) || 0
+    readonly property real headingOffset: ((rawHeading % 360) + 540) % 360 - 180
+    readonly property real minCameraAltitude: 2000         // límites de RetroplasmaCamera::zoom
+    readonly property real maxCameraAltitude: 50000000
+    property real zoomPrediction: 0                        // telemetría a 2 Hz: predice toques seguidos
+    readonly property real effectiveAltitude: zoomPrediction > 0 ? zoomPrediction : cameraAltitude
+    Timer { id: zoomPredictionReset; interval: 900; onTriggered: root.zoomPrediction = 0 }
+    function formatAltitude(metres) {
+        if (metres >= 100000) return Math.round(metres / 1000).toLocaleString(Qt.locale(), "f", 0) + " km"
+        if (metres >= 1000) return Number(metres / 1000).toFixed(1) + " km"
+        return Math.round(metres) + " m"
     }
-    Column {
-        anchors.right: parent.right; anchors.rightMargin: 16 * root.u
-        y: searchPill.y + searchPill.height + 18 * root.u; spacing: 10 * root.u
-        FloatButton { label: "Orientar al norte"; glyph: "N"; onActivated: root.controller.command("north")
-            Text { font.family: root.fontFamily; anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 3 * root.u; text: Math.round(root.controller.cameraInfo.heading) + "\u00b0"; color: "#344A62"; font.pixelSize: 8 * root.u }
+    function zoomStep(zoomIn) {
+        var next = Math.max(minCameraAltitude, Math.min(maxCameraAltitude, effectiveAltitude * (zoomIn ? 0.75 : 1.333333)))
+        if (!controller.command(zoomIn ? "zoomIn" : "zoomOut"))
+            return false
+        zoomPrediction = next
+        zoomPredictionReset.restart()
+        return true
+    }
+    function orientNorth() {
+        var wasNorth = Math.abs(headingOffset) <= 0.5
+        if (!controller.command("north")) { compassAction.confirm("La brújula no está disponible todavía.", "error"); return }
+        compassAction.confirm(wasNorth ? "Ya orientado al norte" : "Norte restablecido", "ok")
+    }
+    function centerView() {
+        var t = selectedTarget, info = controller.cameraInfo
+        if (t && t.latitude !== undefined) {
+            var lonGap = Math.abs(((Number(info.longitude) - t.longitude) % 360 + 540) % 360 - 180)
+            var centered = Math.abs(Number(info.latitude) - t.latitude) < 0.02 && lonGap < 0.02
+            if (!centered) {
+                if (controller.goTo(t.latitude, t.longitude, t.altitude || 0)) centerAction.confirm("Centrado en " + (t.label || "la ubicación seleccionada"), "ok")
+                else centerAction.confirm("No se pudo centrar la ubicación.", "error")
+                return
+            }
         }
-        FloatButton { label: "Mi ubicacion"; glyph: "GPS"; onActivated: root.requestGps() }
-        FloatButton { label: "Capas"; glyph: "☷"; onActivated: root.showSheet("layers") }
-        FloatButton { label: "Acercar"; glyph: "+"; onActivated: root.controller.command("zoomIn") }
-        FloatButton { label: "Alejar"; glyph: "-"; onActivated: root.controller.command("zoomOut") }
-        FloatButton { label: "Planeta completo"; glyph: "◎"; onActivated: root.controller.command("reset") }
+        // Sin selección, o ya centrado en ella: recupera el encuadre del planeta.
+        if (controller.command("reset")) centerAction.confirm("Encuadre del planeta restablecido", "ok")
+        else centerAction.confirm("El planeta aún se está cargando.", "error")
     }
+    onGpsStateChanged: {
+        if (gpsState === "searching") gpsAction.confirm(gpsMessage.length ? gpsMessage : "Buscando posición GPS…", "info")
+        else if (gpsState === "fixed") gpsAction.confirm(gpsMessage, "ok")
+        else if (gpsState === "error") gpsAction.confirm(gpsMessage, "error")
+    }
+    onGpsMessageChanged: if (gpsState === "searching" && gpsMessage.length) gpsAction.confirm(gpsMessage, "info")
+    Timer { id: gpsFixFade; interval: 12000; running: root.gpsState === "fixed"; onTriggered: root.gpsState = "idle" }
+
+    // ================================================ Liquid Glass compartido
+    // UNA captura del globo bajo la columna (1/4 de resolución) + UN desenfoque:
+    // los seis botones muestrean la misma textura. Sin blur por botón; sin
+    // captura en gama baja ni con la columna oculta (se pausa por completo).
+    readonly property real controlSpacing: 12 * u
+    readonly property real controlTop: safeTop + 16 * u
+    readonly property real controlBottom: height - safeBottom - 16 * u
+    readonly property real controlSize: Math.max(40 * u, Math.min(52 * u, (controlBottom - controlTop - 5 * controlSpacing) / 6))
+    property real controlsShown: sheet.length ? 0 : 1      // un panel abierto nunca queda tapado
+    Behavior on controlsShown { NumberAnimation { duration: root.reducedMotion ? 0 : 240; easing.type: Easing.OutCubic } }
+    readonly property bool glassLive: !lowCostGlass && visible && controlsShown > 0.001
+    property int glassTick: 0
+    onWidthChanged: glassTick++
+    onHeightChanged: glassTick++
+    Item {
+        id: controlGlass
+        readonly property real pad: 14 * root.u
+        x: controls.x - pad
+        y: controls.y - pad
+        width: controls.width + 2 * pad
+        height: controls.height + 2 * pad
+        readonly property Item backdrop: controlGlass
+        // Se conserva asignada (congelada) aunque la columna se oculte: GlassSurface
+        // no admite pasar a una textura nula sin avisos.
+        readonly property var glassTexture: glassChain.item ? glassChain.item.texture : null
+        readonly property int glassTick: root.glassTick
+        onXChanged: root.glassTick++
+        onYChanged: root.glassTick++
+        onWidthChanged: root.glassTick++
+        onHeightChanged: root.glassTick++
+        Loader {   // gama baja: no existe; columna oculta: live = false (cero trabajo por frame)
+            id: glassChain
+            anchors.fill: parent
+            active: !root.lowCostGlass
+            sourceComponent: Item {
+                readonly property var texture: controlGlassTexture
+                ShaderEffectSource {
+                    id: controlCapture
+                    width: controlGlass.width
+                    height: controlGlass.height
+                    sourceItem: viewport
+                    sourceRect: Qt.rect(controlGlass.x, controlGlass.y, controlGlass.width, controlGlass.height)
+                    live: root.glassLive
+                    hideSource: false
+                    visible: false
+                    textureSize: Qt.size(Math.max(1, Math.round(width / 4)), Math.max(1, Math.round(height / 4)))
+                }
+                MultiEffect {
+                    id: controlBlur
+                    width: controlGlass.width
+                    height: controlGlass.height
+                    source: controlCapture
+                    blurEnabled: true
+                    blurMax: 32
+                    blur: 1.0
+                    autoPaddingEnabled: false
+                }
+                ShaderEffectSource {
+                    id: controlGlassTexture
+                    sourceItem: controlBlur
+                    live: root.glassLive
+                    hideSource: true
+                    visible: false
+                    smooth: true
+                    textureSize: Qt.size(Math.max(1, Math.round(controlBlur.width / 4)), Math.max(1, Math.round(controlBlur.height / 4)))
+                }
+            }
+        }
+    }
+
+    // ================================================ Seis controles laterales
+    Column {
+        id: controls
+        z: 5
+        spacing: root.controlSpacing
+        x: root.width - width - 18 * root.u + (1 - root.controlsShown) * (width + 36 * root.u)
+        y: root.controlTop
+        opacity: root.controlsShown
+        visible: opacity > 0.01
+        enabled: root.controlsShown > 0.99
+        EarthGlassAction {   // 1. Brújula: rumbo real; toque = norte animado
+            id: compassAction
+            glassHost: controlGlass; u: root.u; iconFamily: root.iconFamily; fontFamily: root.fontFamily
+            width: root.controlSize; height: width; reducedMotion: root.reducedMotion; tint: root.glassTint
+            label: "Brújula: orientar al norte"
+            hint: "Rumbo " + Math.round(((root.rawHeading % 360) + 360) % 360) + "°"
+            available: root.planetReady
+            active: Math.abs(root.headingOffset) > 0.5
+            face: Component {
+                Item {
+                    rotation: -root.rawHeading
+                    Behavior on rotation { NumberAnimation { duration: root.reducedMotion ? 0 : 480; easing.type: Easing.OutCubic } }
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        y: 2 * root.u
+                        text: "N"
+                        font.family: root.fontFamily
+                        font.pixelSize: 9.5 * root.u
+                        font.bold: true
+                        color: "#FF9A8F"
+                        style: Text.Raised
+                        styleColor: Qt.rgba(4 / 255, 10 / 255, 24 / 255, 0.6)
+                    }
+                    Text {
+                        anchors.centerIn: parent
+                        anchors.verticalCenterOffset: 2 * root.u
+                        text: String.fromCharCode(0xE124)      // lucide navigation-2 (aguja)
+                        font.family: root.iconFamily
+                        font.pixelSize: 19 * root.u
+                        color: "white"
+                        style: Text.Raised
+                        styleColor: Qt.rgba(4 / 255, 10 / 255, 24 / 255, 0.55)
+                    }
+                }
+            }
+            onActivated: root.orientNorth()
+            onRejected: compassAction.confirm("El planeta aún se está cargando.", "error")
+        }
+        EarthGlassAction {   // 2. GPS compartido: permisos, búsqueda, fix o fallo reales
+            id: gpsAction
+            glassHost: controlGlass; u: root.u; iconFamily: root.iconFamily; fontFamily: root.fontFamily
+            width: root.controlSize; height: width; reducedMotion: root.reducedMotion; tint: root.glassTint
+            label: "Mi ubicación GPS"
+            hint: root.gpsMessage
+            glyph: root.gpsState === "fixed" ? 0xE1DB : 0xE1DA   // lucide locate-fixed / locate
+            available: root.planetReady
+            active: root.gpsState === "fixed"
+            busy: root.gpsRequested
+            accent: root.gpsState === "error" ? "#FF8A8A" : "#8FD8FF"
+            onActivated: {
+                if (root.gpsRequested) gpsAction.confirm(root.gpsMessage.length ? root.gpsMessage : "Buscando posición GPS…", "info")
+                else root.requestGps()
+            }
+            onRejected: gpsAction.confirm("El planeta aún se está cargando.", "error")
+        }
+        EarthGlassAction {   // 3. Capas: panel real de fuentes NASA / EOX / Landsat
+            id: layersAction
+            glassHost: controlGlass; u: root.u; iconFamily: root.iconFamily; fontFamily: root.fontFamily
+            width: root.controlSize; height: width; reducedMotion: root.reducedMotion; tint: root.glassTint
+            label: "Capas y fuentes"
+            hint: "NASA Blue Marble, Sentinel EOX, Landsat HLS y capas KML"
+            glyph: 0xE529                                          // lucide layers
+            active: root.sheet === "layers"
+            onActivated: root.showSheet("layers")
+        }
+        EarthGlassAction {   // 4. Acercar (mismo comando que el Dock)
+            id: zoomInAction
+            glassHost: controlGlass; u: root.u; iconFamily: root.iconFamily; fontFamily: root.fontFamily
+            width: root.controlSize; height: width; reducedMotion: root.reducedMotion; tint: root.glassTint
+            label: "Acercar"
+            hint: "Altitud de cámara " + root.formatAltitude(root.effectiveAltitude)
+            glyph: 0xE13D                                          // lucide plus
+            available: root.planetReady && root.effectiveAltitude > root.minCameraAltitude * 1.01
+            onActivated: {
+                if (root.zoomStep(true)) zoomInAction.confirm("Acercando · " + root.formatAltitude(root.zoomPrediction), "info")
+                else zoomInAction.confirm("No se pudo acercar la cámara.", "error")
+            }
+            onRejected: zoomInAction.confirm(root.planetReady ? "Acercamiento máximo: " + root.formatAltitude(root.minCameraAltitude) : "El planeta aún se está cargando.", "error")
+        }
+        EarthGlassAction {   // 5. Alejar (mismo comando que el Dock)
+            id: zoomOutAction
+            glassHost: controlGlass; u: root.u; iconFamily: root.iconFamily; fontFamily: root.fontFamily
+            width: root.controlSize; height: width; reducedMotion: root.reducedMotion; tint: root.glassTint
+            label: "Alejar"
+            hint: "Altitud de cámara " + root.formatAltitude(root.effectiveAltitude)
+            glyph: 0xE11C                                          // lucide minus
+            available: root.planetReady && root.effectiveAltitude < root.maxCameraAltitude / 1.01
+            onActivated: {
+                if (root.zoomStep(false)) zoomOutAction.confirm("Alejando · " + root.formatAltitude(root.zoomPrediction), "info")
+                else zoomOutAction.confirm("No se pudo alejar la cámara.", "error")
+            }
+            onRejected: zoomOutAction.confirm(root.planetReady ? "Alejamiento máximo: " + root.formatAltitude(root.maxCameraAltitude) : "El planeta aún se está cargando.", "error")
+        }
+        EarthGlassAction {   // 6. Centrar: selección (GPS/coordenadas/calicata) o encuadre del planeta
+            id: centerAction
+            glassHost: controlGlass; u: root.u; iconFamily: root.iconFamily; fontFamily: root.fontFamily
+            width: root.controlSize; height: width; reducedMotion: root.reducedMotion; tint: root.glassTint
+            label: "Centrar vista"
+            hint: root.selectedTarget && root.selectedTarget.latitude !== undefined
+                  ? "Centra " + (root.selectedTarget.label || "la ubicación seleccionada") + "; otro toque recupera el planeta completo"
+                  : "Recupera el encuadre del planeta completo"
+            glyph: 0xE29E                                          // lucide focus
+            available: root.planetReady
+            onActivated: root.centerView()
+            onRejected: centerAction.confirm("El planeta aún se está cargando.", "error")
+        }
+    }
+
     Text { font.family: root.fontFamily;
         anchors.centerIn: parent; width: parent.width - 100 * root.u
         visible: !root.controller.ready
         text: root.controller.busy ? "Cargando la Tierra..." : root.controller.status
         color: "white"; wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter
     }
-    Rectangle {
-        id: toolbar
-        x: 16 * root.u; width: parent.width - 32 * root.u; height: 54 * root.u; radius: 27 * root.u
-        y: parent.height - root.safeBottom - height - 28 * root.u; color: "#F5F8FC"
-        Row { anchors.fill: parent; anchors.margins: 4 * root.u
-            Repeater {
-                model: [{title:"Lugares",key:"places"},{title:"Medir",key:"measure"},{title:"Archivos",key:"files"},{title:"Info",key:"info"}]
-                delegate: Item {
-                    required property var modelData
-                    width: (toolbar.width - 8 * root.u) / 4; height: toolbar.height - 8 * root.u
-                    Accessible.role: Accessible.Button; Accessible.name: modelData.title
-                    Accessible.onPressAction: root.showSheet(modelData.key)
-                    Text { font.family: root.fontFamily; anchors.centerIn: parent; text: modelData.title; color: "#163451"; font.pixelSize: 13 * root.u; font.bold: true }
-                    TapHandler { onTapped: root.showSheet(modelData.key) }
-                }
+
+    // ================================================ Telemetría mínima (abajo-izquierda)
+    property bool attributionExpanded: false
+    Column {
+        id: telemetry
+        x: 18 * root.u
+        y: root.height - root.safeBottom - 10 * root.u - height
+        width: Math.max(120 * root.u, root.width - 36 * root.u - controls.width - 16 * root.u)
+        spacing: 6 * root.u
+        opacity: root.controlsShown
+        visible: opacity > 0.01
+        Text { font.family: root.fontFamily
+            width: parent.width
+            visible: text.length > 0
+            text: root.controller.measuring ? "Toca dos puntos sobre la Tierra"
+                  : (root.gpsState === "searching" || root.gpsState === "error" ? root.gpsMessage : "")
+            color: "#FFFFFF"; style: Text.Outline; styleColor: "#070F1E"; font.pixelSize: 12 * root.u; wrapMode: Text.WordWrap
+        }
+        Item {
+            width: 100 * root.u; height: 16 * root.u
+            property real metres: { var position = root.controller.cameraInfo; return root.controller.scaleMetres(width) }
+            visible: metres > 0
+            Text { font.family: root.fontFamily; anchors.left: parent.left; anchors.bottom: scaleBar.top; anchors.bottomMargin: 3 * root.u; text: parent.metres >= 1000 ? Number(parent.metres / 1000).toFixed(1) + " km" : Number(parent.metres).toFixed(0) + " m"; color: "white"; style: Text.Outline; styleColor: "#070F1E"; font.pixelSize: 10 * root.u }
+            Rectangle { id: scaleBar; anchors.bottom: parent.bottom; width: parent.width; height: 2 * root.u; color: "white" }
+        }
+        Text { font.family: root.fontFamily
+            width: parent.width
+            visible: root.coordinatesShown
+            text: {
+                var p = root.controller.cameraInfo
+                return Number(p.latitude).toFixed(4) + ", " + Number(p.longitude).toFixed(4)
+                    + " | " + Number(p.cameraAltitude / 1000).toFixed(1) + " km"
             }
+            color: "white"; style: Text.Outline; styleColor: "#070F1E"; font.pixelSize: 11 * root.u
+        }
+        // Atribución obligatoria NASA / EOX (CC BY 4.0): siempre visible y compacta;
+        // un toque la amplía con la licencia y otro abre Capas y fuentes.
+        Rectangle {
+            id: attribution
+            width: Math.min(telemetry.width, attributionText.width + 22 * root.u)
+            height: attributionText.height + 10 * root.u
+            radius: Math.min(height / 2, 12 * root.u)
+            color: Qt.rgba(7 / 255, 15 / 255, 30 / 255, 0.50)
+            border.width: 1
+            border.color: Qt.rgba(1, 1, 1, 0.16)
+            Text {
+                id: attributionText
+                x: 11 * root.u
+                anchors.verticalCenter: parent.verticalCenter
+                width: Math.min(implicitWidth, telemetry.width - 22 * root.u)
+                text: root.attributionExpanded
+                      ? "NASA / USGS · EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016). CC BY 4.0. Toca de nuevo para ver Capas y fuentes."
+                      : "ⓘ NASA / USGS · EOxCloudless by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016)"
+                color: Qt.rgba(1, 1, 1, 0.86)
+                font.family: root.fontFamily
+                font.pixelSize: 9 * root.u
+                wrapMode: Text.WordWrap
+                maximumLineCount: root.attributionExpanded ? 6 : 2
+                elide: Text.ElideRight
+            }
+            Accessible.role: Accessible.Button
+            Accessible.name: "Atribución: NASA / USGS. EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016). CC BY 4.0"
+            Accessible.onPressAction: root.toggleAttribution()
+            MouseArea {
+                anchors.fill: parent
+                anchors.margins: -6 * root.u
+                onClicked: root.toggleAttribution()
+            }
+            Timer { id: attributionCollapse; interval: 8000; onTriggered: root.attributionExpanded = false }
         }
     }
-    Text { font.family: root.fontFamily;
-        x: 18 * root.u; y: toolbar.y - implicitHeight - 12 * root.u; width: parent.width - 100 * root.u
-        text: root.controller.measuring ? "Toca dos puntos sobre la Tierra" : root.gpsMessage
-        color: "#FFFFFF"; style: Text.Outline; styleColor: "#070F1E"; font.pixelSize: 12 * root.u; wrapMode: Text.WordWrap
-    }
-    Text { font.family: root.fontFamily;
-        x: 18 * root.u; y: toolbar.y - 56 * root.u; width: parent.width - 90 * root.u
-        visible: root.coordinatesShown
-        text: {
-            var p = root.controller.cameraInfo
-            return Number(p.latitude).toFixed(4) + ", " + Number(p.longitude).toFixed(4)
-                + " | " + Number(p.cameraAltitude / 1000).toFixed(1) + " km"
+    function goToCoordinates(latitude, longitude, altitude) {
+        if (!controller.goTo(latitude, longitude, altitude)) {   // el controlador valida rangos
+            searchMessage = "Coordenadas no válidas: latitud ±90°, longitud ±180°, altitud ≤ 100 km."
+            return false
         }
-        color: "white"; style: Text.Outline; styleColor: "#070F1E"; font.pixelSize: 11 * root.u
+        searchMessage = ""
+        selectedTarget = { latitude: latitude, longitude: longitude, altitude: altitude,
+                           label: Number(latitude).toFixed(4) + ", " + Number(longitude).toFixed(4) }
+        return true
     }
-    Rectangle {
-        x: 18 * root.u; y: toolbar.y - 70 * root.u; width: 100 * root.u; height: 2 * root.u; color: "white"
-        property real metres: { var position = root.controller.cameraInfo; return root.controller.scaleMetres(width) }
-        visible: metres > 0
-        Text { font.family: root.fontFamily; anchors.left: parent.left; anchors.bottom: parent.top; anchors.bottomMargin: 3 * root.u; text: parent.metres >= 1000 ? Number(parent.metres / 1000).toFixed(1) + " km" : Number(parent.metres).toFixed(0) + " m"; color: "white"; style: Text.Outline; styleColor: "#070F1E"; font.pixelSize: 10 * root.u }
+    function searchResults(query, layers) {
+        var q = String(query || "").trim()
+        if (!q.length) return []
+        var result = []
+        var pair = q.replace(/;/g, ",").match(/^(-?\d+(?:[.,]\d+)?)\s*[, ]\s*(-?\d+(?:[.,]\d+)?)$/)
+        if (pair) {
+            var la = Number(pair[1].replace(",", ".")), lo = Number(pair[2].replace(",", "."))
+            if (Math.abs(la) <= 90 && Math.abs(lo) <= 180)
+                result.push({ title: "Ir a " + la + ", " + lo, latitude: la, longitude: lo })
+        }
+        var needle = q.toLocaleLowerCase()
+        for (var i = 0; i < layers.length && result.length < 12; ++i)
+            for (var k = 0; k < layers[i].features.length && result.length < 12; ++k) {
+                var f = layers[i].features[k]
+                if (String(f.name).toLocaleLowerCase().indexOf(needle) >= 0 || String(layers[i].name).toLocaleLowerCase().indexOf(needle) >= 0)
+                    result.push({ title: f.name + " · " + layers[i].name, layerId: layers[i].id, index: f.index })
+            }
+        return result
     }
-    Text { font.family: root.fontFamily;
-        id: attribution
-        x: 18 * root.u; y: toolbar.y + toolbar.height + 5 * root.u; width: parent.width - 36 * root.u
-        text: "NASA / USGS | EOxCloudless https://cloudless.eox.at\nby EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016)"
-        color: "#FFFFFF"; style: Text.Outline; styleColor: "#070F1E"; font.pixelSize: 9 * root.u; wrapMode: Text.WordWrap
-        TapHandler { onTapped: root.showSheet("layers") }
+    function toggleAttribution() {
+        if (attributionExpanded) { attributionExpanded = false; showSheet("layers") }
+        else { attributionExpanded = true; attributionCollapse.restart() }
     }
     Rectangle {
         id: sheetPanel
@@ -217,7 +508,7 @@ Item {
         MouseArea { anchors.fill: parent; onClicked: {} }
         Rectangle { anchors.horizontalCenter: parent.horizontalCenter; y: 8 * root.u; width: 38 * root.u; height: 4 * root.u; radius: 2 * root.u; color: "#C4CFDA" }
         Button { font.family: root.fontFamily; anchors.right: parent.right; anchors.rightMargin: 14 * root.u; y: 12 * root.u; text: "Cerrar"; onClicked: root.handleBack() }
-        Text { font.family: root.fontFamily; x: 20 * root.u; y: 24 * root.u; text: ({search:"Buscar",layers:"Capas y fuentes",places:"Lugares",measure:"Medir distancia",files:"Documentos",info:"Informacion"})[root.sheet] || ""; color: "#163451"; font.pixelSize: 18 * root.u; font.bold: true }
+        Text { font.family: root.fontFamily; x: 20 * root.u; y: 24 * root.u; text: ({search:"Buscar lugares y coordenadas",layers:"Capas y fuentes",places:"Lugares guardados",measure:"Medir distancia",files:"Archivos KML / KMZ",info:"Información geográfica"})[root.sheet] || ""; width: parent.width - 130 * root.u; elide: Text.ElideRight; color: "#163451"; font.pixelSize: 18 * root.u; font.bold: true }
         Flickable {
             anchors.fill: parent; anchors.topMargin: 66 * root.u; anchors.margins: 18 * root.u
             anchors.bottomMargin: 18 * root.u
@@ -226,14 +517,34 @@ Item {
                 id: content; width: parent.width; spacing: 10 * root.u
                 Column {
                     width: parent.width; spacing: 8 * root.u; visible: root.sheet === "search"
+                    // Lugares guardados y geometrías KML/KMZ cargadas, o "lat, lon" en una línea.
+                    TextField { id: placeQuery; width: parent.width; placeholderText: "Lugar guardado, capa o \"lat, lon\"" }
+                    Repeater {
+                        model: root.searchResults(placeQuery.text, root.controller.geoLayers)
+                        delegate: Button { font.family: root.fontFamily
+                            required property var modelData
+                            width: content.width; text: modelData.title
+                            onClicked: {
+                                if (modelData.latitude !== undefined) {
+                                    if (!root.goToCoordinates(modelData.latitude, modelData.longitude, 0)) return
+                                } else root.controller.centerGeoLayer(modelData.layerId, modelData.index)
+                                root.sheet = ""; root.coordinateEntryFinished()
+                            }
+                        }
+                    }
+                    Text { font.family: root.fontFamily; width: parent.width; color: "#344A62"; wrapMode: Text.WordWrap
+                        visible: placeQuery.text.trim().length > 0 && root.searchResults(placeQuery.text, root.controller.geoLayers).length === 0
+                        text: "Sin coincidencias en los lugares guardados ni en las capas KML/KMZ abiertas. Escribe coordenadas o importa un archivo."
+                    }
                     TextField { id: lat; width: parent.width; placeholderText: "Latitud (-12.0464)"; inputMethodHints: Qt.ImhFormattedNumbersOnly }
                     TextField { id: lon; width: parent.width; placeholderText: "Longitud (-77.0428)"; inputMethodHints: Qt.ImhFormattedNumbersOnly }
                     TextField { id: alt; width: parent.width; placeholderText: "Altitud en metros (opcional)"; inputMethodHints: Qt.ImhFormattedNumbersOnly }
                     Button { font.family: root.fontFamily; text: "Ir a coordenadas"; enabled: lat.text.trim().length > 0 && lon.text.trim().length > 0
                         onClicked: {
-                            if(root.controller.goTo(Number(lat.text.replace(",",".")),Number(lon.text.replace(",",".")),alt.text.trim().length ? Number(alt.text.replace(",",".")) : 0)) { root.sheet=""; root.coordinateEntryFinished() }
+                            if(root.goToCoordinates(Number(lat.text.replace(",",".")),Number(lon.text.replace(",",".")),alt.text.trim().length ? Number(alt.text.replace(",",".")) : 0)) { root.sheet=""; root.coordinateEntryFinished() }
                         }
                     }
+                    Text { font.family: root.fontFamily; width: parent.width; visible: root.searchMessage.length > 0; text: root.searchMessage; color: "#A52D35"; wrapMode: Text.WordWrap }
                     Row { spacing: 6 * root.u
                         Button { font.family: root.fontFamily; text: "Peru"; onClicked: {root.controller.command("peru");root.sheet=""} }
                         Button { font.family: root.fontFamily; text: "Lima"; onClicked: {root.controller.command("lima");root.sheet=""} }
@@ -287,11 +598,15 @@ Item {
                     Button { font.family: root.fontFamily; text: "Borrar medicion"; onClicked: root.controller.cancelMeasure() }
                 }
                 Loader {
+                    id: filesLoader
                     property var documentPanel: item
                     width: parent.width; height: visible && documentPanel ? documentPanel.implicitHeight : 0
                     visible: root.sheet === "files"
                     active: root.filesInitialized; source: "EarthDocumentSheet.qml"
-                    onLoaded: { documentPanel.controller = root.controller; documentPanel.width = width }
+                    onLoaded: {
+                        documentPanel.controller = root.controller; documentPanel.width = width
+                        if (root.filesIntent.length) { documentPanel.applyIntent(root.filesIntent); root.filesIntent = "" }
+                    }
                 }
                 Column {
                     width: parent.width; spacing: 8 * root.u; visible: root.sheet === "info"

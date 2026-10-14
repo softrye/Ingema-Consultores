@@ -15,15 +15,42 @@ Column {
     property string operationMessage: ""
     spacing: 8
     Backend.NothingDocuments { id: files }
+    property string pendingIntent: ""
     function initialize() {
         if (initialized || files.busy || !files.rootPath.length) return
         initialized = true
         files.navigate("files", files.rootPath)
     }
+    // Accesos del menú "···" del Dock (InGe Earth UX 5.0), sobre los mismos flujos:
+    //  import = selector del sistema (dispositivo / Google Drive)
+    //  drive  = abrir KML/KMZ desde InGeDrive
+    //  save   = elegir carpeta de InGeDrive para Guardar + Subir
+    //  export = guardar KML/KMZ en los documentos locales de la cuenta
+    function applyIntent(intent) {
+        if (intent === "import") { picker.open(); return }
+        if (intent !== "drive" && intent !== "save" && intent !== "export") return
+        if (files.busy) { pendingIntent = intent; return }
+        pendingIntent = ""
+        if (intent === "export") {
+            if (initialized && files.rootPath.length) files.navigate("files", files.rootPath)
+            else initialize()
+            operationMessage = "Escribe el nombre, elige KML o KMZ y pulsa Guardar en documentos de esta cuenta."
+            return
+        }
+        initialized = true                      // la raíz local no sustituye a InGeDrive
+        files.navigate("drive")
+        operationMessage = intent === "save"
+            ? "Abre el espacio y la carpeta de destino de InGeDrive; después Guardar y Subir."
+            : "Elige un KML o KMZ de InGeDrive para abrirlo en el planeta."
+    }
     Component.onCompleted: initialize()
     Connections {
         target: files
-        function onChanged() { root.initialize(); if (!files.busy && files.error.length) root.pendingImport = "" }
+        function onChanged() {
+            root.initialize()
+            if (!files.busy && files.error.length) root.pendingImport = ""
+            if (!files.busy && root.pendingIntent.length) root.applyIntent(root.pendingIntent)
+        }
         function onCompleted(message, path) {
             root.operationMessage = message
             if (root.pendingImport.length && path.length) {

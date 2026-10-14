@@ -67,3 +67,21 @@ Commits funcionales: `67b6cef` (datos/LOD/cámara), `099172b` (geometrías KML/K
 En Qt Creator abrir CMakeLists.txt, seleccionar Qt **6.9.3 Android arm64-v8a** para dispositivo o **x86_64** para el emulador del usuario, conservar INGE_BUILD_MOBILE=ON y target **AppCalicatasMobile**. Ejecutar **Run CMake** para QuickDialogs2, nuevas fuentes y QML; luego **Compilar**. No se necesitan credenciales nuevas ni assets manuales.
 
 Probar: pantalla completa y safe areas; planeta entero inicial y regreso global; zoom y navegación Perú/Lima con red; EOX histórico y fallback sin conexión; GPS/permisos; arrastre/pinch/norte; Back de paneles y retorno a Calicatas; KML/KMZ de puntos, líneas y polígonos; centrar/ocultar/quitar; exportar/reimportar; InGeDrive carpeta/subida/descarga; Google Drive SAF/chooser; cambio de cuenta; memoria y fluidez en dispositivo. Build, instalación, render real y pruebas de nube están pendientes del usuario.
+
+## UX 5.0 · Liquid Glass y Dock contextual (2026-10-14)
+
+Eliminados del visor: la cápsula superior `InGe Earth | Buscar lugar` y la barra inferior Lugares / Medir / Archivos / Info. El globo ocupa toda la pantalla; abajo solo quedan el Dock global y InGe IA. La atribución NASA / USGS · EOX (CC BY 4.0, Copernicus Sentinel 2016) queda en una etiqueta compacta abajo a la izquierda; un toque la amplía y otro abre Capas y fuentes.
+
+Seis controles laterales `EarthGlassAction.qml`, cada uno una instancia de la GlassSurface existente (glass.frag sin cambios) sobre UNA captura del globo a 1/4 + UN MultiEffect compartidos; lente (refracción aproximada) por mapeo de región, sin pasadas extra; borde iluminado, brillo especular y sombra interior pintados una vez en Canvas. Gama LOW/ULTRA_LOW (`dockLowCostGlass`): sin captura, cristal tintado denso. Panel abierto: la columna se retira y la captura queda congelada (`live: false`).
+
+| Control | Acción |
+|---|---|
+| Brújula | aguja girada con el rumbo real (`cameraInfo.heading`); toque `command("north")`, interpolado por la cámara |
+| GPS | `requestGps()` compartido: permiso, búsqueda (anillo), fix (locate-fixed) o fallo/timeout real |
+| Capas | panel real `layers` (Sentinel EOX, Blue Marble, Landsat HLS) |
+| + / − | `command("zoomIn"/"zoomOut")`, los mismos del Dock; atenuados en 2 km / 50 000 km |
+| Centrar | `goTo` de la última selección (GPS, coordenadas, calicata); ya centrado o sin selección: `command("reset")` |
+
+Dock: `DockContextController` admite 8 raíces (kMaxActions); el preset anterior publicaba 15 y perdía Lugares, Info, Capas y GPS. Nuevo preset: Acercar, Alejar, Restablecer vista visibles; `···` = Buscar lugares y coordenadas, Lugares guardados (Sudamérica, Perú, Lima), Archivos KML/KMZ (Importar, Abrir desde InGeDrive, Guardar en InGeDrive, Exportar), Información geográfica, Herramientas (Medir, Fuentes y capas, GPS, Girar, Desplazar, Modo navegación, Coordenadas). La búsqueda encuentra lugares guardados/geometrías KML abiertas y acepta `lat, lon`.
+
+Verificación sin compilar la app: qmllint sin errores (solo advertencias de contexto dinámico ya existentes), `scripts/verify_earth_planetary_static.py` 24/24, arnés `qml.exe` offscreen con un RetroplasmaView simulado (imagen NASA del repo) para cristal, gama baja, GPS buscando y panel de búsqueda, sin avisos QML. No certifica el render QRhi ni Android: build, instalación, logcat y pruebas en dispositivo quedan en Qt Creator.

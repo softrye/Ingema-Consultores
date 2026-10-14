@@ -946,6 +946,10 @@ Item {
                     otherGpsClientActive: function() { return home.page === "calicatas" && calicatasEditor.item && calicatasEditor.item.gpsEnabled }
                     u: home.u
                     fontFamily: home.fontFamily
+                    iconFamily: home.iconFamily
+                    lowCostGlass: home.dockLowCostGlass
+                    glassTint: home.dockGlassTint
+                    requestedTarget: home.earthRequestedTarget
                     safeTop: home.topInset
                     safeBottom: Qt.inputMethod.visible ? 14 * home.u : home.dockArea
                     reducedMotion: home.reducedMotion
@@ -1166,35 +1170,46 @@ Item {
     property bool earthSourceEntryShown: false
     property bool earthDockReady: false
     property bool earthDockNavigation: false
+    // UX 5.0: DockContextController admite 8 nodos raíz (kMaxActions), 10 hijos y
+    // 3 niveles. El Dock muestra los tres primeros por prioridad (Acercar,
+    // Alejar, Restablecer vista) y "···" agrupa todo lo que antes vivía en las
+    // barras propias del visor: Buscar, Lugares, Archivos, Info y Herramientas.
     readonly property var earthDockPreset: [
-        {id: "earth.files", label: "KML / KMZ / Drive", icon: "earth.diagnostics", command: "earth.files", priority: 13},
-        {id: "earth.measure", label: "Medir distancia", icon: "earth.pan", command: "earth.measure", priority: 14},
         {id: "earth.zoomIn", label: "Acercar", icon: "earth.zoomIn", command: "earth.zoomIn", enabled: earthDockReady, priority: 1},
         {id: "earth.zoomOut", label: "Alejar", icon: "earth.zoomOut", command: "earth.zoomOut", enabled: earthDockReady, priority: 2},
-        {id: "earth.rotate", label: "Girar planeta", icon: "earth.rotate", command: "", priority: 3, children: [
-            {id: "earth.rotateLeft", label: "Girar a la izquierda", icon: "earth.rotateLeft", command: "earth.rotateLeft", enabled: earthDockReady},
-            {id: "earth.rotateRight", label: "Girar a la derecha", icon: "earth.rotate", command: "earth.rotateRight", enabled: earthDockReady},
-            {id: "earth.tiltUp", label: "Mover vista al norte", icon: "earth.rotate", command: "earth.tiltUp", enabled: earthDockReady},
-            {id: "earth.tiltDown", label: "Mover vista al sur", icon: "earth.rotate", command: "earth.tiltDown", enabled: earthDockReady},
-            {id: "earth.north", label: "Orientar al norte", icon: "earth.pan", command: "earth.north", enabled: earthDockReady}
+        {id: "earth.reset", label: "Restablecer vista", icon: "earth.rotateLeft", command: "earth.reset", enabled: earthDockReady, priority: 3},
+        {id: "earth.search", label: "Buscar lugares y coordenadas", icon: "earth.search", command: "earth.search", priority: 4},
+        {id: "earth.places", label: "Lugares guardados", icon: "earth.place", command: "earth.savedPlaces", priority: 5, children: [
+            {id: "earth.southAmerica", label: "Sudamérica", icon: "earth.globe", command: "earth.southAmerica", enabled: earthDockReady},
+            {id: "earth.peru", label: "Perú", icon: "earth.place", command: "earth.peru", enabled: earthDockReady},
+            {id: "earth.lima", label: "Lima", icon: "earth.place", command: "earth.lima", enabled: earthDockReady}
         ]},
-        {id: "earth.pan", label: "Desplazar", icon: "earth.pan", command: "", priority: 4, children: [
-            {id: "earth.panLeft", label: "Izquierda", icon: "earth.pan", command: "earth.panLeft", enabled: earthDockReady},
-            {id: "earth.panRight", label: "Derecha", icon: "earth.pan", command: "earth.panRight", enabled: earthDockReady},
-            {id: "earth.panUp", label: "Adelante", icon: "earth.pan", command: "earth.forward", enabled: earthDockReady},
-            {id: "earth.panDown", label: "Atrás", icon: "earth.pan", command: "earth.backward", enabled: earthDockReady}
+        {id: "earth.files", label: "Archivos KML / KMZ", icon: "earth.files", command: "earth.files", priority: 6, children: [
+            {id: "earth.filesImport", label: "Importar KML / KMZ", icon: "earth.import", command: "earth.filesImport"},
+            {id: "earth.driveOpen", label: "Abrir desde InGeDrive", icon: "earth.drive", command: "earth.driveOpen"},
+            {id: "earth.driveSave", label: "Guardar en InGeDrive", icon: "earth.export", command: "earth.driveSave"},
+            {id: "earth.export", label: "Exportar KML / KMZ", icon: "earth.export", command: "earth.export"}
         ]},
-        {id: "earth.reset", label: "Vista inicial", icon: "earth.rotateLeft", command: "earth.reset", enabled: earthDockReady, priority: 5},
-        {id: "earth.goTo", label: "Ir a coordenadas", icon: "earth.pan", command: "earth.goTo", priority: 6},
-        {id: "earth.navigation", label: "Modo navegación", icon: "earth.pan", command: "earth.navigation", selected: earthDockNavigation, priority: 7},
-        {id: "earth.coordinates", label: "Mostrar coordenadas", icon: "earth.pan", command: "earth.coordinates", priority: 8},
-        {id: "earth.diagnostics", label: "Métricas del visor", icon: "earth.diagnostics", command: "earth.diagnostics", priority: 9},
-        {id: "earth.source", label: "Capas y fuentes", icon: "earth.diagnostics", command: "earth.source", priority: 10},
-        {id: "earth.gps", label: "Mi ubicación GPS", icon: "earth.pan", command: "earth.gps", priority: 11},
-        {id: "earth.places", label: "Lugares", icon: "earth.pan", command: "earth.savedPlaces", priority: 12, children: [
-            {id: "earth.southAmerica", label: "Sudamérica", icon: "earth.pan", command: "earth.southAmerica", enabled: earthDockReady},
-            {id: "earth.peru", label: "Perú", icon: "earth.pan", command: "earth.peru", enabled: earthDockReady},
-            {id: "earth.lima", label: "Lima", icon: "earth.pan", command: "earth.lima", enabled: earthDockReady}
+        {id: "earth.diagnostics", label: "Información geográfica", icon: "earth.info", command: "earth.diagnostics", priority: 7},
+        {id: "earth.tools", label: "Herramientas", icon: "earth.tools", command: "", priority: 8, children: [
+            {id: "earth.measure", label: "Medir distancia", icon: "earth.measure", command: "earth.measure"},
+            {id: "earth.source", label: "Fuentes y capas", icon: "earth.layers", command: "earth.source"},
+            {id: "earth.gps", label: "Mi ubicación GPS", icon: "earth.gps", command: "earth.gps"},
+            {id: "earth.rotate", label: "Girar planeta", icon: "earth.rotate", command: "", children: [
+                {id: "earth.rotateLeft", label: "Girar a la izquierda", icon: "earth.rotateLeft", command: "earth.rotateLeft", enabled: earthDockReady},
+                {id: "earth.rotateRight", label: "Girar a la derecha", icon: "earth.rotate", command: "earth.rotateRight", enabled: earthDockReady},
+                {id: "earth.tiltUp", label: "Mover vista al norte", icon: "earth.rotate", command: "earth.tiltUp", enabled: earthDockReady},
+                {id: "earth.tiltDown", label: "Mover vista al sur", icon: "earth.rotate", command: "earth.tiltDown", enabled: earthDockReady},
+                {id: "earth.north", label: "Orientar al norte", icon: "earth.compass", command: "earth.north", enabled: earthDockReady}
+            ]},
+            {id: "earth.pan", label: "Desplazar", icon: "earth.pan", command: "", children: [
+                {id: "earth.panLeft", label: "Izquierda", icon: "earth.pan", command: "earth.panLeft", enabled: earthDockReady},
+                {id: "earth.panRight", label: "Derecha", icon: "earth.pan", command: "earth.panRight", enabled: earthDockReady},
+                {id: "earth.panUp", label: "Adelante", icon: "earth.pan", command: "earth.forward", enabled: earthDockReady},
+                {id: "earth.panDown", label: "Atrás", icon: "earth.pan", command: "earth.backward", enabled: earthDockReady}
+            ]},
+            {id: "earth.navigation", label: "Modo navegación", icon: "earth.compass", command: "earth.navigation", selected: earthDockNavigation},
+            {id: "earth.coordinates", label: "Mostrar coordenadas", icon: "earth.globe", command: "earth.coordinates", selected: earthCoordinatesShown}
         ]}
     ]
     function openEarth(returnPage) {
@@ -1254,8 +1269,11 @@ Item {
                 if (home.page !== "earth" || !home.visible) return
                 var name = String(commandId)
                 if (name === "earth.diagnostics" && earthNativeLoader.item) earthNativeLoader.item.showSheet("info")
-                else if (name === "earth.coordinates") home.earthCoordinatesShown = !home.earthCoordinatesShown
-                else if (name === "earth.goTo" && earthNativeLoader.item) earthNativeLoader.item.showSheet("search")
+                else if (name === "earth.coordinates") { home.earthCoordinatesShown = !home.earthCoordinatesShown; home.publishEarthDock() }
+                else if ((name === "earth.search" || name === "earth.goTo") && earthNativeLoader.item) earthNativeLoader.item.showSheet("search")
+                else if (earthNativeLoader.item && (name === "earth.filesImport" || name === "earth.driveOpen" || name === "earth.driveSave" || name === "earth.export"))
+                    earthNativeLoader.item.openFiles(({"earth.filesImport": "import", "earth.driveOpen": "drive",
+                                                       "earth.driveSave": "save", "earth.export": "export"})[name])
                 else if (name === "earth.source" && earthNativeLoader.item) earthNativeLoader.item.showSheet("layers")
                 else if (earthNativeLoader.item && (name === "earth.files" || name === "earth.measure" || name === "earth.savedPlaces")) earthNativeLoader.item.showSheet(name === "earth.savedPlaces" ? "places" : name.substring(6))
                 else if (name === "earth.gps" && earthNativeLoader.item) earthNativeLoader.item.requestGps()
@@ -1434,6 +1452,12 @@ Item {
         "earth.zoomIn": 0xE1B6, "earth.zoomOut": 0xE1B7,
         "earth.pan": 0xE111, "earth.rotate": 0xE149, "earth.rotateLeft": 0xE148,
         "earth.diagnostics": 0xE154,
+        // Menú "···" de InGe Earth (glifos Lucide de la misma fuente del Dock).
+        "earth.search": 0xE151, "earth.place": 0xE111, "earth.globe": 0xE0E8,
+        "earth.files": 0xE247, "earth.import": 0xE0B2, "earth.drive": 0xE0ED,
+        "earth.export": 0xE19E, "earth.info": 0xE0F9, "earth.tools": 0xE1B1,
+        "earth.measure": 0xE14B, "earth.layers": 0xE529, "earth.gps": 0xE1DB,
+        "earth.compass": 0xE09B,
 
         "documents.file": 0xE0CC, "documents.folder": 0xE0D7, "documents.open": 0xE247,
         "documents.template": 0xE207, "profile.user": 0xE617, "map.location": 0xE1DB,

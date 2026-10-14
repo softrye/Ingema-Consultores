@@ -62,7 +62,7 @@ def main():
     check('bounded/cancellable official-only network and disk cache','setMaximumCacheSize(128*1024*1024)' in provider and 'std::min<qint64>(15000,30000-searchClock.elapsed())' in provider and 'ManualRedirectPolicy' in provider and 'cancel.load()' in provider and '4*1024*1024' in provider)
     check('same native viewport, source packaging and dependencies','RetroplasmaPlanetProvider.cpp' in module and '/resources/earth/*' in module and 'Qt6::Network' in module and 'RetroplasmaView {' in view)
     check('shared GPS only, gestures and geographic Dock controls','root.permissions.requestImmediateLocationUpdate()' in view and 'otherGpsClientActive' in view and 'Qt.callLater(root.completeGpsFix)' in view and 'earth.gps' in home and 'earth.peru' in home and 'earth.lima' in home and 'rotateView' in view)
-    allowed=('src/retroplasma/','tests/retroplasma/','docs/','scripts/verify_earth_planetary_static.py','qml/Mobile/HomeScreen.qml','qml/Mobile/RetroplasmaEarthView.qml','qml/Mobile/EarthDocumentSheet.qml','CMakeLists.txt')
+    allowed=('src/retroplasma/','tests/retroplasma/','docs/','scripts/verify_earth_planetary_static.py','qml/Mobile/HomeScreen.qml','qml/Mobile/RetroplasmaEarthView.qml','qml/Mobile/EarthDocumentSheet.qml','qml/Mobile/EarthGlassAction.qml','CMakeLists.txt')
     changed=subprocess.check_output(['git','diff','--name-only','--no-renames',BASE],cwd=ROOT).decode().splitlines()
     unexpected=[name for name in changed if not name.startswith(allowed)]
     if unexpected:
@@ -74,7 +74,16 @@ def main():
     check('fullscreen native viewport, safe areas and Back', 'objectName: "earthFullViewport"' in view and 'anchors.fill: parent' in view and 'safeTop: home.topInset' in home and 'item.handleBack()' in home)
     check('native KML/KMZ geometry, bounded import and atomic export', 'QXmlStreamReader' in geo and 'QZipReader' in geo and 'QSaveFile' in geo and 'geoFeatureVertexCost' in geo and 'geoFeatureTile' in read('src/retroplasma/RetroplasmaGeoController.cpp'))
     check('existing account documents, InGeDrive and system Drive adapter', 'Backend.NothingDocuments' in files and 'files.download(entry)' in files and 'files.upload(root.exportedPath' in files and 'FileDialog.OpenFile' in files and 'files.open(' in files)
-    print('19 planetary source/resource checks passed; this does not certify Android rendering.')
+    glass=read('qml/Mobile/EarthGlassAction.qml')
+    cmake=read('CMakeLists.txt')
+    preset=home[home.index('readonly property var earthDockPreset: ['):home.index('function openEarth(returnPage)')]
+    roots=re.findall(r'^        \{id: "earth\.[A-Za-z]+"',preset,re.M)
+    check('UX 5.0: no own top search capsule or secondary bottom bar', 'searchPill' not in view and 'id: toolbar' not in view and 'InGe Earth  |  Buscar lugar' not in view and '{title:"Lugares"' not in view)
+    check('UX 5.0: six Liquid Glass controls on the existing GlassSurface, one shared blur', view.count('EarthGlassAction {')==6 and 'GlassSurface {' in glass and 'fragmentShader' not in glass and view.count('MultiEffect {')==1 and '"${MOBILE_QML_DIR}/EarthGlassAction.qml"' in cmake)
+    check('UX 5.0: controls call the same controller commands as the Dock', 'command(zoomIn ? "zoomIn" : "zoomOut")' in view and 'command("north")' in view and 'command("reset")' in view and 'root.requestGps()' in view and 'showSheet("layers")' in view)
+    check('UX 5.0: Dock preset within DockContextController limits (8 roots) and holds the removed functions', len(roots)<=8 and all(k in preset for k in ('earth.search','earth.savedPlaces','earth.measure','earth.files','earth.driveOpen','earth.driveSave','earth.diagnostics','earth.source','earth.tools')))
+    check('UX 5.0: compact NASA/EOX attribution kept on screen', 'EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016)' in view and 'NASA / USGS' in view)
+    print('24 planetary source/resource checks passed; this does not certify Android rendering.')
 
 
 if __name__=='__main__':

@@ -572,6 +572,7 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/HomeScreen.qml"
             "${MOBILE_QML_DIR}/RetroplasmaEarthView.qml"
             "${MOBILE_QML_DIR}/EarthDocumentSheet.qml"
+            "${MOBILE_QML_DIR}/EarthGlassAction.qml"
             "${MOBILE_QML_DIR}/AddToolPanel.qml"
             "${MOBILE_QML_DIR}/GlassSurface.qml"
             # Calicatas: editor original restaurado y sus dependencias reales.
