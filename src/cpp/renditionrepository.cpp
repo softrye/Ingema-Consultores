@@ -1,4 +1,5 @@
 #include "renditionrepository.h"
+#include "renditionadminrpc.h"
 
 #include "appcontext.h"
 #include "authsession.h"
@@ -806,30 +807,7 @@ void RenditionRepository::receivedCommand(const QString &requestId,
 {
     QString rpc;
     QVariantMap params;
-    if (operation == QLatin1String("folderCapabilities")) {
-        rpc = QStringLiteral("get_document_structural_capabilities_v02");
-        params = {{QStringLiteral("p_space_id"), arguments.value(QStringLiteral("spaceId"))},
-                  {QStringLiteral("p_node_id"), arguments.value(QStringLiteral("nodeId"))}};
-    } else if (operation == QLatin1String("receivedList")) {
-        rpc = QStringLiteral("list_received_renditions_v02");
-        params = {{QStringLiteral("p_limit"), 200},
-                  {QStringLiteral("p_after_submitted_at"), nullableText(arguments.value(QStringLiteral("afterSubmittedAt")).toString())},
-                  {QStringLiteral("p_after_id"), nullableText(arguments.value(QStringLiteral("afterId")).toString())}};
-    } else {
-        params.insert(QStringLiteral("p_rendition_id"), arguments.value(QStringLiteral("renditionId")));
-        if (operation == QLatin1String("receivedQuery"))
-            rpc = QStringLiteral("get_received_rendition_v02");
-        else if (operation == QLatin1String("receivedNotes"))
-            rpc = QStringLiteral("list_rendition_admin_notes_v01");
-        else if (operation == QLatin1String("receivedActivity"))
-            rpc = QStringLiteral("list_rendition_activity_v01");
-        else if (operation == QLatin1String("receivedAddNote")) {
-            rpc = QStringLiteral("create_rendition_admin_note_v01");
-            params.insert(QStringLiteral("p_rendition_version_id"), arguments.value(QStringLiteral("versionId")));
-            params.insert(QStringLiteral("p_request_id"), arguments.value(QStringLiteral("noteRequestId")));
-            params.insert(QStringLiteral("p_body"), arguments.value(QStringLiteral("body")));
-        }
-    }
+    RenditionAdminRpc::call(operation, arguments, &rpc, &params);
     const QString correlation = QStringLiteral("received/") + requestId;
     if (rpc.isEmpty()) {
         emit operationFailed(correlation, QStringLiteral("UNKNOWN_COMMAND"), QStringLiteral("Contrato administrativo no disponible."));
@@ -855,6 +833,7 @@ void RenditionRepository::receivedCommand(const QString &requestId,
             });
     });
 }
+
 
 SupabaseClient *RenditionRepository::supabase() const
 {

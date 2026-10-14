@@ -436,6 +436,34 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
         m_repository->receivedCommand(requestId, operation, arguments);
         return;
     }
+    // Revisión administrativa y recepción (contratos de la Web). El servidor
+    // decide los permisos efectivos; Android solo envía la intención con CAS
+    // y request_id estables y refresca la ficha tras la respuesta.
+    if (operation == QLatin1String("reviewContext") || operation == QLatin1String("reviewTransition")
+        || operation == QLatin1String("reviewRequest") || operation == QLatin1String("reviewDecide")
+        || operation == QLatin1String("receive")) {
+        if (arguments.value(QStringLiteral("renditionId")).toString().isEmpty()) {
+            sendError(requestId, QStringLiteral("RENDITION_REQUIRED"),
+                      QStringLiteral("Sincroniza la rendición antes de consultar su revisión."));
+            return;
+        }
+        if ((operation == QLatin1String("reviewTransition") || operation == QLatin1String("reviewRequest")
+             || operation == QLatin1String("reviewDecide"))
+            && arguments.value(QStringLiteral("reason")).toString().trimmed().isEmpty()) {
+            sendError(requestId, QStringLiteral("RENDITION_REVIEW_REASON_REQUIRED"),
+                      QStringLiteral("Escribe el motivo de la operación."));
+            return;
+        }
+        if ((operation == QLatin1String("reviewRequest") || operation == QLatin1String("receive"))
+            && arguments.value(QStringLiteral("requestId")).toString().isEmpty()) {
+            sendError(requestId, QStringLiteral("REQUEST_ID_REQUIRED"),
+                      QStringLiteral("Falta el identificador idempotente de la solicitud."));
+            return;
+        }
+        m_receivedRequests.insert(requestId, arguments);
+        m_repository->receivedCommand(requestId, operation, arguments);
+        return;
+    }
     if (operation == QLatin1String("receivedExport") || operation == QLatin1String("receivedAttachment")) {
         if (m_receivedSnapshot.isEmpty()
             || arguments.value(QStringLiteral("versionId")) != m_receivedSnapshot.value(QStringLiteral("rendition_version_id"))
