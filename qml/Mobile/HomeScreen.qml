@@ -939,11 +939,13 @@ Item {
             shown: home.page === "earth"
             title: "InGe Earth"
             Loader {
+                id: earthNativeLoader
                 width: parent.width
                 active: home.page === "earth" && home.visible
                 sourceComponent: Component {
                     RetroplasmaEarthView {
                         controller: EarthNative
+                        otherGpsClientActive: function() { return home.page === "calicatas" && calicatasEditor.item && calicatasEditor.item.gpsEnabled }
                         u: home.u
                         fontFamily: home.fontFamily
                         viewportHeight: Math.max(240 * home.u, home.height * 0.50)
@@ -1186,7 +1188,13 @@ Item {
         {id: "earth.navigation", label: "Modo navegación", icon: "earth.pan", command: "earth.navigation", selected: earthDockNavigation, priority: 7},
         {id: "earth.coordinates", label: "Mostrar coordenadas", icon: "earth.pan", command: "earth.coordinates", priority: 8},
         {id: "earth.diagnostics", label: "Métricas del visor", icon: "earth.diagnostics", command: "earth.diagnostics", priority: 9},
-        {id: "earth.source", label: "Escena local", icon: "earth.diagnostics", command: "earth.source", priority: 10}
+        {id: "earth.source", label: "Imágenes NASA / escenas", icon: "earth.diagnostics", command: "earth.source", priority: 10},
+        {id: "earth.gps", label: "Mi ubicación GPS", icon: "earth.pan", command: "earth.gps", priority: 11},
+        {id: "earth.places", label: "Lugares", icon: "earth.pan", command: "", priority: 12, children: [
+            {id: "earth.southAmerica", label: "Sudamérica", icon: "earth.pan", command: "earth.southAmerica", enabled: earthDockReady},
+            {id: "earth.peru", label: "Perú", icon: "earth.pan", command: "earth.peru", enabled: earthDockReady},
+            {id: "earth.lima", label: "Lima", icon: "earth.pan", command: "earth.lima", enabled: earthDockReady}
+        ]}
     ]
     function openEarth(returnPage) {
         earthReturnPage = returnPage || "home"
@@ -1248,6 +1256,7 @@ Item {
                 else if (name === "earth.coordinates") home.earthCoordinatesShown = !home.earthCoordinatesShown
                 else if (name === "earth.goTo") home.earthCoordinateEntryShown = !home.earthCoordinateEntryShown
                 else if (name === "earth.source") home.earthSourceEntryShown = !home.earthSourceEntryShown
+                else if (name === "earth.gps" && earthNativeLoader.item) earthNativeLoader.item.requestGps()
                 else if (!EarthNative.command(name.indexOf("earth.") === 0 ? name.substring(6) : name))
                     home.notify("La escena 3D aún no está disponible para este control.")
             } finally {

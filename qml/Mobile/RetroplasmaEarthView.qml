@@ -14,6 +14,54 @@ Column {
     property bool coordinateEntryShown: false
     property bool sourceEntryShown: false
     signal coordinateEntryFinished()
+    property bool gpsRequested: false
+    property bool gpsStartedTracking: false
+    property var otherGpsClientActive: function() { return false }
+    property string gpsMessage: ""
+    function finishGps() {
+        gpsTimeout.stop()
+        gpsRequested = false
+        if (gpsStartedTracking && !otherGpsClientActive()) Perms.stopNativeLocationUpdates()
+        gpsStartedTracking = false
+    }
+    function obtainGpsFix() {
+        gpsStartedTracking = gpsStartedTracking || !Perms.nativeTracking
+        if (!Perms.requestImmediateLocationUpdate()) {
+            gpsMessage = Perms.nativeLocationError || "Activa la ubicación del dispositivo."
+            finishGps()
+        } else {
+            gpsMessage = "Buscando posición GPS…"
+            gpsTimeout.restart()
+        }
+    }
+    function requestGps() {
+        if (gpsRequested) return
+        gpsRequested = true
+        if (!Perms.hasLocationPermission()) {
+            gpsMessage = "Autoriza ubicación precisa para centrar el planeta."
+            Perms.requestLocationPermission()
+            gpsTimeout.restart()
+        } else obtainGpsFix()
+    }
+    function completeGpsFix() {
+        if (!gpsRequested || !Perms.nativeHasFix || Date.now() - Perms.nativeTimestampMs > 30000) return
+        if (controller.goTo(Perms.nativeLatitude, Perms.nativeLongitude, isFinite(Perms.nativeAltitude) ? Perms.nativeAltitude : 0)) {
+            gpsMessage = "GPS · precisión " + Number(Perms.nativeAccuracy).toFixed(0) + " m"
+            finishGps()
+        }
+    }
+    Timer { id: gpsTimeout; interval: 30000; onTriggered: { root.gpsMessage = "No se obtuvo una posición reciente. Reintenta GPS."; root.finishGps() } }
+    Connections {
+        target: Perms
+        function onNativePermissionChanged() {
+            if (root.gpsRequested && Perms.hasLocationPermission()) root.obtainGpsFix()
+        }
+        function onNativeLocationChanged() {
+            // Finish after the shared helper has completed starting/requesting its one source.
+            if (root.gpsRequested) Qt.callLater(root.completeGpsFix)
+        }
+    }
+    Component.onDestruction: finishGps()
     spacing: 10 * u
     Text {
         width: parent.width
@@ -64,7 +112,7 @@ Column {
                 }
                 onRotationChanged: {
                     if (active)
-                        root.controller.orbit(-(activeRotation - lastRotation) * Math.PI / (180 * 0.006), 0)
+                        root.controller.rotateView((activeRotation - lastRotation) * Math.PI / 180)
                     lastRotation = activeRotation
                 }
                 onTranslationChanged: function(delta) {
@@ -99,6 +147,21 @@ Column {
         font.family: root.fontFamily
         font.pixelSize: 12 * root.u
         wrapMode: Text.WordWrap
+    }
+    Text {
+        width: parent.width
+        visible: root.gpsMessage.length > 0
+        text: root.gpsMessage
+        color: "#B4C2D3"; wrapMode: Text.WordWrap; font.family: root.fontFamily
+    }
+    Flow {
+        width: parent.width
+        spacing: 4 * root.u
+        Button { text: "Planeta completo"; onClicked: root.controller.command("reset") }
+        Button { text: "Sudamérica"; onClicked: root.controller.command("southAmerica") }
+        Button { text: "Perú"; onClicked: root.controller.command("peru") }
+        Button { text: "Lima"; onClicked: root.controller.command("lima") }
+        Button { text: "GPS"; onClicked: root.requestGps() }
     }
     Text {
         width: parent.width
@@ -167,6 +230,10 @@ Column {
                 root.controller.loadLocalScene(sourcePath.text.trim())
             }
         }
-        Button { text: "Cargar terreno de prueba CC0"; onClicked: root.controller.loadScene("qrc:/inge/retroplasma/sample/scene.json") }
+        Button { text: "Volver al planeta NASA"; onClicked: root.controller.openPlanet() }
+        Text { width: parent.width; text: "Mosaicos regionales: conexión a Internet. HLS Landsat: 30 m, cobertura parcial, nubes y fecha de adquisición; no ofrece detalle de edificios."; color: "#B4C2D3"; wrapMode: Text.WordWrap; font.family: root.fontFamily }
+        Button { text: "NASA Blue Marble mundial / GIBS 500 m"; onClicked: root.controller.setPlanetImagery("blue-marble") }
+        TextField { id: imageryDate; width: parent.width; placeholderText: "Fecha Landsat AAAA-MM-DD; vacío: reciente por región" }
+        Button { text: "NASA/USGS Landsat HLS · 30 m"; onClicked: root.controller.setPlanetImagery("landsat", imageryDate.text.trim()) }
     }
 }
