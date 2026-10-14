@@ -15,7 +15,11 @@ Item {
     property string fontFamily: ""
     property string iconFamily: ""          // Lucide, la misma fuente del Dock
     property bool lowCostGlass: false       // gama baja: sin captura del globo
-    property color glassTint: Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.42)
+    property color glassTint: Qt.rgba(10 / 255, 14 / 255, 20 / 255, 0.20)   // vidrio neutro: sin tinte corporativo
+    // Fondo real del Dock global sobre Earth: HomeScreen lo usa como GlassSurface.ui
+    // en lugar de la foto del Home (que en Earth no está detrás del Dock).
+    readonly property Item dockGlassHost: dockGlass
+    property int externalGlassTick: 0   // HomeScreen: el Dock se movió (show/hide, menú)
     property var requestedTarget: ({})      // destino pedido por Calicatas/Home
     property var selectedTarget: ({})       // último destino real: GPS, coordenadas o petición
     onRequestedTargetChanged: if (requestedTarget && requestedTarget.latitude !== undefined) selectedTarget = requestedTarget
@@ -265,6 +269,58 @@ Item {
                     visible: false
                     smooth: true
                     textureSize: Qt.size(Math.max(1, Math.round(controlBlur.width / 4)), Math.max(1, Math.round(controlBlur.height / 4)))
+                }
+            }
+        }
+    }
+
+    // ================================================ Liquid Glass del Dock
+    // El Dock, el botón IA y el menú Quick Bubble viven en HomeScreen, pero en Earth
+    // lo que tienen detrás es el globo: UNA captura del viewport completo a 1/3 de
+    // resolución + UN desenfoque, la misma cadena que la columna. En gama baja no
+    // existe (HomeScreen usa su vidrio neutro de respaldo).
+    readonly property bool dockGlassLive: !lowCostGlass && visible
+    Item {
+        id: dockGlass
+        anchors.fill: parent
+        readonly property Item backdrop: dockGlass
+        readonly property var glassTexture: dockGlassChain.item ? dockGlassChain.item.texture : null
+        readonly property int glassTick: root.glassTick + root.externalGlassTick
+        Loader {
+            id: dockGlassChain
+            anchors.fill: parent
+            active: !root.lowCostGlass
+            sourceComponent: Item {
+                readonly property var texture: dockGlassTexture
+                ShaderEffectSource {
+                    id: dockCapture
+                    width: dockGlass.width
+                    height: dockGlass.height
+                    sourceItem: viewport
+                    live: root.dockGlassLive
+                    hideSource: false
+                    visible: false
+                    textureSize: Qt.size(Math.max(1, Math.round(width / 3)), Math.max(1, Math.round(height / 3)))
+                }
+                MultiEffect {
+                    id: dockBlur
+                    width: dockGlass.width
+                    height: dockGlass.height
+                    source: dockCapture
+                    blurEnabled: true
+                    blurMax: 32
+                    blur: 0.9
+                    saturation: 0.12            // vibrancia leve: el color real del globo, no un tinte
+                    autoPaddingEnabled: false
+                }
+                ShaderEffectSource {
+                    id: dockGlassTexture
+                    sourceItem: dockBlur
+                    live: root.dockGlassLive
+                    hideSource: true
+                    visible: false
+                    smooth: true
+                    textureSize: Qt.size(Math.max(1, Math.round(dockBlur.width / 3)), Math.max(1, Math.round(dockBlur.height / 3)))
                 }
             }
         }

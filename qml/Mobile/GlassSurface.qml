@@ -16,6 +16,10 @@ ShaderEffect {
     property real edgeWidth: 1
     property real shadowAlpha: 0.22
     property color shadowColor: "#151A30"
+    // Óptica opcional (InGe Earth). En 0, idéntico al material del Home.
+    property real refraction: 0                  // px de lente en el borde
+    property real specular: 0                    // 0..1 brillo especular / filo de luz
+    property real bevel: 0                       // px de la zona curva del borde
 
     anchors.fill: parent
     anchors.margins: -margin

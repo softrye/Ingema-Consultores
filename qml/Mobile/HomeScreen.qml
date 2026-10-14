@@ -948,7 +948,8 @@ Item {
                     fontFamily: home.fontFamily
                     iconFamily: home.iconFamily
                     lowCostGlass: home.dockLowCostGlass
-                    glassTint: home.dockGlassTint
+                    glassTint: home.earthGlassTint
+                    externalGlassTick: home.glassTick
                     requestedTarget: home.earthRequestedTarget
                     safeTop: home.topInset
                     safeBottom: Qt.inputMethod.visible ? 14 * home.u : home.dockArea
@@ -1641,8 +1642,21 @@ Item {
     readonly property bool subAppGlassActive: subAppProgress > 0.001
                                               && calicatasEditor.status === Loader.Ready
                                               && !dockLowCostGlass
-    readonly property var dockGlassUi: subAppGlassActive ? subAppGlass : home
-    readonly property color dockGlassTint: subAppGlassActive ? Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.56)
+    // InGe Earth: detrás del Dock está el globo, no la foto del Home. El Dock, el
+    // botón IA y el Quick Bubble muestrean la captura desenfocada del viewport que
+    // publica RetroplasmaEarthView (dockGlassHost), con vidrio neutro y la óptica
+    // opcional de GlassSurface (lente de borde + especular). Fuera de Earth no cambia nada.
+    readonly property Item earthGlassHost: page === "earth" && earthNativeLoader.item
+                                           ? earthNativeLoader.item.dockGlassHost : null
+    readonly property bool earthGlassActive: earthGlassHost !== null && earthGlassHost.glassTexture !== null
+    // Gama baja sobre Earth: sin captura; vidrio neutro translúcido (nunca la foto del Home).
+    readonly property bool earthGlassFallback: page === "earth" && !earthGlassActive
+    readonly property color earthGlassTint: Qt.rgba(10 / 255, 14 / 255, 20 / 255, 0.20)
+    readonly property real earthGlassRefraction: earthGlassActive ? 6 * u : 0
+    readonly property real earthGlassSpecular: earthGlassActive ? 0.55 : 0
+    readonly property var dockGlassUi: earthGlassActive ? earthGlassHost : subAppGlassActive ? subAppGlass : home
+    readonly property color dockGlassTint: earthGlassActive ? earthGlassTint
+                                         : subAppGlassActive ? Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.56)
                                          : subAppProgress > 0.001 ? Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.84)
                                          : Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.38)
     Item {
@@ -1678,6 +1692,22 @@ Item {
             smooth: true
             textureSize: Qt.size(Math.max(1, Math.round(subAppBlur.width / 4)),
                                  Math.max(1, Math.round(subAppBlur.height / 4)))
+        }
+    }
+
+    // Vidrio de respaldo para Earth sin captura: neutro, translúcido, con brillo
+    // superior y borde de cristal. Solo existe en Earth; Home y subapps no cambian.
+    component EarthGlassFallback: Rectangle {
+        anchors.fill: parent
+        radius: parent ? parent.radius : 0
+        visible: home.earthGlassFallback
+        color: Qt.rgba(14 / 255, 18 / 255, 24 / 255, 0.42)
+        border.width: 1
+        border.color: Qt.rgba(1, 1, 1, 0.30)
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.16) }
+            GradientStop { position: 0.5; color: Qt.rgba(14 / 255, 18 / 255, 24 / 255, 0.40) }
+            GradientStop { position: 1.0; color: Qt.rgba(14 / 255, 18 / 255, 24 / 255, 0.50) }
         }
     }
 
@@ -1724,7 +1754,12 @@ Item {
             radius: dockMenuBox.radius
             margin: 10 * home.u
             tint: home.dockGlassTint
+            refraction: home.earthGlassRefraction
+            specular: home.earthGlassSpecular
+            bevel: 14 * home.u
+            opacity: home.earthGlassFallback ? 0 : 1
         }
+        EarthGlassFallback {}
         MouseArea { anchors.fill: parent }
         Flickable {
             anchors.fill: parent
@@ -2263,7 +2298,12 @@ Item {
             radius: dock.height / 2
             margin: 10 * home.u
             tint: home.dockGlassTint
+            refraction: home.earthGlassRefraction
+            specular: home.earthGlassSpecular
+            bevel: 14 * home.u
+            opacity: home.earthGlassFallback ? 0 : 1
         }
+        EarthGlassFallback {}
         MouseArea { anchors.fill: parent; enabled: home.dockMode !== "home" }   // no atraviesa al editor
         Row {
             anchors.centerIn: parent
@@ -2408,7 +2448,12 @@ Item {
         x: home.width - home.gutter - width
         y: dock.y + (dock.height - height) / 2
         color: "transparent"
-        GlassSurface { ui: home.dockGlassUi; radius: iaButton.width / 2; margin: 10 * home.u; tint: home.dockGlassTint }
+        GlassSurface {
+            ui: home.dockGlassUi; radius: iaButton.width / 2; margin: 10 * home.u; tint: home.dockGlassTint
+            refraction: home.earthGlassRefraction; specular: home.earthGlassSpecular; bevel: 14 * home.u
+            opacity: home.earthGlassFallback ? 0 : 1
+        }
+        EarthGlassFallback {}
         Column {
             anchors.centerIn: parent
             Text {

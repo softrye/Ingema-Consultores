@@ -7,8 +7,10 @@ import QtQuick
 // desenfocada del globo (glassHost), más capas ópticas estáticas pintadas una
 // sola vez (borde iluminado, brillo especular, sombra interior). La refracción
 // se aproxima con una lente: el cristal muestrea una región algo menor que su
-// tamaño, centrada en el botón; no añade pasadas GPU. Sin textura (gama baja o
-// backdrop no disponible) degrada a cristal tintado denso con las mismas capas.
+// tamaño, centrada en el botón, más la lente de borde del shader; no añade
+// pasadas GPU. Tinte neutro casi incoloro: el globo se ve a través del vidrio,
+// nunca un relleno corporativo. Sin textura (gama baja o backdrop no
+// disponible) degrada a cristal neutro translúcido con las mismas capas.
 Item {
     id: action
 
@@ -24,8 +26,8 @@ Item {
     property bool active: false
     property bool busy: false
     property bool reducedMotion: false
-    property color tint: Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.42)
-    property color fallbackTint: Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.84)
+    property color tint: Qt.rgba(10 / 255, 14 / 255, 20 / 255, 0.20)   // vidrio grafito neutro y translúcido: sin color de marca, icono blanco legible sobre nubes
+    property color fallbackTint: Qt.rgba(14 / 255, 18 / 255, 24 / 255, 0.42)   // neutro translúcido
     property color accent: "#8FD8FF"
     property real lens: 1.14
     property Component face: null         // contenido propio (p. ej. la brújula)
@@ -131,16 +133,24 @@ Item {
             radius: body.width / 2
             margin: 10 * action.u
             tint: action.tint
-            edge: Qt.rgba(1, 1, 1, 0.26)
-            shadowAlpha: 0.24
+            edge: Qt.rgba(1, 1, 1, 0.34)
+            shadowAlpha: 0.20
+            refraction: 5 * action.u               // lente de borde: el globo se curva hacia el centro
+            specular: 0.55
+            bevel: 12 * action.u
         }
-        Rectangle {   // degradación elegante: cristal tintado denso
+        Rectangle {   // degradación digna: vidrio neutro translúcido (el globo se sigue viendo)
             visible: !action.hasBackdrop
             anchors.fill: parent
             radius: width / 2
             color: action.fallbackTint
             border.width: 1
-            border.color: Qt.rgba(1, 1, 1, 0.26)
+            border.color: Qt.rgba(1, 1, 1, 0.30)
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.16) }
+                GradientStop { position: 0.5; color: action.fallbackTint }
+                GradientStop { position: 1.0; color: Qt.rgba(14 / 255, 18 / 255, 24 / 255, 0.50) }
+            }
         }
         // Capas ópticas estáticas: se pintan una vez por tamaño, no por frame.
         Canvas {
@@ -178,11 +188,11 @@ Item {
                 ctx.beginPath(); ctx.arc(w / 2, h / 2, r - lw / 2, 0, 2 * Math.PI); ctx.stroke()
             }
         }
-        Rectangle {   // estado activo: núcleo y anillo de acento
+        Rectangle {   // estado activo: realce sutil (vidrio algo más luminoso + anillo fino)
             anchors.fill: parent
             anchors.margins: 2 * action.u
             radius: width / 2
-            color: Qt.rgba(143 / 255, 216 / 255, 1, 0.16)
+            color: Qt.rgba(1, 1, 1, 0.10)
             border.width: 1.5 * action.u
             border.color: action.accent
             opacity: action.active ? 1 : 0
