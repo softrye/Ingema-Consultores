@@ -6,6 +6,7 @@ class Camera {
 public:
     void reset(Bounds,bool snap=false);
     void resetPlanet(bool snap=false);
+    void framePlanet(double aspect,bool snap=false);
     void goToGeographic(GeoPoint,double cameraAltitude=120000);
     void rotateHeading(double radians);
     double heading()const{return m_heading;}

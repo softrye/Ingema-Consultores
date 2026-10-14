@@ -20,8 +20,8 @@ std::shared_ptr<const Scene> PlanetSceneProvider::readScene(const QUrl &url,QStr
     error.clear();if(cancel.load()){error=QStringLiteral("CANCELLED");return {};}
     auto scene=std::make_shared<Scene>();scene->planetary=true;scene->title=QStringLiteral("Tierra · WGS84");
     QUrlQuery query(url);scene->imagery=query.queryItemValue(QStringLiteral("layer"));
-    if(scene->imagery.isEmpty())scene->imagery=QStringLiteral("blue-marble");
-    if(scene->imagery!=QLatin1String("blue-marble")&&scene->imagery!=QLatin1String("landsat")){error=QStringLiteral("RP_IMAGERY_LAYER_UNSUPPORTED");return {};}
+    if(scene->imagery.isEmpty())scene->imagery=QStringLiteral("sentinel");
+    if(scene->imagery!=QLatin1String("blue-marble")&&scene->imagery!=QLatin1String("landsat")&&scene->imagery!=QLatin1String("sentinel")){error=QStringLiteral("RP_IMAGERY_LAYER_UNSUPPORTED");return {};}
     scene->date=query.queryItemValue(QStringLiteral("date"));
     if(scene->imagery==QLatin1String("landsat")){
         if(scene->date.isEmpty())scene->date=QStringLiteral("auto");
@@ -30,6 +30,7 @@ std::shared_ptr<const Scene> PlanetSceneProvider::readScene(const QUrl &url,QStr
     }
     scene->source=QStringLiteral("NASA Earth Observatory / Reto Stöckli · Blue Marble · NASA EOSDIS GIBS");
     if(scene->imagery==QLatin1String("landsat"))scene->source+=QStringLiteral(" · NASA/USGS Landsat HLS L30 · ")+(scene->date==QLatin1String("auto")?QStringLiteral("adquisición reciente por sector"):scene->date);
+    if(scene->imagery==QLatin1String("sentinel"))scene->source+=QStringLiteral(" · EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016) · CC BY 4.0");
     scene->license=QStringLiteral("NASA imagery usage guidelines; USGS Landsat public domain; attribution, no endorsement");
     scene->bounds={{-1.001,-1.001,-1.001},{1.001,1.001,1.001}};
     // 32 permanent overview segments ensure all longitudes and both poles are present offline.
@@ -50,6 +51,13 @@ QImage PlanetSceneProvider::overview(QString &error)const{
     return m_overview;
 }
 QUrl PlanetSceneProvider::imageryUrl(const Lod &lod){
+    if(lod.layer==QLatin1String("sentinel")){
+        QUrl url(QStringLiteral("https://tiles.maps.eox.at/wms"));QUrlQuery q;
+        q.addQueryItem("SERVICE","WMS");q.addQueryItem("REQUEST","GetMap");q.addQueryItem("VERSION","1.1.1");
+        q.addQueryItem("LAYERS","s2cloudless");q.addQueryItem("STYLES","");q.addQueryItem("SRS","EPSG:4326");
+        q.addQueryItem("BBOX",QStringLiteral("%1,%2,%3,%4").arg(lod.sector.west,0,'f',10).arg(lod.sector.south,0,'f',10).arg(lod.sector.east,0,'f',10).arg(lod.sector.north,0,'f',10));
+        q.addQueryItem("WIDTH","256");q.addQueryItem("HEIGHT","256");q.addQueryItem("FORMAT","image/jpeg");url.setQuery(q);return url;
+    }
     QUrl url(QStringLiteral("https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi"));QUrlQuery q;
     const bool hls=lod.layer==QLatin1String("landsat");
     q.addQueryItem(QStringLiteral("SERVICE"),QStringLiteral("WMS"));q.addQueryItem(QStringLiteral("REQUEST"),QStringLiteral("GetMap"));q.addQueryItem(QStringLiteral("VERSION"),QStringLiteral("1.3.0"));
@@ -71,7 +79,7 @@ std::shared_ptr<const LoadedTile> PlanetSceneProvider::readTile(const Lod &lod,Q
         int width=qRound((lod.sector.east-lod.sector.west)/360*image.width()),height=qRound((lod.sector.north-lod.sector.south)/180*image.height());
         tile->texture=image.copy(x,y,width,height);tile->source=QStringLiteral("NASA Blue Marble incorporada");tile->resolutionMetres=19568;
     }else{
-        if(lod.layer!=QLatin1String("blue-marble")&&lod.layer!=QLatin1String("landsat")){error=QStringLiteral("RP_IMAGERY_LAYER_UNSUPPORTED");return {};}
+        if(lod.layer!=QLatin1String("blue-marble")&&lod.layer!=QLatin1String("landsat")&&lod.layer!=QLatin1String("sentinel")){error=QStringLiteral("RP_IMAGERY_LAYER_UNSUPPORTED");return {};}
         QMutexLocker networkLock(&m_networkMutex); // One disk cache writer across the two bounded workers.
         if(cancel.load()){error=QStringLiteral("CANCELLED");return {};}
         // Each manager/reply belongs exclusively to this worker thread. No GUI-thread network wait.
@@ -83,7 +91,7 @@ std::shared_ptr<const LoadedTile> PlanetSceneProvider::readTile(const Lod &lod,Q
         if(cancel.load()){error=QStringLiteral("CANCELLED");return {};}
         if(searchClock.elapsed()>30000)break;
         Lod candidate=lod;if(automatic)candidate.date=QDate::currentDate().addDays(-4-attempt).toString(Qt::ISODate);
-        QNetworkRequest request(imageryUrl(candidate));request.setTransferTimeout(15000);request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,QNetworkRequest::ManualRedirectPolicy);request.setRawHeader("User-Agent","InGePlus-Earth/1.0 (NASA-GIBS)");
+        QNetworkRequest request(imageryUrl(candidate));request.setTransferTimeout(15000);request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,QNetworkRequest::ManualRedirectPolicy);request.setRawHeader("User-Agent","InGePlus-Earth/1.0 (NASA-GIBS; EOX)");
         auto *reply=manager.get(request);reply->setReadBufferSize(4*1024*1024);QEventLoop loop;QTimer poll,deadline;poll.setInterval(50);deadline.setSingleShot(true);QByteArray payload;bool exceeded=false;
         QObject::connect(reply,&QNetworkReply::readyRead,&loop,[&](){payload+=reply->readAll();if(payload.size()>4*1024*1024){exceeded=true;reply->abort();}});
         QObject::connect(reply,&QNetworkReply::finished,&loop,&QEventLoop::quit);
@@ -94,9 +102,9 @@ std::shared_ptr<const LoadedTile> PlanetSceneProvider::readTile(const Lod &lod,Q
         QBuffer buffer(&payload);buffer.open(QIODevice::ReadOnly);QImageReader reader(&buffer);
         if(reader.size()!=QSize(256,256)){error=QStringLiteral("RP_GIBS_TILE_SIZE_OR_FORMAT_INVALID");return {};}
         tile->texture=reader.read().convertToFormat(QImage::Format_RGBA8888);
-        tile->source=lod.layer==QLatin1String("landsat")?QStringLiteral("NASA/USGS HLS L30 · ")+candidate.date:QStringLiteral("NASA GIBS Blue Marble");
+        tile->source=lod.layer==QLatin1String("sentinel")?QStringLiteral("EOxCloudless / EOX · Sentinel 2016 · CC BY 4.0"):lod.layer==QLatin1String("landsat")?QStringLiteral("NASA/USGS HLS L30 · ")+candidate.date:QStringLiteral("NASA GIBS Blue Marble");
         if(lod.layer==QLatin1String("landsat"))tile->acquisitionDate=candidate.date;
-        tile->resolutionMetres=std::max(lod.layer==QLatin1String("landsat")?30.0:500.0,(lod.sector.east-lod.sector.west)*Radians*EarthRadius/256);
+        tile->resolutionMetres=std::max(lod.layer==QLatin1String("sentinel")?10.0:lod.layer==QLatin1String("landsat")?30.0:500.0,(lod.sector.east-lod.sector.west)*Radians*EarthRadius/256);
         if(lod.layer==QLatin1String("landsat")&&!tile->texture.isNull()){
             int covered=0;for(int y=0;y<256;++y){const auto *line=tile->texture.constScanLine(y);for(int x=0;x<256;++x)if(line[x*4+3]>=128)++covered;}
             tile->coveragePercent=covered*100/(256*256);
@@ -114,6 +122,6 @@ std::shared_ptr<const LoadedTile> PlanetSceneProvider::readTile(const Lod &lod,Q
 Geometry PlanetSceneProvider::geometryFor(const Lod &lod){
     // L0 must match the overview angular density; a coarser chord would be buried by depth-write.
     int steps=lod.layer==QLatin1String("overview")||lod.level==0?32:16;
-    return planetMesh(lod.sector,steps,lod.layer==QLatin1String("overview")?0:(lod.layer==QLatin1String("landsat")?250:50)+lod.level*10);
+    return planetMesh(lod.sector,steps,lod.layer==QLatin1String("overview")?0:60+lod.level);
 }
 }

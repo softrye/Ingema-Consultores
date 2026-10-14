@@ -22,7 +22,7 @@ static double radialIntersection(const Geometry &mesh,Vec3 direction){
 int main(int argc,char **argv){
     QCoreApplication app(argc,argv);Q_INIT_RESOURCE(rp_samples);
     PlanetSceneProvider provider;QString error;std::atomic_bool cancel{false};
-    auto scene=provider.readScene(QUrl("inge-earth://global"),error,cancel);
+    auto scene=provider.readScene(QUrl("inge-earth://global?layer=blue-marble"),error,cancel);
     require(scene&&scene->planetary&&scene->nodes.size()==32,"global scene consists of 32 ellipsoid sectors");
     Lod overview;overview.planetary=true;overview.layer="overview";overview.sector={-90,-45,-45,0};
     auto baseMesh=PlanetSceneProvider::geometryFor(overview);Lod remote=overview;remote.layer="blue-marble";
@@ -65,6 +65,22 @@ int main(int argc,char **argv){
             require(tile&&tile->texture.size()==QSize(256,256),"live official GIBS tile fetched and decoded on worker");
             std::cout<<"LIVE_GIBS "<<layer.toStdString()<<" coverage="<<tile->coveragePercent<<"% resolution="<<tile->resolutionMetres<<"m date="<<tile->acquisitionDate.toStdString()<<"\n";
         }
+    }
+    auto eox=provider.readScene(QUrl("inge-earth://global?layer=sentinel"),error,cancel);
+    require(eox&&eox->imagery=="sentinel","authorized EOX 2016 provider accepted");
+    asset.layer="sentinel";QUrlQuery eoxQuery(PlanetSceneProvider::imageryUrl(asset));
+    require(eoxQuery.queryItemValue("LAYERS")=="s2cloudless"&&eoxQuery.queryItemValue("VERSION")=="1.1.1","2016 EOX EPSG4326 WMS layer");
+    require(eoxQuery.queryItemValue("BBOX")=="-78.0000000000,-13.0000000000,-77.0000000000,-12.0000000000","EOX WMS111 longitude-first axis order");
+    camera.goToGeographic({-12.0464,-77.0428,0},2000);for(int i=0;i<180;++i)camera.step(.016);
+    require(camera.pose().distance<2100,"city zoom reaches 2km rather than former 40km floor");
+    auto city=RetroplasmaTileScheduler::selectPlanet(*eox,camera.viewProjection(1),camera.eye(),1200,cache,"g");
+    bool fine=false,progressive=false;for(const auto&r:city.requests){fine|=r.asset.level>=10;progressive|=r.asset.level<8;require(r.asset.level<=11,"10m native detail bounded at level11");}
+    require(fine&&progressive,"city requests fine imagery with coarse parents for progressive coverage");
+    if(qEnvironmentVariableIsSet("RP_TEST_EOX")){
+        asset.layer="sentinel";asset.level=11;asset.sector={-77.05,-12.05,-77.02802734375,-12.02802734375};
+        auto future=QtConcurrent::run([&](){return provider.readTile(asset,error,cancel);});future.waitForFinished();auto tile=future.result();
+        if(!tile)std::cerr<<error.toStdString()<<'\n';require(tile&&tile->texture.size()==QSize(256,256)&&tile->resolutionMetres>=10&&tile->resolutionMetres<11,"live licensed EOX 2016 tile at native 10m");
+        std::cout<<"LIVE_EOX LIMA 2016 256x256 effective_resolution="<<tile->resolutionMetres<<"m\n";
     }
     cancel.store(true);require(!provider.readTile(scene->nodes[0].lods[0],error,cancel)&&error=="CANCELLED","planet load cancellation obeyed");
     std::cout<<"PLANET PROVIDER PASS "<<checks<<" checks\n";

@@ -6,20 +6,25 @@ Schedule RetroplasmaTileScheduler::selectPlanet(const Scene &scene,const Mat4 &v
     Schedule out;QSet<QString> drawn;int leaves=0,remoteRequests=0;
     auto draw=[&](const QString &key){if(resident.contains(key)&&!drawn.contains(key)){drawn.insert(key);out.wanted.insert(key);out.draw.push_back({key,resident.value(key)});}};
     auto request=[&](const QString &key,const Lod &asset,double priority){if(out.wanted.contains(key))return;if(asset.layer!=QLatin1String("overview")&&remoteRequests++>=96)return;out.wanted.insert(key);if(!resident.contains(key))out.requests.push_back({key,0,0,priority,true,asset,planetBounds(asset.sector)});};
-    const bool detail=scene.imagery==QLatin1String("landsat");const int maxLevel=detail?9:5;
+    const bool detail=scene.imagery==QLatin1String("landsat");const int maxLevel=scene.imagery==QLatin1String("sentinel")?11:detail?9:5;
     std::function<void(GeoSector,int,int,int,QString)> visit=[&](GeoSector box,int level,int x,int y,QString ancestor){
         if(!planetSectorVisible(box,view,eye))return;
         auto middle=ecefToPlanet(geodeticToEcef({(box.south+box.north)*.5,(box.west+box.east)*.5,0}));
-        double distance=std::max(.002,length(middle-eye));
+        double distance=std::max(.0001,length(middle-eye));
         double pixels=(box.east-box.west)*Radians*height/(2*std::tan(22.5*Radians)*distance);
         QString key=revision+QStringLiteral(":gibs:%1:%2:%3:%4").arg(scene.imagery).arg(level).arg(y).arg(x);
-        if(resident.contains(key))ancestor=key;
+        if(resident.contains(key)){ancestor=key;out.wanted.insert(key);}
+        if(level>=3&&pixels>360&&level<maxLevel){
+            Lod parent;parent.planetary=true;parent.sector=box;parent.layer=scene.imagery;parent.date=scene.date;parent.level=level;
+            request(key,parent,distance-1.0/double(level+1));
+        }
         if(pixels>360&&level<maxLevel&&leaves<80){
             double lon=(box.west+box.east)*.5,lat=(box.south+box.north)*.5;
-            visit({box.west,box.south,lon,lat},level+1,x*2,y*2,ancestor);
-            visit({lon,box.south,box.east,lat},level+1,x*2+1,y*2,ancestor);
-            visit({box.west,lat,lon,box.north},level+1,x*2,y*2+1,ancestor);
-            visit({lon,lat,box.east,box.north},level+1,x*2+1,y*2+1,ancestor);return;
+            struct Cell{GeoSector box;int x,y;};
+            std::array<Cell,4> cells{{{{box.west,box.south,lon,lat},x*2,y*2},{{lon,box.south,box.east,lat},x*2+1,y*2},{{box.west,lat,lon,box.north},x*2,y*2+1},{{lon,lat,box.east,box.north},x*2+1,y*2+1}}};
+            auto proximity=[&](GeoSector s){return length(ecefToPlanet(geodeticToEcef({(s.south+s.north)*.5,(s.west+s.east)*.5,0}))-eye);};
+            std::stable_sort(cells.begin(),cells.end(),[&](auto a,auto b){return proximity(a.box)<proximity(b.box);});
+            for(auto cell:cells)visit(cell.box,level+1,cell.x,cell.y,ancestor);return;
         }
         if(++leaves>96)return;
         // Leaf textures never become a flat map: each is uploaded on an ECEF ellipsoid segment.
@@ -38,7 +43,9 @@ Schedule RetroplasmaTileScheduler::selectPlanet(const Scene &scene,const Mat4 &v
         const auto &node=scene.nodes[root];auto key=revision+QStringLiteral(":overview:")+node.id;
         request(key,node.lods[0],-1000);draw(key); // Pinned all-world coverage, also across fast rotations/offline.
     }
-    if(length(eye)<3.0)for(int root:scene.roots)visit(scene.nodes[root].lods[0].sector,0,root%8,root/8,{});
+    auto roots=scene.roots;
+    std::stable_sort(roots.begin(),roots.end(),[&](int a,int b){return length(center(scene.nodes[a].bounds)-eye)<length(center(scene.nodes[b].bounds)-eye);});
+    if(length(eye)<3.0)for(int root:roots)visit(scene.nodes[root].lods[0].sector,0,root%8,root/8,{});
     std::stable_sort(out.requests.begin(),out.requests.end(),[](const auto &a,const auto &b){return a.priority<b.priority;});return out;
 }
 Schedule RetroplasmaTileScheduler::select(const Scene &scene,const Mat4 &view,Vec3 eye,double height,const QHash<QString,std::shared_ptr<const LoadedTile>> &resident,const QString &revision){
