@@ -41,6 +41,7 @@
 #include "src/cpp/renditionlocalstore.h"
 #include "src/cpp/renditionsynccontroller.h"
 #include "src/cpp/renditionflutterbridge.h"
+#include "src/cpp/renditionuicontroller.h"
 #include "src/cpp/renditionexportservice.h"
 #include "src/graphics/InGeGraphicsCore.h"
 #include "src/core/StartupInstrumentation.h"
@@ -218,6 +219,8 @@ int main(int argc, char *argv[])
     RenditionExportService::shared(ctx->supabase(), ctx->auth());
     auto *renditionFlutterBridge = new RenditionFlutterBridge(renditions, renditionLocalStore,
                                renditionSyncController, &excelExporter, &app);
+    // Subapp QML de Rendiciones: adaptador de presentación sobre el mismo bridge.
+    auto *renditionsUi = new RenditionUiController(renditionFlutterBridge, &app);
 
     DropboxBridge dropboxBridge(&app);
     DocsOps docsOps(&app);
@@ -346,6 +349,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("renditionLocalStore", renditionLocalStore);
     engine.rootContext()->setContextProperty("renditionSyncController", renditionSyncController);
     engine.rootContext()->setContextProperty("renditionFlutterBridge", renditionFlutterBridge);
+    engine.rootContext()->setContextProperty("RenditionsUi", renditionsUi);
     engine.rootContext()->setContextProperty("excelExporter", &excelExporter);
     engine.rootContext()->setContextProperty("dropbox", &dropboxBridge);
     engine.rootContext()->setContextProperty("docsOps", &docsOps);

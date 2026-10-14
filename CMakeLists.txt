@@ -299,6 +299,8 @@ if(INGE_BUILD_MOBILE)
         "${INGE_PROJECT_ROOT}/src/cpp/renditionsynccontroller.cpp"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionflutterbridge.h"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionflutterbridge.cpp"
+        "${INGE_PROJECT_ROOT}/src/cpp/renditionuicontroller.h"
+        "${INGE_PROJECT_ROOT}/src/cpp/renditionuicontroller.cpp"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionsnapshotexporter.h"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionsnapshotexporter.cpp"
         "${INGE_PROJECT_ROOT}/androidcalicataexporter.h"
