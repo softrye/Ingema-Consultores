@@ -21,6 +21,7 @@ inline bool canEditWorkingCopy(const QVariantMap &row) {
 inline QVariantMap normalize(const QVariantMap &row, const QVariantMap &saved = {}) {
     QVariantMap result = row;
     const QMap<QString, QString> aliases{
+        {"displayName", "display_name"},
         {"projectIds", "project_ids"}, {"primaryProjectId", "primary_project_id"},
         {"primaryProjectName", "primary_project_name"}, {"totalPen", "total_pen"},
         {"totalUsd", "total_usd"}, {"expenseCount", "expense_count"},

@@ -13,6 +13,10 @@ Column {
     property string maximum: ""
     property string error: ""
     property bool readOnly: false
+    // Variante aprobada de Nuevo gasto: icono de calendario y botón X para
+    // limpiar la fecha (emite picked("")).
+    property bool formStyle: false
+    property bool clearable: false
     signal picked(string value)
 
     spacing: 6 * ui.u
@@ -34,19 +38,32 @@ Column {
     Text {
         visible: dateField.label.length > 0
         text: dateField.label
-        color: S.muted
+        color: dateField.formStyle ? S.text : S.muted
         font.family: dateField.ui.fontFamily
-        font.pixelSize: 13 * dateField.ui.u
+        font.pixelSize: (dateField.formStyle ? 15 : 13) * dateField.ui.u
+        font.weight: dateField.formStyle ? Font.DemiBold : Font.Normal
     }
     Rectangle {
         width: parent.width
-        height: 48 * dateField.ui.u
-        radius: 12 * dateField.ui.u
-        color: Qt.rgba(1, 1, 1, dateField.readOnly ? 0.03 : (tap.pressed ? 0.14 : 0.08))
+        height: (dateField.formStyle ? 56 : 48) * dateField.ui.u
+        radius: (dateField.formStyle ? 16 : 12) * dateField.ui.u
+        color: dateField.formStyle ? Qt.rgba(1, 1, 1, dateField.readOnly ? 0.45 : (tap.pressed ? 0.6 : 0.78))
+                                   : S.ink(dateField.readOnly ? 0.03 : (tap.pressed ? 0.14 : 0.08))
         border.width: 1
-        border.color: dateField.error.length > 0 ? S.danger : S.border
+        border.color: dateField.error.length > 0 ? S.danger : (dateField.formStyle ? S.fieldBorder : S.border)
         Text {
-            x: 14 * dateField.ui.u
+            visible: dateField.formStyle
+            x: 16 * dateField.ui.u
+            width: 28 * dateField.ui.u
+            anchors.verticalCenter: parent.verticalCenter
+            horizontalAlignment: Text.AlignHCenter
+            text: String.fromCharCode(0xE063)       // calendar (Lucide)
+            color: S.navy
+            font.family: dateField.ui.iconFamily
+            font.pixelSize: 22 * dateField.ui.u
+        }
+        Text {
+            x: (dateField.formStyle ? 66 : 14) * dateField.ui.u
             anchors.verticalCenter: parent.verticalCenter
             text: dateField.value.length ? S.date(dateField.value) : "dd/mm/aaaa"
             color: dateField.value.length ? S.text : S.faint
@@ -63,6 +80,19 @@ Column {
                 grid.year = d.getFullYear()
                 calendar.open()
             }
+        }
+        Rectangle {                                   // limpiar fecha (X)
+            visible: dateField.clearable && !dateField.readOnly && dateField.value.length > 0
+            width: 44 * dateField.ui.u; height: width; radius: width / 2
+            anchors.right: parent.right
+            anchors.rightMargin: 6 * dateField.ui.u
+            anchors.verticalCenter: parent.verticalCenter
+            color: clearTap.pressed ? S.ink(0.08) : "transparent"
+            Text { anchors.centerIn: parent; text: String.fromCharCode(0xE1B2); color: S.navy
+                   font.family: dateField.ui.iconFamily; font.pixelSize: 22 * dateField.ui.u }
+            MouseArea { id: clearTap; anchors.fill: parent; onClicked: dateField.picked("") }
+            Accessible.role: Accessible.Button
+            Accessible.name: "Limpiar fecha"
         }
         Accessible.role: Accessible.Button
         Accessible.name: dateField.label + " " + dateField.value
@@ -87,7 +117,7 @@ Column {
         x: parent ? (parent.width - width) / 2 : 0
         y: parent ? (parent.height - height) / 2 : 0
         padding: 14 * dateField.ui.u
-        background: Rectangle { radius: 18 * dateField.ui.u; color: "#1A2440"; border.width: 1; border.color: S.border }
+        background: Rectangle { radius: 18 * dateField.ui.u; color: S.popup; border.width: 1; border.color: S.border }
         Column {
             anchors.fill: parent
             spacing: 8 * dateField.ui.u

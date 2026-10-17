@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 #include <QVariantMap>
 
 // Contrato puro comando del bridge -> RPC administrativa/documental de
@@ -54,6 +55,41 @@ inline bool call(const QString &operation, const QVariantMap &arguments,
         *rpc = QStringLiteral("receive_rendition_v01");
         *params = {{QStringLiteral("p_rendition_id"), arg("renditionId")},
                    {QStringLiteral("p_request_id"), arg("requestId")}};
+    } else if (operation == QLatin1String("filesContract")) {
+        // Files v07 (PR #5/#6): disponibilidad del contrato por entorno (PGRST202 = no desplegado).
+        *rpc = QStringLiteral("get_files_recovery_contract_v07");
+    } else if (operation == QLatin1String("filesArchive") || operation == QLatin1String("filesTrash")) {
+        // Archivero (sólo lectura) y Papelera global jerárquicos; ACL exclusivamente del servidor.
+        *rpc = operation == QLatin1String("filesArchive") ? QStringLiteral("list_files_archive_children_v07")
+                                                          : QStringLiteral("list_files_trash_children_v07");
+        *params = {{QStringLiteral("p_parent_id"), nullable(arguments.value(QStringLiteral("parentId")).toString())},
+                   {QStringLiteral("p_after_id"), nullable(arguments.value(QStringLiteral("afterId")).toString())},
+                   {QStringLiteral("p_limit"), 200}};
+    } else if (operation == QLatin1String("filesCanChoose")) {
+        *rpc = QStringLiteral("can_select_files_recovery_destination_v07");
+        *params = {{QStringLiteral("p_entity_id"), arg("entityId")},
+                   {QStringLiteral("p_space_id"), arg("spaceId")},
+                   {QStringLiteral("p_node_id"), nullable(arguments.value(QStringLiteral("nodeId")).toString())}};
+    } else if (operation == QLatin1String("filesPreviewRecovery") || operation == QLatin1String("filesRecover")) {
+        // Recuperación reversible: vista previa (token) -> mutación con el MISMO token,
+        // versión esperada y request_id idempotente. Nunca purga ni borra.
+        *rpc = operation == QLatin1String("filesPreviewRecovery") ? QStringLiteral("preview_files_recovery_v07")
+                                                                  : QStringLiteral("mutate_files_recovery_v07");
+        *params = {{QStringLiteral("p_entity_id"), arg("entityId")},
+                   {QStringLiteral("p_expected_version"), arg("expectedVersion").toLongLong()},
+                   {QStringLiteral("p_destination_space_id"), nullable(arguments.value(QStringLiteral("destinationSpaceId")).toString())},
+                   {QStringLiteral("p_destination_node_id"), nullable(arguments.value(QStringLiteral("destinationNodeId")).toString())}};
+        if (operation == QLatin1String("filesRecover")) {
+            params->insert(QStringLiteral("p_request_id"), arg("requestId"));
+            params->insert(QStringLiteral("p_preview_token"), arg("previewToken"));
+        }
+    } else if (operation == QLatin1String("filesArchivedContext")) {
+        *rpc = QStringLiteral("get_my_archived_document_context_v07");
+        *params = {{QStringLiteral("p_node_id"), arg("nodeId")}};
+    } else if (operation == QLatin1String("workingInspect")) {
+        // Lectura de la versión vigente del servidor (resolución de conflictos Working).
+        *rpc = QStringLiteral("list_rendition_working_rows_v01");
+        *params = {{QStringLiteral("p_rendition_id"), arg("renditionId")}};
     } else if (operation == QLatin1String("receivedList")) {
         *rpc = QStringLiteral("list_received_renditions_v02");
         *params = {{QStringLiteral("p_limit"), 200},
@@ -77,6 +113,16 @@ inline bool call(const QString &operation, const QVariantMap &arguments,
     if (rpc->isEmpty())
         params->clear();
     return !rpc->isEmpty();
+}
+
+// Comandos Files/Working de sólo lectura o recuperación reversible enrutados por
+// el canal solicitud/respuesta del bridge (ninguno purga, borra ni mueve bytes).
+inline bool isFilesOperation(const QString &operation)
+{
+    static const QStringList names{QStringLiteral("filesContract"), QStringLiteral("filesArchive"),
+        QStringLiteral("filesTrash"), QStringLiteral("filesCanChoose"), QStringLiteral("filesPreviewRecovery"),
+        QStringLiteral("filesRecover"), QStringLiteral("filesArchivedContext"), QStringLiteral("workingInspect")};
+    return names.contains(operation);
 }
 
 } // namespace RenditionAdminRpc

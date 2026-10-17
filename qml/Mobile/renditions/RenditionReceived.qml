@@ -12,7 +12,8 @@ Item {
     property var row: ({})
     readonly property var ui: app.ui
     readonly property var ctl: app.ctl
-    readonly property string title: (S.text_(row, "visible_code") || "Rendición") + " · v" + (row.version_number || "?")
+    readonly property string title: S.renditionDisplayName(S.text_(row, "displayName", "display_name"), S.text_(row, "visible_code"))
+                                   + " · " + (S.text_(row, "visible_code") || "Código pendiente") + " · v" + (row.version_number || "?")
     readonly property var identity: ({
         renditionId: S.text_(row, "rendition_id"), versionId: S.text_(row, "rendition_version_id"),
         versionNumber: Number(row.version_number || 0), hash: S.text_(row, "snapshot_hash")

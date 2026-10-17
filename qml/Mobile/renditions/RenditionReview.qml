@@ -23,6 +23,9 @@ Item {
     readonly property int pending: Number(current.pendingCount || 0)
     readonly property string presentBlocker: !detail.writable ? "La rendición no tiene permiso efectivo de edición."
         : detail.conflict ? "Resuelve el conflicto de sincronización antes de presentar."
+        // Paridad con el servidor (rendition_working_snapshot_guard_v01).
+        : Number(detail.current.workingCount || 0) > 0 ? "Hay " + Number(detail.current.workingCount)
+              + " borrador(es) de gasto sin terminar. Regístralos o descártalos antes de presentar."
         : !remoteId.length ? "Sincroniza la rendición con el servidor antes de presentarla."
         : pending > 0 ? "Hay " + pending + " cambios pendientes de sincronizar. Sincroniza antes de presentar."
         : expenseCount === 0 ? "Agrega al menos un gasto."

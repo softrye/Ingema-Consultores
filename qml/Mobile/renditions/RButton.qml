@@ -27,7 +27,7 @@ Rectangle {
     }
     radius: 14 * ui.u
     color: primary ? (tap.pressed ? Qt.darker(S.accent, 1.2) : S.accent)
-                   : Qt.rgba(1, 1, 1, tap.pressed ? 0.16 : 0.08)
+                   : S.ink(tap.pressed ? 0.12 : 0.05)
     border.width: primary ? 0 : 1
     border.color: danger ? S.danger : S.border
     opacity: enabledButton ? 1 : 0.45
@@ -48,13 +48,13 @@ Rectangle {
             text: String.fromCharCode(button.glyph)
             font.family: button.ui.iconFamily
             font.pixelSize: 20 * button.ui.u
-            color: button.danger ? S.danger : S.text
+            color: button.danger ? S.danger : (button.primary ? S.onAccent : S.text)
             anchors.verticalCenter: parent.verticalCenter
         }
         Text {
             visible: button.label.length > 0
             text: button.label
-            color: button.danger ? S.danger : S.text
+            color: button.danger ? S.danger : (button.primary ? S.onAccent : S.text)
             font.family: button.ui.fontFamily
             font.pixelSize: 15 * button.ui.u
             font.weight: button.primary ? Font.DemiBold : Font.Normal

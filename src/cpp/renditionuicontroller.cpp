@@ -1,15 +1,20 @@
 #include "renditionuicontroller.h"
 
+#include "renditionconnectivity.h"
 #include "renditioncontract.h"
+#include "renditiondiagnostics.h"
 #include "renditionfeatures.h"
 #include "renditionmoney.h"
 #include "renditionvalidation.h"
+#include "renditionworkingcontract.h"
 
 #include <QDate>
+#include <QDateTime>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QLocale>
 #include <QMimeDatabase>
+#include <QTimer>
 #include <QUuid>
 
 namespace {
@@ -106,6 +111,7 @@ void RenditionUiController::handleEvent(const QString &eventJson)
         m_state = event;
         m_ready = true;
         emit stateChanged();
+        recomputeDiagnostics();
         return;
     }
     if (type == QLatin1String("commandResult")) {
@@ -133,9 +139,47 @@ void RenditionUiController::handleEvent(const QString &eventJson)
         // Cambio de cuenta: el bridge ya respondió ACCOUNT_CHANGED a lo pendiente.
         m_state.clear();
         m_ready = false;
+        m_issues.clear();                 // las fallas de la cuenta anterior no se heredan
         emit stateChanged();
+        recomputeDiagnostics();
     }
     emit bridgeEvent(type, event);
+}
+
+void RenditionUiController::reportIssue(const QString &key, const QVariantMap &issue)
+{
+    if (key.isEmpty()) return;
+    QVariantMap entry = issue;
+    entry.insert(QStringLiteral("key"), key);
+    entry.insert(QStringLiteral("at"), QDateTime::currentMSecsSinceEpoch());
+    m_issues.insert(key, entry);
+    recomputeDiagnostics();
+}
+
+void RenditionUiController::resolveIssue(const QString &key)
+{
+    if (m_issues.remove(key) > 0)
+        recomputeDiagnostics();
+}
+
+void RenditionUiController::recomputeDiagnostics()
+{
+    // Las fallas de acciones vencen (3 min): una incidencia resuelta no queda activa.
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    QVariantList active;
+    for (auto it = m_issues.begin(); it != m_issues.end();) {
+        if (now - it.value().toMap().value(QStringLiteral("at")).toLongLong() > 180000) { it = m_issues.erase(it); continue; }
+        active.append(it.value());
+        ++it;
+    }
+    const QVariantMap next = RenditionDiagnostics::evaluate(m_state, active);
+    if (next == m_diagnostics) return;                 // sin parpadeos por publicaciones iguales
+    m_diagnostics = next;
+    emit diagnosticsChanged();
+    if (!m_issues.isEmpty() && !m_issueTickScheduled) {   // un solo recálculo pendiente
+        m_issueTickScheduled = true;
+        QTimer::singleShot(30000, this, [this]() { m_issueTickScheduled = false; recomputeDiagnostics(); });
+    }
 }
 
 bool RenditionUiController::canEdit(const QVariantMap &rendition) const
@@ -247,6 +291,69 @@ QVariantMap RenditionUiController::fundBalance(const QVariantMap &rendition) con
     result.insert(QStringLiteral("usdCents"), balance.usd ? QVariant(*balance.usd) : QVariant());
 #endif
     return result;
+}
+
+// Avance de completitud de una rendición. Requisitos tomados de
+// RenditionLocalStore::presentationBlocker / RenditionValidation, excluyendo los
+// que dependen de la sincronización (estado SYNCED, documento .rend confirmado,
+// rowVersion del servidor). Los adjuntos no son obligatorios en el sistema
+// actual, por eso no penalizan. Pesos fijos y documentados:
+//   1  Período válido (fechas ISO, inicio <= fin)
+//   1  Proyectos asociados con proyecto principal incluido
+//   1  Carpeta documental (documentParentNodeId + spaceId)
+//   1  Al menos un gasto activo
+//   2  Gastos válidos según RenditionValidation::expense (fracción válidos/activos)
+// P = round(100 * Σ(peso_i * cumplimiento_i) / Σ peso_i). No usa estado de ficha,
+// sincronización, fecha actual ni código RDC.
+QVariantMap RenditionUiController::completion(const QVariantMap &rendition) const
+{
+    const auto unknown = [](const char *reason) {
+        return QVariantMap{{QStringLiteral("known"), false}, {QStringLiteral("reason"), QString::fromLatin1(reason)}};
+    };
+    if (rendition.isEmpty())
+        return unknown("EMPTY");
+    // La lista remota (v06) no trae proyectos ni gastos: sin detalle cargado no se evalúa.
+    if (!rendition.contains(QStringLiteral("projectIds")))
+        return unknown("PROJECTS_NOT_LOADED");
+    QVariantList active;
+    if (rendition.contains(QStringLiteral("expenses"))) {
+        for (const auto &value : rendition.value(QStringLiteral("expenses")).toList())
+            if (!value.toMap().value(QStringLiteral("archived")).toBool())
+                active.append(value);
+    }
+    const QVariant declared = rendition.value(QStringLiteral("expenseCount"));
+    const bool declaredKnown = declared.isValid() && !declared.isNull();
+    if (!rendition.contains(QStringLiteral("expenses")) && !(declaredKnown && declared.toInt() == 0))
+        return unknown("EXPENSES_NOT_LOADED");
+    if (declaredKnown && declared.toInt() != active.size())
+        return unknown("EXPENSES_NOT_LOADED");
+
+    const QString start = rendition.value(QStringLiteral("periodStart")).toString();
+    const QString end = rendition.value(QStringLiteral("periodEnd")).toString();
+    const QVariantList projects = rendition.value(QStringLiteral("projectIds")).toList();
+    const QString primary = rendition.value(QStringLiteral("primaryProjectId")).toString();
+    int valid = 0;
+    for (const auto &value : active)
+        valid += RenditionValidation::expense(rendition, value.toMap()).isEmpty() ? 1 : 0;
+
+    struct Check { const char *key; double weight; double done; };
+    const Check checks[] = {
+        {"period", 1, RenditionValidation::date(start) && RenditionValidation::date(end) && start <= end ? 1.0 : 0.0},
+        {"projects", 1, !projects.isEmpty() && projects.contains(primary) ? 1.0 : 0.0},
+        {"folder", 1, !rendition.value(QStringLiteral("documentParentNodeId")).toString().isEmpty()
+                          && !rendition.value(QStringLiteral("spaceId")).toString().isEmpty() ? 1.0 : 0.0},
+        {"hasExpense", 1, active.isEmpty() ? 0.0 : 1.0},
+        {"validExpenses", 2, active.isEmpty() ? 0.0 : double(valid) / active.size()}};
+    double score = 0, weight = 0;
+    QVariantMap detail;
+    for (const auto &check : checks) {
+        score += check.weight * check.done;
+        weight += check.weight;
+        detail.insert(QString::fromLatin1(check.key), check.done);
+    }
+    return {{QStringLiteral("known"), true}, {QStringLiteral("percent"), qRound(100.0 * score / weight)},
+            {QStringLiteral("checks"), detail}, {QStringLiteral("validExpenses"), valid},
+            {QStringLiteral("activeExpenses"), int(active.size())}};
 }
 
 QString RenditionUiController::fundingError(const QVariantMap &values) const
@@ -371,6 +478,10 @@ QString RenditionUiController::errorText(const QString &code, const QString &mes
         {QStringLiteral("ACCOUNT_CHANGED"), QStringLiteral("La cuenta cambió; vuelve a abrir la consulta.")}};
     if (known.contains(code))
         return known.value(code);
+    // Working Document (Web PR #6): p. ej. presentar con filas sin terminar creadas en la Web.
+    const QString working = RenditionWorkingContract::message(code);
+    if (!working.isEmpty())
+        return working;
     const QString upper = code.toUpper();
     if (upper.contains(QStringLiteral("NETWORK")) || upper.contains(QStringLiteral("TIMEOUT")))
         return QStringLiteral("Sin conexión con el servidor. Los cambios quedan guardados en el equipo y se reintentarán.");
@@ -382,6 +493,25 @@ QString RenditionUiController::errorText(const QString &code, const QString &mes
     if (!message.trimmed().isEmpty())
         return message.trimmed();
     return code.isEmpty() ? QStringLiteral("No se pudo completar la operación.") : code;
+}
+
+bool RenditionUiController::silentError(const QString &code) const
+{
+    return RenditionConnectivity::isSilent(code);
+}
+
+QString RenditionUiController::visibleSyncError(const QString &text) const
+{
+    return text == RenditionConnectivity::transportMarker() ? QString() : text;
+}
+
+QString RenditionUiController::effectiveSyncState(const QVariantMap &row) const
+{
+    const QString state = row.value(QStringLiteral("syncState")).toString().toUpper();
+    if (state == QLatin1String("ERROR")
+        && row.value(QStringLiteral("syncError")).toString() == RenditionConnectivity::transportMarker())
+        return QStringLiteral("PENDING_UPDATE");
+    return state;
 }
 
 QVariantMap RenditionUiController::describeLocalFile(const QUrl &url) const

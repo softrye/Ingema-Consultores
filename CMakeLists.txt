@@ -295,6 +295,10 @@ if(INGE_BUILD_MOBILE)
         "${INGE_PROJECT_ROOT}/src/cpp/renditionrepository.cpp"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionlocalstore.h"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionlocalstore.cpp"
+        "${INGE_PROJECT_ROOT}/src/cpp/renditionlocalstore_working.cpp"
+        "${INGE_PROJECT_ROOT}/src/cpp/renditionconnectivity.h"
+        "${INGE_PROJECT_ROOT}/src/cpp/renditionworkingcontract.h"
+        "${INGE_PROJECT_ROOT}/src/cpp/renditiondiagnostics.h"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionsynccontroller.h"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionsynccontroller.cpp"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionflutterbridge.h"
@@ -646,6 +650,16 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/renditions/RenditionReview.qml"
             "${MOBILE_QML_DIR}/renditions/ReviewPanel.qml"
             "${MOBILE_QML_DIR}/renditions/RenditionReceived.qml"
+            "${MOBILE_QML_DIR}/renditions/RendicionesSyncAura.qml"
+            "${MOBILE_QML_DIR}/renditions/RGlassMenu.qml"
+            "${MOBILE_QML_DIR}/renditions/RMenuItem.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionsDock.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionCard.qml"
+            "${MOBILE_QML_DIR}/renditions/FilesBrowser.qml"
+            "${MOBILE_QML_DIR}/renditions/RConfetti.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionsDiagnostics.qml"
+            "${MOBILE_QML_DIR}/assistant/InGeAssistantSheet.qml"
+            "${MOBILE_QML_DIR}/assistant/InGeAssistantController.qml"
         )
 
         # Acceso (Login V1): tipografia corporativa Rubik (SIL OFL) y simbolo

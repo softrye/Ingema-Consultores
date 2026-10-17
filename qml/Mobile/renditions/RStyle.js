@@ -1,19 +1,41 @@
 .pragma library
-// Paleta de la subapp Rendiciones: lenguaje visual actual de InGe+ (vidrio
-// azul oscuro, texto blanco). Sin reglas de negocio.
+// Paleta de la subapp Rendiciones: variante clara aprobada (2026-10-15) con
+// la paleta corporativa INGEMA. Blanco, grises y transparencias son superficie;
+// ámbar/rojo sólo como color semántico de estado. Sin reglas de negocio.
 
-var background = "#111827"
-var surface = Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.50)
-var surfaceStrong = Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.78)
-var border = Qt.rgba(1, 1, 1, 0.22)
-var text = "#FFFFFF"
-var muted = Qt.rgba(1, 1, 1, 0.72)
-var faint = Qt.rgba(1, 1, 1, 0.45)
-var accent = "#2F6FE0"
-var accentSoft = "#8FC1FF"
-var danger = "#FF8A80"
-var success = "#7EE2A8"
-var warning = "#FFD27A"
+// Corporativos
+var navyDark = "#151A30"      // 21, 26, 48
+var navy = "#1C2D50"          // 28, 45, 80
+var corporateBlue = "#0654A2" // 6, 84, 162
+var corporateGreen = "#486426" // 72, 100, 38
+
+// Superficies y texto (variante clara)
+var background = "#FFFFFF"
+var surface = Qt.rgba(1, 1, 1, 0.86)
+var surfaceStrong = "#F3F6FB"
+var popup = Qt.rgba(1, 1, 1, 0.94)
+var border = Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.10)
+var text = navyDark
+var muted = "#7A8299"
+var faint = "#A7AEC0"
+var accent = corporateBlue
+var accentSoft = "#3B82D6"
+var onAccent = "#FFFFFF"
+var track = "#E3E8F0"
+// Nuevo gasto (previews aprobados): bordes de campo y superficies azuladas suaves.
+var fieldBorder = Qt.rgba(6 / 255, 84 / 255, 162 / 255, 0.10)
+var tintSoft = Qt.rgba(6 / 255, 84 / 255, 162 / 255, 0.07)       // mosaicos, nota informativa, chip
+var tintSoftBorder = Qt.rgba(6 / 255, 84 / 255, 162 / 255, 0.12)
+var cardGlass = Qt.rgba(1, 1, 1, 0.62)                          // tarjeta de sección (vidrio claro)
+
+// Semánticos
+var danger = "#C62F3E"
+var success = corporateGreen
+var warning = "#F2B21B"       // Borrador: ámbar de los puntos aprobados
+var syncErrorRed = "#B42334"  // sólo para el aura de error de sincronización
+
+// Tinta oscura translúcida para rellenos sobre blanco.
+function ink(alpha) { return Qt.rgba(21 / 255, 26 / 255, 48 / 255, alpha) }
 
 function syncColor(state) {
     switch (String(state || "").toUpperCase()) {
@@ -24,19 +46,28 @@ function syncColor(state) {
     case "NEEDS_RECONCILIATION":
     case "PENDING_CREATE":
     case "PENDING_UPDATE":
-    case "LOCAL_ONLY": return warning
+    case "LOCAL_ONLY": return "#C98A06"
     }
     return muted
 }
 
+// Estado ADMINISTRATIVO de la ficha (nunca sincronización).
 function statusColor(status) {
-    switch (String(status || "").toUpperCase()) {
-    case "BORRADOR": return accentSoft
-    case "OBSERVADO": return warning
-    case "EN_REVISION": return "#C9B3FF"
-    case "APROBADO": return success
+    switch (String(status || "BORRADOR").toUpperCase()) {
+    case "BORRADOR": return warning
+    case "OBSERVADO": return danger
+    case "EN_REVISION": return corporateBlue
+    case "APROBADO": return corporateGreen
     }
     return muted
+}
+
+// Igual que renditionDocumentName.ts (Web): el código no sustituye al nombre.
+function renditionDisplayName(name, code) {
+    var title = String(name === undefined || name === null ? "" : name).trim()
+    var ref = String(code || "").trim()
+    if (!title || title === ref || /^RDC-\d{4}-\d+(?:\.rend)?$/i.test(title)) return "Rendición"
+    return title
 }
 
 function text_(row, a, b) {

@@ -666,7 +666,13 @@ android {
 
 
 
-    lintOptions { abortOnError = false }
+    // Lint vital de release (AGP 8.10.1) incluye un lector Kotlin 2.1 que no puede leer
+    // los AAR de plugins Flutter compilados con Kotlin 2.3 (p. ej. local_auth_android):
+    // "Module was compiled with an incompatible version of Kotlin". No afecta al APK.
+    lintOptions {
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
 
 
 

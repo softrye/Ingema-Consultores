@@ -10,6 +10,7 @@ Item {
     id: page
     property var app
     property var original: null
+    property bool embedded: false              // dentro de la hoja «Nueva rendición»
     readonly property var ui: app.ui
     readonly property var ctl: app.ctl
     readonly property bool editing: original !== null && original !== undefined
@@ -18,6 +19,7 @@ Item {
     readonly property bool writable: !editing || ctl.canEdit(original)
     readonly property var life: ({ alive: true })
 
+    property string displayName: ""
     property string start: ""
     property string end: ""
     property var projects: []
@@ -45,6 +47,7 @@ Item {
         var draft = (app.st.editorDrafts || {})[draftKey]
         var source = draft && draft.periodStart ? draft : null
         var b = editing ? original : {}
+        displayName = source ? String(source.displayName || "") : S.text_(b, "displayName", "display_name")
         start = source ? String(source.periodStart) : String(b.periodStart || ctl.today())
         end = source ? String(source.periodEnd) : String(b.periodEnd || ctl.today())
         projects = source ? (source.projectIds || []).slice() : (b.projectIds || []).slice()
@@ -58,7 +61,7 @@ Item {
 
     function payload() {
         var p = {
-            periodStart: start, periodEnd: end, projectIds: projects.slice(), primaryProjectId: primary,
+            displayName: displayName.trim(), periodStart: start, periodEnd: end, projectIds: projects.slice(), primaryProjectId: primary,
             documentParentNodeId: folder, spaceId: space, synchronize: true
         }
         if (editing) {
@@ -167,6 +170,10 @@ Item {
 
     // ------------------------------------------------------------ Guardar
     function save() {
+        if (!editing && (!displayName.trim().length || displayName.trim().length > 160)) {
+            error = "Escribe un nombre para la rendición (máximo 160 caracteres)."
+            return
+        }
         var header = payload()
         var problem = ctl.headerError(header)
         if (problem.length) { error = problem; return }
@@ -193,14 +200,14 @@ Item {
         anchors.fill: parent
         visible: !page.browsing
         contentWidth: width
-        contentHeight: form.height + 140 * page.ui.u
+        contentHeight: form.height + (page.embedded ? 30 : 140) * page.ui.u
         boundsBehavior: Flickable.StopAtBounds
         clip: true
         Column {
             id: form
-            x: page.ui.gutter
-            y: 8 * page.ui.u
-            width: parent.width - 2 * page.ui.gutter
+            x: page.embedded ? 22 * page.ui.u : page.ui.gutter
+            y: page.embedded ? 12 * page.ui.u : 8 * page.ui.u
+            width: parent.width - 2 * x
             spacing: 14 * page.ui.u
 
             Text {
@@ -220,23 +227,24 @@ Item {
                 font.family: page.ui.fontFamily; font.pixelSize: 14 * page.ui.u
             }
 
-            Text { text: "Período"; color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 17 * page.ui.u; font.weight: Font.DemiBold }
-            Row {
+            RField {
                 width: parent.width
-                spacing: 10 * page.ui.u
-                RDateField {
-                    width: (parent.width - 10 * page.ui.u) / 2
-                    ui: page.ui; label: "Desde"; value: page.start; readOnly: !page.writable
-                    onPicked: function(v) { page.start = v; page.changed() }
-                }
-                RDateField {
-                    width: (parent.width - 10 * page.ui.u) / 2
-                    ui: page.ui; label: "Hasta"; value: page.end; minimum: page.start; readOnly: !page.writable
-                    onPicked: function(v) { page.end = v; page.changed() }
-                }
+                ui: page.ui
+                label: "Nombre de la rendición"
+                text: page.displayName
+                placeholder: "Ej.: Visita de campo — Huarmey"
+                maxLength: 160
+                readOnly: page.editing || !page.writable
+                onEdited: { page.displayName = text; page.changed() }
             }
-
-            Text { text: "Proyectos asociados"; color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 17 * page.ui.u; font.weight: Font.DemiBold }
+            Text {
+                width: parent.width
+                visible: page.editing
+                text: "El nombre existente se administra desde el archivo .rend en InGeDrive/Web. El código se conserva como identificador."
+                color: S.muted; wrapMode: Text.WordWrap
+                font.family: page.ui.fontFamily; font.pixelSize: 13 * page.ui.u
+            }
+            Text { visible: !page.embedded; text: "Proyectos asociados"; color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 17 * page.ui.u; font.weight: Font.DemiBold }
             Text {
                 width: parent.width
                 visible: (page.app.st.projects || []).length === 0
@@ -252,16 +260,24 @@ Item {
                     readonly property bool checked: page.projects.indexOf(projectId) >= 0
                     width: form.width
                     height: 60 * page.ui.u
-                    radius: 14 * page.ui.u
-                    color: checked ? Qt.rgba(47 / 255, 111 / 255, 224 / 255, 0.25) : S.surface
-                    border.width: 1; border.color: S.border
+                    radius: 16 * page.ui.u
+                    color: checked ? Qt.rgba(6 / 255, 84 / 255, 162 / 255, 0.08) : "#FFFFFF"
+                    border.width: 1; border.color: checked ? Qt.rgba(6 / 255, 84 / 255, 162 / 255, 0.35) : S.ink(0.07)
                     Text {
-                        x: 14 * page.ui.u
-                        width: parent.width - primaryChip.width - 40 * page.ui.u
+                        x: 22 * page.ui.u
+                        width: parent.width - (parent.checked ? primaryChip.width : 0) - 64 * page.ui.u
                         anchors.verticalCenter: parent.verticalCenter
                         text: (parent.checked ? "✓  " : "") + page.ctl.projectLabel(parent.projectId)
                         color: S.text; elide: Text.ElideRight
-                        font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u
+                        font.family: page.ui.fontFamily; font.pixelSize: 17 * page.ui.u
+                    }
+                    Text {
+                        visible: !parent.checked
+                        anchors.right: parent.right; anchors.rightMargin: 18 * page.ui.u
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: String.fromCharCode(0xE06F)
+                        font.family: page.ui.iconFamily; font.pixelSize: 20 * page.ui.u
+                        color: S.muted
                     }
                     MouseArea { anchors.fill: parent; enabled: page.writable; onClicked: page.toggleProject(parent.projectId) }
                     RChip {
@@ -278,11 +294,27 @@ Item {
                 }
             }
 
-            Text { text: "Carpeta documental (InGe Drive)"; color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 17 * page.ui.u; font.weight: Font.DemiBold }
+            Text { text: "Período"; color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 19 * page.ui.u; font.weight: Font.DemiBold }
+            Row {
+                width: parent.width
+                spacing: 10 * page.ui.u
+                RDateField {
+                    width: (parent.width - 10 * page.ui.u) / 2
+                    ui: page.ui; label: "Desde"; value: page.start; readOnly: !page.writable
+                    onPicked: function(v) { page.start = v; page.changed() }
+                }
+                RDateField {
+                    width: (parent.width - 10 * page.ui.u) / 2
+                    ui: page.ui; label: "Hasta"; value: page.end; minimum: page.start; readOnly: !page.writable
+                    onPicked: function(v) { page.end = v; page.changed() }
+                }
+            }
+
+            Text { text: "Carpeta documental"; color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 19 * page.ui.u; font.weight: Font.DemiBold }
             Text {
                 width: parent.width
                 text: page.folder.length ? (page.folderName.length ? page.folderName : "Carpeta seleccionada") : "Sin carpeta seleccionada"
-                color: page.folder.length ? S.text : S.faint
+                color: page.folder.length ? S.text : S.muted
                 wrapMode: Text.WordWrap
                 font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u
             }

@@ -45,7 +45,8 @@ public:
                                     const QString &primaryProjectId,
                                     const QString &documentParentNodeId = {},
                                     const QString &spaceId = {},
-                                    bool stageForSync = true);
+                                    bool stageForSync = true,
+                                    const QString &displayName = {});
     Q_INVOKABLE bool saveDraft(const QString &localId,
                                const QString &periodStart,
                                const QString &periodEnd,
@@ -117,6 +118,40 @@ public:
                                         const QString &expenseLocalId,
                                         const QString &error);
 
+    // ---- Working Document (borradores de gasto en la nube, Web PR #6).
+    // Mismo almacén persistente y MISMO outbox (working_save / working_promote /
+    // working_archive) que procesa RenditionSyncController: un solo motor.
+    // Implementación: renditionlocalstore_working.cpp.
+    QVariantList workingRowsFor(const QString &renditionLocalId) const;   // vista para UI
+    QVariantMap workingRow(const QString &workingId) const;
+    int activeWorkingCount(const QString &renditionLocalId) const;
+    int workingConflictCount(const QString &renditionLocalId) const;
+    // Borradores cuya promoción a gasto CONFIRMÓ el servidor (no basta el outbox).
+    QStringList promotedWorkingIds(const QString &renditionLocalId) const;
+    // Crea/actualiza la intención deseada (form + sustentos). files: [{localUri,
+    // fileName, mimeType, sizeBytes} | {id (sustento ya existente)}]. Devuelve el id.
+    QString saveWorkingDraft(const QString &renditionLocalId, const QString &workingId,
+                             const QVariantMap &form, const QVariantList &files,
+                             const QString &expenseLocalId = {});
+    bool requestWorkingPromotion(const QString &renditionLocalId, const QString &workingId);
+    bool requestWorkingArchive(const QString &renditionLocalId, const QString &workingId);
+    // Conflicto real: keepLocal=true reaplica la intención local sobre la versión
+    // vigente del servidor (serverRow); false adopta la versión del servidor.
+    bool resolveWorkingConflict(const QString &renditionLocalId, const QString &workingId,
+                                bool keepLocal, const QVariantMap &serverRow);
+    void mergeRemoteWorkingRows(const QString &renditionLocalId, const QVariantList &rows);
+    // Transiciones de la cola.
+    bool markWorkingSending(const QString &workingId, const QVariantMap &saveArguments);
+    bool markWorkingSaved(const QString &workingId, const QVariantMap &serverRow);
+    QVariantList workingPendingSources(const QString &workingId) const;
+    bool markWorkingSourcePhase(const QString &workingId, const QString &sourceId,
+                                const QString &phase, const QVariantMap &file = {});
+    bool finishWorkingSave(const QString &workingId);
+    bool markWorkingPromoted(const QString &workingId, const QVariantMap &result);
+    bool markWorkingArchived(const QString &workingId, const QVariantMap &serverRow);
+    bool markWorkingFailed(const QString &operation, const QString &workingId,
+                           const QString &state, const QString &error);
+
 signals:
     void accountIdChanged();
     void renditionsChanged();
@@ -155,6 +190,12 @@ private:
     static qint64 remoteRowVersion(const QVariantMap &remote, qint64 fallback);
     static QVariantMap canonicalDraftPayload(const QVariantMap &draft);
     static QByteArray payloadHash(const QVariantMap &payload);
+    // Working (renditionlocalstore_working.cpp)
+    int workingIndex(const QString &workingId) const;
+    QVariantMap workingDocument(const QVariantMap &row) const;
+    QVariantMap workingOperation(const QVariantMap &outboxEntry) const;
+    void adoptOwnRenditionVersion(const QString &renditionLocalId, qint64 version);
+    QVariantList m_workingRows;
 
     AuthSession *m_auth = nullptr;
     QString m_accountScope;

@@ -20,6 +20,9 @@ ShaderEffect {
     property real refraction: 0                  // px de lente en el borde
     property real specular: 0                    // 0..1 brillo especular / filo de luz
     property real bevel: 0                       // px de la zona curva del borde
+    // Material del Dock: contraste adaptativo y esmerilado propio. En 0, sin cambios.
+    property real contrast: 0                    // 0..1
+    property real frost: 0                       // px
 
     anchors.fill: parent
     anchors.margins: -margin

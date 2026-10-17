@@ -4,10 +4,10 @@ const SYSTEM = 'Eres InGe+ IA, asistente de INGEMA. Responde en español con cla
 // has no external effect, so both may be repeated; 400/401/403/404 never are.
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
 const TRANSIENT = new Set([500, 502, 503, 504]);
-const PRIMARY_CHAT_MODEL = 'gemini-3.8-flash';
+const PRIMARY_CHAT_MODEL = 'gemini-3.6-flash';
 // Stable Flash used only after the primary keeps failing with a retryable status.
 // Override with GEMINI_CHAT_FALLBACK_MODEL (empty value disables the fallback).
-const DEFAULT_FALLBACK_CHAT_MODEL = 'gemini-3.6-flash';
+const DEFAULT_FALLBACK_CHAT_MODEL = 'gemini-3.5-flash-lite';
 // The token constraint uses the bare model id; the WebSocket setup uses models/<id>.
 const LIVE_MODEL = 'gemini-3.8-live';
 const PRIMARY_ATTEMPTS = 3;
@@ -35,7 +35,8 @@ export async function providerFailure(response) {
   return failure;
 }
 function userMessage(status) {
-  if (RETRYABLE.has(status)) return 'El servicio de IA está temporalmente ocupado. Intenta nuevamente.';
+  if (status === 429) return 'Gemini ha limitado temporalmente las solicitudes. Espera antes de reintentar.';
+  if (RETRYABLE.has(status)) return 'Gemini no está disponible temporalmente. Intenta nuevamente.';
   return `Gemini rechazó la consulta (HTTP ${status}).`;
 }
 function providerCode(status) {
@@ -78,7 +79,7 @@ export function createHandler({ env, fetcher = fetch, issueToken, now = Date.now
         method: 'POST', headers, body: JSON.stringify({ p_operation: body.operation }), signal: AbortSignal.timeout(10000),
       });
       if (!quota.ok) return json({ error: 'No se pudo validar el límite de consultas.', code: 'QUOTA_UNAVAILABLE' }, 503);
-      if (await quota.json() !== true) return json({ error: 'Llegaste al límite de consultas. Espera un minuto.', code: 'RATE_LIMIT' }, 429);
+      if (await quota.json() !== true) return json({ error: 'Llegaste al límite de consultas de InGe IA. Espera un minuto.', code: 'RATE_LIMIT', retry_after_seconds: 60, retryable: true }, 429);
       const live = body.operation === 'live-token';
       const config = { responseModalities: ['AUDIO'], inputAudioTranscription: {}, outputAudioTranscription: {},
         systemInstruction: { parts: [{ text: SYSTEM }] } };
@@ -104,7 +105,9 @@ export function createHandler({ env, fetcher = fetch, issueToken, now = Date.now
         for (let attempt = 1; ; attempt++) {
           ++attempts;
           google = await call(attempt);
-          if (google.ok || !RETRYABLE.has(google.status) || attempt >= maxAttempts) return;
+          // Google 429 indica cuota/capacidad: no insistir sobre el mismo modelo.
+          // Un solo intento por modelo evita multiplicar una cuota agotada.
+          if (google.ok || google.status === 429 || !RETRYABLE.has(google.status) || attempt >= maxAttempts) return;
           const wait = backoff(attempt);
           // Not enough budget for a useful new attempt: report the failure now.
           if (budget() < wait + 5000) return;
@@ -119,8 +122,9 @@ export function createHandler({ env, fetcher = fetch, issueToken, now = Date.now
       } else {
         const fallbackEnv = env('GEMINI_CHAT_FALLBACK_MODEL');
         const fallback = fallbackEnv === undefined || fallbackEnv === null ? DEFAULT_FALLBACK_CHAT_MODEL : String(fallbackEnv).trim();
-        const plan = [{ model: PRIMARY_CHAT_MODEL, attempts: PRIMARY_ATTEMPTS }];
-        if (fallback && fallback !== PRIMARY_CHAT_MODEL) plan.push({ model: fallback, attempts: FALLBACK_ATTEMPTS });
+        const primary = String(env('GEMINI_CHAT_MODEL') || PRIMARY_CHAT_MODEL).trim();
+        const plan = [{ model: primary, attempts: PRIMARY_ATTEMPTS }];
+        if (fallback && fallback !== primary) plan.push({ model: fallback, attempts: FALLBACK_ATTEMPTS });
         for (const [index, step] of plan.entries()) {
           if (index > 0) {
             if (!RETRYABLE.has(google.status) || budget() < 5000) break;
@@ -142,8 +146,12 @@ export function createHandler({ env, fetcher = fetch, issueToken, now = Date.now
         // gateway status (HTTP of this function) and provider status stay separate.
         const failure = await providerFailure(google);
         const gatewayStatus = google.status === 429 ? 429 : 502;
+        const providerWait = String(failure.retry_after || '').trim();
+        const parsedWait = Number.parseFloat(providerWait);
+        const waitSeconds = google.status === 429 ? Math.max(30, Math.min(300, Number.isFinite(parsedWait) && parsedWait > 0 ? Math.ceil(parsedWait) : 60)) : 0;
         const detail = { code: providerCode(google.status), provider: 'gemini', ...failure, google_status: google.status,
           gateway_status: gatewayStatus, retryable: RETRYABLE.has(google.status),
+          ...(waitSeconds ? { retry_after_seconds: waitSeconds } : {}),
           attempts, duration_ms: Math.round(now() - started), operation: body.operation };
         log(live
           ? `INGE_AI_LIVE_TOKEN_FAIL status=${google.status} code=${failure.provider_reason ?? '-'} message=${failure.provider_message ?? '-'} attempts=${attempts}`

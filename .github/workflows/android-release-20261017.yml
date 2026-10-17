@@ -1,0 +1,24 @@
+name: InGe+ Android — Presentación 2026-10-17
+on:
+  push:
+    tags:
+      - 'android-2026.10.17-build122'
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Publicar release con changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "InGe+ Android | 17-10-2026 | build 122" \
+            --notes-file "docs/CHANGELOG_ANDROID_20261017.md" \
+            --prerelease \
+            --target "${GITHUB_SHA}"

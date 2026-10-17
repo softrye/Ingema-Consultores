@@ -5,7 +5,9 @@
 #include "authsession.h"
 #include "supabaseclient.h"
 #include "renditionattachmentcontract.h"
+#include "renditionconnectivity.h"
 #include "renditionexportservice.h"
+#include "renditionworkingcontract.h"
 
 #include <QFile>
 #include <QJsonDocument>
@@ -246,7 +248,8 @@ void RenditionRepository::createRendition(const QString &requestId,
                                           const QString &periodEnd,
                                           const QVariantList &projectIds,
                                           const QString &primaryProjectId,
-                                          const QString &documentParentNodeId)
+                                          const QString &documentParentNodeId,
+                                          const QString &displayName)
 {
     QVariantMap arguments{
         {QStringLiteral("p_request_id"), requestId},
@@ -263,7 +266,15 @@ void RenditionRepository::createRendition(const QString &requestId,
                                  QStringLiteral("Selecciona una ubicación .rend."));
             return;
         }
-        rpcName = QStringLiteral("create_my_rendition_draft_v02");
+        // Contrato Web v03: nombre real de la rendición + ubicación documental.
+        const QString name = displayName.trimmed().isEmpty() ? QStringLiteral("Rendición") : displayName.trimmed();
+        if (name.size() > 160) {
+            emit operationFailed(QStringLiteral("create"), QStringLiteral("RENDITION_INVALID_DISPLAY_NAME"),
+                                 QStringLiteral("El nombre debe tener entre 1 y 160 caracteres."));
+            return;
+        }
+        rpcName = QStringLiteral("create_my_rendition_draft_v03");
+        arguments.insert(QStringLiteral("p_display_name"), name);
         arguments.insert(QStringLiteral("p_document_parent_node_id"),
                          documentParentNodeId);
     }
@@ -698,7 +709,11 @@ void RenditionRepository::uploadReservedAttachment(
     RenditionExportService::shared(client, session)->storage()->uploadReserved(
         localFileName(localFilePath), bucket, objectPath, mimeType,
         [guard, attachmentId, epoch](bool ok, const QString &error, bool retryable) {
-        if (!guard || epoch != guard->m_requestEpoch) return;
+        if (!guard) return;
+        // Subida a Storage: éxito o rechazo definitivo prueban contacto; reintentable = sin servidor.
+        emit guard->transportObserved(int(ok || !retryable
+            ? RenditionConnectivity::Outcome::Reachable : RenditionConnectivity::Outcome::Unreachable));
+        if (epoch != guard->m_requestEpoch) return;
         guard->endRequest();
         if (!ok) {
             qInfo() << "INGE_DRIVE_ATTACHMENT owner=renditions state=error";
@@ -762,43 +777,143 @@ void RenditionRepository::accessReceivedAttachment(const QString &requestId, con
             {{QStringLiteral("p_attachment_id"), attachmentId}},
             [this, operation, requestId](const QVariant &payload) {
         const auto access = firstRow(payload);
-        const QString bucket = access.value(QStringLiteral("bucket")).toString();
-        const QString path = access.value(QStringLiteral("storage_path")).toString();
-        if (bucket.isEmpty() || path.isEmpty()) {
-            emit operationFailed(operation, QStringLiteral("ATTACHMENT_ACCESS_INVALID"), QStringLiteral("El servidor no devolvió una referencia de acceso."));
+        signObject(operation, requestId, access.value(QStringLiteral("bucket")).toString(),
+                   access.value(QStringLiteral("storage_path")).toString(), {});
+    });
+}
+
+// Firma efímera (60 s) de un objeto que el servidor acaba de autorizar. La URL
+// sólo viaja al solicitante; no se guarda en el almacén ni en el estado publicado.
+void RenditionRepository::signObject(const QString &operation, const QString &requestId,
+                                     const QString &bucket, const QString &path,
+                                     const QString &fileName)
+{
+    if (bucket.isEmpty() || path.isEmpty()) {
+        emit operationFailed(operation, QStringLiteral("ATTACHMENT_ACCESS_INVALID"), QStringLiteral("El servidor no devolvió una referencia de acceso."));
+        return;
+    }
+    auto *client = supabase();
+    auto *session = appContext() ? appContext()->auth() : nullptr;
+    if (!client || !session || !session->logged()) {
+        emit operationFailed(operation, QStringLiteral("AUTH_REQUIRED"), QStringLiteral("Inicia sesión para acceder al sustento."));
+        return;
+    }
+    QString url = storageObjectUrl(client, bucket, path);
+    url.replace(QStringLiteral("/storage/v1/object/"), QStringLiteral("/storage/v1/object/sign/"));
+    const QString base = client->projectUrl();
+    QNetworkRequest request = client->makeRequest(QUrl(url), session->accessToken());
+    request.setTransferTimeout(30000);
+    auto *reply = client->nam()->post(request, QByteArrayLiteral("{\"expiresIn\":60}"));
+    const quint64 epoch = m_requestEpoch;
+    beginRequest();
+    connect(reply, &QNetworkReply::finished, this, [this, reply, operation, requestId, epoch, base, fileName]() {
+        endRequest();
+        const auto raw = reply->readAll();
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const bool ok = reply->error() == QNetworkReply::NoError && status >= 200 && status < 300;
+        emit transportObserved(int(RenditionConnectivity::classifyHttp(
+            status, reply->error() != QNetworkReply::NoError)));
+        reply->deleteLater();
+        if (epoch != m_requestEpoch) return;
+        const auto object = QJsonDocument::fromJson(raw).object();
+        const QString relative = object.value(QStringLiteral("signedURL")).toString();
+        if (!ok || !relative.startsWith(QLatin1String("/object/sign/"))) {
+            emit operationFailed(operation, QStringLiteral("ATTACHMENT_ACCESS_DENIED"), QStringLiteral("No se pudo autorizar el acceso privado al sustento."));
             return;
         }
-        auto *client = supabase();
-        auto *session = appContext() ? appContext()->auth() : nullptr;
-        if (!client || !session || !session->logged()) {
-            emit operationFailed(operation, QStringLiteral("AUTH_REQUIRED"), QStringLiteral("Inicia sesión para acceder al sustento."));
-            return;
-        }
-        QString url = storageObjectUrl(client, bucket, path);
-        url.replace(QStringLiteral("/storage/v1/object/"), QStringLiteral("/storage/v1/object/sign/"));
-        const QString base = client->projectUrl();
-        QNetworkRequest request = client->makeRequest(QUrl(url), session->accessToken());
-        request.setTransferTimeout(30000);
-        auto *reply = client->nam()->post(request, QByteArrayLiteral("{\"expiresIn\":60}"));
-        const quint64 epoch = m_requestEpoch;
-        beginRequest();
-        connect(reply, &QNetworkReply::finished, this, [this, reply, operation, requestId, epoch, base]() {
-            endRequest();
-            const auto raw = reply->readAll();
-            const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            const bool ok = reply->error() == QNetworkReply::NoError && status >= 200 && status < 300;
-            reply->deleteLater();
-            if (epoch != m_requestEpoch) return;
-            const auto object = QJsonDocument::fromJson(raw).object();
-            const QString relative = object.value(QStringLiteral("signedURL")).toString();
-            if (!ok || !relative.startsWith(QLatin1String("/object/sign/"))) {
-                emit operationFailed(operation, QStringLiteral("ATTACHMENT_ACCESS_DENIED"), QStringLiteral("No se pudo autorizar el acceso privado al sustento."));
+        QVariantMap result{{QStringLiteral("signedUrl"), base + QStringLiteral("/storage/v1") + relative}};
+        if (!fileName.isEmpty()) result.insert(QStringLiteral("fileName"), fileName);
+        emit receivedResult(requestId, QStringLiteral("receivedAttachment"), result);
+    });
+}
+
+// --------------------------------------------------- Working Document (v01)
+void RenditionRepository::listWorkingRows(const QString &renditionId)
+{
+    callRpc(QStringLiteral("working_list"), QString::fromLatin1(RenditionWorkingContract::ListRows),
+            {{QStringLiteral("p_rendition_id"), renditionId}},
+            [this, renditionId](const QVariant &payload) {
+        emit workingRowsLoaded(renditionId, rows(payload));
+    });
+}
+
+void RenditionRepository::saveWorkingRow(const QVariantMap &arguments)
+{
+    // Defensa en profundidad: nunca se envía algo que el contrato SQL rechazaría.
+    const QString invalid = RenditionWorkingContract::validateSave(arguments);
+    if (!invalid.isEmpty()) {
+        emit operationFailed(QStringLiteral("working_save"), QStringLiteral("RENDITION_WORKING_INVALID"), invalid);
+        return;
+    }
+    callRpc(QStringLiteral("working_save"), QString::fromLatin1(RenditionWorkingContract::SaveRow), arguments,
+            [this](const QVariant &payload) { emit workingSaved(firstRow(payload)); });
+}
+
+void RenditionRepository::archiveWorkingRow(const QVariantMap &arguments)
+{
+    callRpc(QStringLiteral("working_archive"), QString::fromLatin1(RenditionWorkingContract::ArchiveRow), arguments,
+            [this](const QVariant &payload) { emit workingArchived(firstRow(payload)); });
+}
+
+void RenditionRepository::reserveWorkingFile(const QVariantMap &arguments)
+{
+    const QString invalid = RenditionWorkingContract::validateReserve(arguments);
+    if (!invalid.isEmpty()) {
+        emit operationFailed(QStringLiteral("working_reserve"), QStringLiteral("RENDITION_WORKING_INVALID_FILE"), invalid);
+        return;
+    }
+    callRpc(QStringLiteral("working_reserve"), QString::fromLatin1(RenditionWorkingContract::ReserveFile), arguments,
+            [this](const QVariant &payload) { emit workingFileReserved(firstRow(payload)); });
+}
+
+void RenditionRepository::confirmWorkingFile(const QString &fileId)
+{
+    callRpc(QStringLiteral("working_confirm"), QString::fromLatin1(RenditionWorkingContract::ConfirmFile),
+            {{QStringLiteral("p_file_id"), fileId}},
+            [this](const QVariant &payload) { emit workingFileConfirmed(firstRow(payload)); });
+}
+
+void RenditionRepository::promoteWorkingRow(const QVariantMap &arguments)
+{
+    callRpc(QStringLiteral("working_promote"), QString::fromLatin1(RenditionWorkingContract::PromoteRow), arguments,
+            [this](const QVariant &payload) { emit workingPromoted(firstRow(payload)); });
+}
+
+void RenditionRepository::openAuthorizedObject(const QString &requestId, const QString &operation,
+                                               const QVariantMap &arguments)
+{
+    const QString correlation = QStringLiteral("received/") + requestId;
+    if (operation == QLatin1String("workingFileOpen")) {
+        // El servidor revalida ACL y estado READY en cada apertura.
+        callRpc(correlation, QString::fromLatin1(RenditionWorkingContract::GetFile),
+                {{QStringLiteral("p_file_id"), arguments.value(QStringLiteral("fileId"))}},
+                [this, correlation, requestId](const QVariant &payload) {
+            const auto file = firstRow(payload);
+            signObject(correlation, requestId, QStringLiteral("project-files"),
+                       file.value(QStringLiteral("storage_path")).toString(),
+                       file.value(QStringLiteral("file_name")).toString());
+        });
+        return;
+    }
+    if (operation == QLatin1String("filesOpenBinary")) {
+        // Archivero/Papelera: binario de sólo lectura (Web: recoveryOpen).
+        callRpc(correlation, QStringLiteral("get_recovery_binary_object_v02"),
+                {{QStringLiteral("p_space_id"), arguments.value(QStringLiteral("spaceId"))},
+                 {QStringLiteral("p_node_id"), arguments.value(QStringLiteral("nodeId"))}},
+                [this, correlation, requestId](const QVariant &payload) {
+            const auto object = firstRow(payload);
+            if (object.value(QStringLiteral("storage_bucket")).toString() != QLatin1String("project-files")) {
+                emit operationFailed(correlation, QStringLiteral("INVALID_RECOVERY_OBJECT"),
+                                     QStringLiteral("El servidor no devolvió un archivo válido."));
                 return;
             }
-            emit receivedResult(requestId, QStringLiteral("receivedAttachment"),
-                QVariantMap{{QStringLiteral("signedUrl"), base + QStringLiteral("/storage/v1") + relative}});
+            signObject(correlation, requestId, QStringLiteral("project-files"),
+                       object.value(QStringLiteral("storage_path")).toString(),
+                       object.value(QStringLiteral("file_name")).toString());
         });
-    });
+        return;
+    }
+    emit operationFailed(correlation, QStringLiteral("UNKNOWN_COMMAND"), QStringLiteral("Operación de acceso no disponible."));
 }
 
 void RenditionRepository::receivedCommand(const QString &requestId,
@@ -884,6 +999,9 @@ void RenditionRepository::callRpc(const QString &operation,
         const QNetworkReply::NetworkError networkError = reply->error();
         const QString networkMessage = reply->errorString();
         reply->deleteLater();
+        // Antes del filtro de época: una respuesta tardía también prueba que el servidor responde.
+        emit transportObserved(int(RenditionConnectivity::classifyHttp(
+            status, networkError != QNetworkReply::NoError)));
 
         if (requestEpoch != m_requestEpoch)
             return;

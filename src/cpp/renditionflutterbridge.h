@@ -1,5 +1,7 @@
 #pragma once
 
+#include "renditionconnectivity.h"
+
 #include <QObject>
 #include <QSet>
 #include <QTimer>
@@ -51,7 +53,11 @@ private:
                         const QString &message);
     void continuePresentationAfterSync();
     void clearPendingPresentation();
-    void updateConnectionState(const QString &code);
+    // Conectividad (fuente única): evidencia de red/transporte -> estado publicado.
+    void applyConnectivity(bool changed);
+    void scheduleRetry();
+    void reconnect();
+    void observeLocalCode(const QString &code);
     void sendEvent(const QVariantMap &event);
     void sendResult(const QString &requestId, const QVariantMap &result = {});
     void sendError(const QString &requestId, const QString &code,
@@ -79,7 +85,15 @@ private:
     QString m_pendingFoldersRequestId;
     QString m_lastPullAt;
     QString m_lastServerConfirmationAt;
-    QString m_connectionState = QStringLiteral("UNKNOWN");
+    RenditionConnectivity::State m_link;
+    QTimer m_retryTimer;                 // reintento controlado (sin sondeo continuo)
+    // Working Document: UNKNOWN hasta la primera respuesta; UNAVAILABLE con PGRST202
+    // (contrato no desplegado en este entorno: sin escrituras, borradores locales).
+    QString m_workingContract = QStringLiteral("UNKNOWN");
+    QTimer m_workingSyncTimer;           // agrupa guardados de borrador antes de enviarlos
+    void scheduleWorkingSync(int delayMs);
+    bool m_selectionPullPending = false; // detalle elegido durante otro pull
+    int m_selectionSerial = 0;           // token de cada apertura de detalle (select)
     QSet<QString> m_pendingPullOperations;
     bool m_presentAfterSync = false;
     QTimer m_publishTimer;

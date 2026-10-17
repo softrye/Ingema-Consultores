@@ -111,8 +111,45 @@ int main(int argc, char **argv)
     expense.insert("expenseDate", "2026-11-01");
     check(!ui.expenseError(draft, expense).isEmpty(), "date outside period rejected");
     check(!ui.headerError({{"periodStart", "2026-10-31"}, {"periodEnd", "2026-10-01"}}).isEmpty(), "inverted period rejected");
+
+    // ---- completion (avance) derived only from real presentation requirements
+    check(!ui.completion({{"localId", "r"}, {"periodStart", "2026-10-01"}}).value("known").toBool(), "list row without projects not evaluated");
+    QVariantMap header{{"periodStart", "2026-10-01"}, {"periodEnd", "2026-10-31"}, {"projectIds", QVariantList{"p1"}},
+                       {"primaryProjectId", "p1"}, {"expenses", QVariantList{}}, {"expenseCount", 0}};
+    check(ui.completion(header).value("percent").toInt() == 33, "period + projects only = 2/6");
+    header.insert("documentParentNodeId", "f1"); header.insert("spaceId", "s1");
+    check(ui.completion(header).value("percent").toInt() == 50, "header complete without expenses = 3/6");
+    QVariantMap good{{"projectId", "p1"}, {"expenseDate", "2026-10-09"}, {"amount", "10.00"}, {"currencyCode", "PEN"},
+                     {"concept", "Almuerzo de campo"}, {"categoryCode", "FOOD"}, {"paymentMethodCode", "CASH"}, {"supportTypeCode", "RECEIPT"}};
+    QVariantMap bad = good; bad.insert("concept", "");
+    header.insert("expenses", QVariantList{good, bad}); header.insert("expenseCount", 2);
+    check(ui.completion(header).value("percent").toInt() == 83, "one of two expenses valid = 5/6");
+    header.insert("expenses", QVariantList{good, good});
+    check(ui.completion(header).value("percent").toInt() == 100, "all requirements = 100");
+    header.insert("expenseCount", 5);
+    check(!ui.completion(header).value("known").toBool(), "partially loaded expenses not evaluated");
+    header.insert("expenseCount", 2); header.insert("status", "APROBADO"); header.insert("syncState", "ERROR");
+    check(ui.completion(header).value("percent").toInt() == 100, "status and sync do not change completion");
     check(ui.errorText("QUOTE_ORIGIN_NOT_CONFIGURED", "raw").contains("manualmente"), "quote origin message");
     check(ui.errorText("NETWORK_ERROR", "").contains("Sin conexión"), "offline message");
+    check(ui.errorText("RENDITION_WORKING_ROWS_PENDING", "RENDITION_WORKING_ROWS_PENDING").contains("sin terminar"),
+          "working rows pending message");
+    check(ui.errorText("PGRST202", "raw").contains("raw"), "missing RPC stays generic outside Working");
+    // P0 conectividad: la pérdida de conexión no produce avisos (la comunica el aura).
+    for (const char *code : {"NETWORK_AMBIGUOUS", "TIMEOUT", "OFFLINE", "SERVER_UNREACHABLE", "HTTP_503",
+                             "ATTACHMENT_UPLOAD_NEEDS_RECONCILIATION", "SYNC_BUSY", "PULL_BUSY", "AUTH_REQUIRED"})
+        check(ui.silentError(code), (std::string("silent connectivity code ") + code).c_str());
+    for (const char *code : {"RENDITION_WORKING_CONFLICT", "RENDITION_VERSION_CONFLICT",
+                             "RENDITION_NOT_FOUND_OR_FORBIDDEN", "PERMISSION_DENIED", "HTTP_409"})
+        check(!ui.silentError(code), (std::string("actionable error stays visible ") + code).c_str());
+    check(ui.effectiveSyncState({{"syncState", "ERROR"}, {"syncError", "TRANSPORT_RETRY"}}) == "PENDING_UPDATE",
+          "waiting-for-server ERROR shown as pending");
+    check(ui.effectiveSyncState({{"syncState", "ERROR"}, {"syncError", "Rechazado por permisos"}}) == "ERROR",
+          "real server rejection stays ERROR");
+    check(ui.effectiveSyncState({{"syncState", "CONFLICT"}, {"syncError", "TRANSPORT_RETRY"}}) == "CONFLICT",
+          "conflict never downgraded");
+    check(ui.visibleSyncError("TRANSPORT_RETRY").isEmpty() && ui.visibleSyncError("Sin permiso") == "Sin permiso",
+          "technical marker hidden, real message kept");
     check(!ui.aiEnabled(), "Renditions AI disabled");
 
     QTemporaryDir dir;

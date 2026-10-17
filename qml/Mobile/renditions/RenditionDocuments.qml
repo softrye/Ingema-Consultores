@@ -136,9 +136,9 @@ Item {
                         delegate: Text {
                             required property var modelData
                             width: column.width - 32 * tab.ui.u
-                            text: "• " + S.text_(modelData, "fileName") + " · " + tab.ctl.syncLabel(S.text_(modelData, "syncState"))
-                                  + (S.text_(modelData, "syncError").length ? " · " + S.text_(modelData, "syncError") : "")
-                            color: S.syncColor(modelData.syncState); wrapMode: Text.WordWrap
+                            text: "• " + S.text_(modelData, "fileName") + " · " + tab.ctl.syncLabel(tab.app.syncState(modelData))
+                                  + (tab.ctl.visibleSyncError(S.text_(modelData, "syncError")).length ? " · " + tab.ctl.visibleSyncError(S.text_(modelData, "syncError")) : "")
+                            color: S.syncColor(tab.app.syncState(modelData)); wrapMode: Text.WordWrap
                             font.family: tab.ui.fontFamily; font.pixelSize: 13 * tab.ui.u
                         }
                     }

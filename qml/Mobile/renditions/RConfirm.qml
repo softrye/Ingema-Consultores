@@ -28,7 +28,7 @@ Popup {
     x: parent ? (parent.width - width) / 2 : 0
     y: parent ? (parent.height - height) / 2 : 0
     padding: 20 * ui.u
-    background: Rectangle { radius: 20 * confirm.ui.u; color: "#1A2440"; border.width: 1; border.color: S.border }
+    background: Rectangle { radius: 20 * confirm.ui.u; color: S.popup; border.width: 1; border.color: S.border }
     contentItem: Column {
         spacing: 14 * confirm.ui.u
         Text {

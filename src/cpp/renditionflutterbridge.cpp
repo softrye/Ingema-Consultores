@@ -6,13 +6,17 @@
 #include "renditionrepository.h"
 #include "renditionsynccontroller.h"
 #include "renditionsnapshotexporter.h"
+#include "renditionadminrpc.h"
 #include "renditioncontract.h"
 #include "renditionfeatures.h"
 
 #include <QJsonDocument>
 #include <QDateTime>
+#include <QDebug>
+#include <QGuiApplication>
 #include <QJsonObject>
 #include <QMetaObject>
+#include <QNetworkInformation>
 #include <QPointer>
 
 namespace {
@@ -93,6 +97,39 @@ RenditionFlutterBridge::RenditionFlutterBridge(
     connect(&m_publishTimer, &QTimer::timeout, this,
             &RenditionFlutterBridge::publishStateNow);
 
+    // ---- Conectividad: una sola fuente para auras, cola y comandos.
+    // (a) Cada respuesta real de Supabase (o su ausencia) es evidencia.
+    connect(m_repository, &RenditionRepository::transportObserved, this, [this](int outcome) {
+        const bool wasOffline = m_link.offline();
+        applyConnectivity(m_link.onTransport(RenditionConnectivity::Outcome(outcome)));
+        // Primera respuesta tras una desconexión: se reanuda la cola existente.
+        if (wasOffline && m_link.online())
+            QTimer::singleShot(0, this, &RenditionFlutterBridge::reconnect);
+    });
+    // (b) Eventos del sistema (sin sondeo): sin red => desconexión inmediata; red
+    // disponible => se verifica con una sincronización real, nunca se supone ONLINE.
+    QNetworkInformation::loadDefaultBackend();
+    if (auto *network = QNetworkInformation::instance()) {
+        const auto apply = [this](QNetworkInformation::Reachability state) {
+            if (state == QNetworkInformation::Reachability::Unknown) return;
+            const bool available = state != QNetworkInformation::Reachability::Disconnected;
+            const bool wasOffline = m_link.offline();
+            applyConnectivity(m_link.onNetwork(available));
+            if (available && wasOffline)
+                QTimer::singleShot(0, this, &RenditionFlutterBridge::reconnect);
+        };
+        apply(network->reachability());
+        connect(network, &QNetworkInformation::reachabilityChanged, this, apply);
+    }
+    // (c) Reintento controlado sólo con red disponible y servidor inaccesible.
+    m_retryTimer.setSingleShot(true);
+    connect(&m_retryTimer, &QTimer::timeout, this, &RenditionFlutterBridge::reconnect);
+    if (auto *app = qobject_cast<QGuiApplication *>(QCoreApplication::instance()))
+        connect(app, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState state) {
+            if (state != Qt::ApplicationActive) m_retryTimer.stop();   // sin consumo en segundo plano
+            else scheduleRetry();
+        });
+
     connect(m_repository, &RenditionRepository::renditionsChanged, this,
             [this]() {
         m_store->mergeRemoteRenditions(m_repository->renditions());
@@ -115,6 +152,24 @@ RenditionFlutterBridge::RenditionFlutterBridge(
             [this, localForRemote](const QString &id, const QVariantList &rows) {
         m_store->mergeRemoteAttachments(localForRemote(id), rows);
     });
+    // ---- Working Document: borradores del servidor (pull del detalle) y contrato.
+    connect(m_repository, &RenditionRepository::workingRowsLoaded, this,
+            [this, localForRemote](const QString &id, const QVariantList &rows) {
+        m_workingContract = QStringLiteral("AVAILABLE");
+        m_store->mergeRemoteWorkingRows(localForRemote(id), rows);
+        publishState();
+    });
+    connect(m_syncController, &RenditionSyncController::workingContractMissing, this, [this]() {
+        m_workingContract = QStringLiteral("UNAVAILABLE");
+        publishState();
+    });
+    m_workingSyncTimer.setSingleShot(true);
+    connect(&m_workingSyncTimer, &QTimer::timeout, this, [this]() {
+        if (m_link.link() == RenditionConnectivity::Link::NoNetwork) return;   // se enviará al volver la red
+        if (!m_syncController->busy() && m_pendingPullOperations.isEmpty()) m_syncController->synchronize();
+        else m_workingSyncTimer.start(2000);
+    });
+
     connect(m_repository, &RenditionRepository::summaryLoaded, this,
             [this, localForRemote](const QString &id, const QVariantMap &summary) {
         m_store->adoptRemoteSummary(localForRemote(id), summary);
@@ -187,6 +242,15 @@ RenditionFlutterBridge::RenditionFlutterBridge(
             sendError(id, code, message);
             return;
         }
+        if (operation == QLatin1String("working_list")) {
+            // Lectura opcional del detalle: un entorno sin el contrato Working (PGRST202)
+            // o sin acceso a borradores no invalida el pull; sólo el transporte lo hace.
+            if (code == QLatin1String("PGRST202")) m_workingContract = QStringLiteral("UNAVAILABLE");
+            if (!RenditionConnectivity::isTransportFailure(code)) {
+                completeRemotePullOperation(operation);
+                return;
+            }
+        }
         if (m_pendingPullOperations.contains(operation)) {
             failRemotePull(operation, code, message);
             return;
@@ -198,14 +262,15 @@ RenditionFlutterBridge::RenditionFlutterBridge(
                 ? m_selectedLocalId : m_pendingPresentationLocalId;
             if (!localId.isEmpty()) {
                 const QString normalized = code.toUpper();
-                const QString state = normalized.contains(QStringLiteral("CONFLICT"))
+                // Sin respuesta: la presentación pudo o no confirmarse; se reconcilia
+                // con el próximo pull (mismo request_id). Nunca se marca como conflicto.
+                const bool transport = RenditionConnectivity::isTransportFailure(normalized);
+                const QString state = transport ? QStringLiteral("NEEDS_RECONCILIATION")
+                    : normalized.contains(QStringLiteral("CONFLICT"))
                         || normalized.contains(QStringLiteral("ROW_VERSION"))
-                    ? QStringLiteral("CONFLICT")
-                    : (normalized.contains(QStringLiteral("NETWORK"))
-                           || normalized.contains(QStringLiteral("TIMEOUT"))
-                       ? QStringLiteral("NEEDS_RECONCILIATION")
-                       : QStringLiteral("ERROR"));
-                m_store->markPresentationState(localId, state, message);
+                    ? QStringLiteral("CONFLICT") : QStringLiteral("ERROR");
+                m_store->markPresentationState(localId, state,
+                    transport ? RenditionConnectivity::transportMarker() : message);
             }
             clearPendingPresentation();
         } else if (operation == QLatin1String("project_workspace")) {
@@ -262,17 +327,20 @@ RenditionFlutterBridge::RenditionFlutterBridge(
         startRemotePull(requestId, QStringLiteral("sync"));
     });
     connect(m_syncController, &RenditionSyncController::syncStopped, this,
-            [this](const QString &state, const QString &message) {
+            [this](const QString &state, const QString &code, const QString &message) {
+        Q_UNUSED(state)
+        // La causa (code) viaja al solicitante; el estado de la fila ya está persistido.
+        // La conexión NO se deduce de aquí: llega por transportObserved/red.
         if (m_presentAfterSync && !m_pendingPresentationRequestId.isEmpty()) {
             const QString requestId = m_pendingPresentationRequestId;
             clearPendingPresentation();
-            sendError(requestId, state, message);
+            sendError(requestId, code, message);
         }
         if (!m_pendingSyncRequestId.isEmpty()) {
-            sendError(m_pendingSyncRequestId, state, message);
+            sendError(m_pendingSyncRequestId, code, message);
             m_pendingSyncRequestId.clear();
         }
-        updateConnectionState(state);
+        observeLocalCode(code);
         publishState();
     });
 }
@@ -511,22 +579,35 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
                       QStringLiteral("La rendición no existe en la cuenta actual."));
             return;
         }
-        // Keep responses for the previous selection from entering another record.
-        if (m_repository->busy() || m_syncController->busy()) {
-            sendError(requestId, QStringLiteral("DETAIL_BUSY"),
-                      QStringLiteral("Espera a que termine la sincronización para abrir la rendición."));
-            return;
-        }
+        // Offline-first: la ficha local se abre siempre (sin red o con el servidor
+        // lento). Las respuestas remotas se fusionan por identidad remota y el
+        // detalle publicado sólo se acepta si coincide con la selección vigente
+        // (publishStateNow: detailMatches), así que una respuesta de la selección
+        // anterior no entra en esta ficha. Si hay un pull en curso, el del nuevo
+        // detalle se encadena al terminar.
         m_selectedLocalId = localId;
+        ++m_selectionSerial;                 // identidad de ESTA apertura (ver closeDetail)
         publishStateNow();
-        sendResult(requestId, {{QStringLiteral("current"), selected}});
-        if (!selected.value(QStringLiteral("remoteId")).toString().isEmpty())
-            startRemotePull({}, QStringLiteral("select"));
+        sendResult(requestId, {{QStringLiteral("current"), selected},
+                               {QStringLiteral("selectionToken"), m_selectionSerial}});
+        if (!selected.value(QStringLiteral("remoteId")).toString().isEmpty()) {
+            if (m_pendingPullOperations.isEmpty() && !m_syncController->busy())
+                startRemotePull({}, QStringLiteral("select"));
+            else
+                m_selectionPullPending = true;
+        }
         return;
     }
 
     if (operation == QLatin1String("closeDetail")) {
-        m_selectedLocalId.clear();
+        // Sólo se libera la selección del detalle que se cierra (un cierre tardío de la
+        // ficha anterior no borra la recién abierta). Sin localId: comportamiento previo.
+        // Con selectionToken se libera sólo la apertura que se cierra (la misma ficha
+        // reabierta enseguida tiene otro token); sin token, por identidad de ficha.
+        const QString closing = arguments.value(QStringLiteral("localId")).toString();
+        const int token = arguments.value(QStringLiteral("selectionToken")).toInt();
+        if (token > 0 ? token == m_selectionSerial : (closing.isEmpty() || closing == m_selectedLocalId))
+            m_selectedLocalId.clear();
         publishState();
         sendResult(requestId);
         return;
@@ -542,7 +623,8 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
             arguments.value(QStringLiteral("primaryProjectId")).toString(),
             arguments.value(QStringLiteral("documentParentNodeId")).toString(),
             arguments.value(QStringLiteral("spaceId")).toString(),
-            synchronize);
+            synchronize,
+            arguments.value(QStringLiteral("displayName")).toString());
         if (localId.isEmpty()) {
             sendError(requestId, QStringLiteral("CREATE_LOCAL_FAILED"),
                       m_store->lastError());
@@ -726,6 +808,13 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
                       m_store->lastError());
             return;
         }
+        // Sin red: los cambios ya quedaron en el outbox; no se lanza ninguna
+        // petición (sin espera de timeouts ni consumo). Se sincroniza al volver la red.
+        if (m_link.link() == RenditionConnectivity::Link::NoNetwork) {
+            sendError(requestId, QStringLiteral("OFFLINE"), QString());
+            publishState();
+            return;
+        }
         m_pendingSyncRequestId = requestId;
         m_syncController->synchronize();
         return;
@@ -754,6 +843,68 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
         const QString parentId = arguments.value(QStringLiteral("parentId")).toString();
         m_repository->getDocumentCapabilities(spaceId, parentId);
         m_repository->listDocumentFolders(spaceId, parentId);
+        return;
+    }
+
+    // ---- Working Document (borradores en la nube). Todo pasa por el almacén local
+    // y el outbox existentes: el guardado es local, durable e inmediato; el envío
+    // lo hace la cola (agrupado) en cuanto hay conexión.
+    if (operation == QLatin1String("saveWorking") || operation == QLatin1String("promoteWorking")) {
+        const QString localId = arguments.value(QStringLiteral("localId")).toString();
+        QString workingId = arguments.value(QStringLiteral("workingId")).toString();
+        if (arguments.contains(QStringLiteral("form"))) {
+            workingId = m_store->saveWorkingDraft(localId, workingId,
+                arguments.value(QStringLiteral("form")).toMap(), arguments.value(QStringLiteral("files")).toList(),
+                arguments.value(QStringLiteral("expenseLocalId")).toString());
+            if (workingId.isEmpty()) {
+                sendError(requestId, QStringLiteral("WORKING_SAVE_FAILED"), m_store->lastError());
+                publishState();
+                return;
+            }
+        }
+        if (operation == QLatin1String("promoteWorking") && !m_store->requestWorkingPromotion(localId, workingId)) {
+            sendError(requestId, QStringLiteral("WORKING_PROMOTE_BLOCKED"), m_store->lastError());
+            publishState();
+            return;
+        }
+        sendResult(requestId, {{QStringLiteral("workingId"), workingId}, {QStringLiteral("pendingSync"), true},
+                               {QStringLiteral("contract"), m_workingContract}});
+        scheduleWorkingSync(operation == QLatin1String("promoteWorking")
+                            || arguments.value(QStringLiteral("final")).toBool() ? 0 : 3000);
+        publishState();
+        return;
+    }
+    if (operation == QLatin1String("archiveWorking") || operation == QLatin1String("resolveWorking")) {
+        const QString localId = arguments.value(QStringLiteral("localId")).toString();
+        const QString workingId = arguments.value(QStringLiteral("workingId")).toString();
+        const bool ok = operation == QLatin1String("archiveWorking")
+            ? m_store->requestWorkingArchive(localId, workingId)
+            : m_store->resolveWorkingConflict(localId, workingId, arguments.value(QStringLiteral("keepLocal")).toBool(),
+                                              arguments.value(QStringLiteral("serverRow")).toMap());
+        if (!ok) sendError(requestId, QStringLiteral("WORKING_ACTION_FAILED"), m_store->lastError());
+        else sendResult(requestId, {{QStringLiteral("workingId"), workingId}, {QStringLiteral("pendingSync"), true}});
+        if (ok) scheduleWorkingSync(0);
+        publishState();
+        return;
+    }
+    // Acceso efímero a un sustento de borrador o a un binario archivado: el servidor
+    // revalida el permiso en cada apertura; la URL firmada no se guarda.
+    if (operation == QLatin1String("workingFileOpen") || operation == QLatin1String("filesOpenBinary")) {
+        m_receivedRequests.insert(requestId, arguments);
+        m_repository->openAuthorizedObject(requestId, operation, arguments);
+        return;
+    }
+    // Archivero, Papelera y recuperación reversible (Files v07). Sin purga ni borrado.
+    if (RenditionAdminRpc::isFilesOperation(operation)) {
+        if (operation == QLatin1String("filesRecover")
+            && (arguments.value(QStringLiteral("requestId")).toString().isEmpty()
+                || arguments.value(QStringLiteral("previewToken")).toString().isEmpty())) {
+            sendError(requestId, QStringLiteral("REQUEST_ID_REQUIRED"),
+                      QStringLiteral("La recuperación necesita su vista previa vigente y un identificador idempotente."));
+            return;
+        }
+        m_receivedRequests.insert(requestId, arguments);
+        m_repository->receivedCommand(requestId, operation, arguments);
         return;
     }
 
@@ -869,6 +1020,20 @@ void RenditionFlutterBridge::startRemotePull(const QString &requestId,
         }
         return;
     }
+    // Sin red (evento del sistema) no se envía nada: los datos locales siguen
+    // disponibles y la reconexión vuelve a pedir el pull. Sin aviso: aura roja.
+    if (m_link.link() == RenditionConnectivity::Link::NoNetwork) {
+        if (reason == QLatin1String("present_preflight") && !m_pendingPresentationRequestId.isEmpty()) {
+            const QString presentation = m_pendingPresentationRequestId;
+            clearPendingPresentation();
+            sendError(presentation, QStringLiteral("OFFLINE"), QString());
+        }
+        if (!requestId.isEmpty())
+            sendError(requestId, QStringLiteral("OFFLINE"), QString());
+        publishState();
+        return;
+    }
+    m_selectionPullPending = false;      // este pull ya incluye el detalle vigente
 
     m_pendingPullRequestId = requestId;
     m_pendingPullReason = reason;
@@ -889,6 +1054,9 @@ void RenditionFlutterBridge::startRemotePull(const QString &requestId,
         });
         if (m_repository->v02Enabled())
             m_pendingPullOperations.insert(QStringLiteral("get_location"));
+        // Borradores Working del detalle (opcional por entorno: PGRST202 => sin contrato).
+        if (m_workingContract != QLatin1String("UNAVAILABLE"))
+            m_pendingPullOperations.insert(QStringLiteral("working_list"));
     }
     publishState();
 
@@ -903,6 +1071,8 @@ void RenditionFlutterBridge::startRemotePull(const QString &requestId,
         m_repository->listAttachments(remoteId);
         if (m_repository->v02Enabled())
             m_repository->getDocumentLocation(remoteId);
+        if (m_workingContract != QLatin1String("UNAVAILABLE"))
+            m_repository->listWorkingRows(remoteId);
     }
 }
 
@@ -919,7 +1089,7 @@ void RenditionFlutterBridge::completeRemotePullOperation(
     m_pendingPullRequestId.clear();
     m_pendingPullReason.clear();
     m_lastPullAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
-    m_connectionState = QStringLiteral("ONLINE");
+    // La conexión ya quedó confirmada por transportObserved (respuestas reales).
     if (reason == QLatin1String("sync"))
         m_lastServerConfirmationAt = m_lastPullAt;
     if (reason == QLatin1String("present_preflight")) {
@@ -935,6 +1105,9 @@ void RenditionFlutterBridge::completeRemotePullOperation(
             {QStringLiteral("pendingCount"), m_store->pendingCount()}
         });
     }
+    // Detalle elegido mientras corría este pull: se trae ahora.
+    if (m_selectionPullPending && m_link.online())
+        QTimer::singleShot(0, this, [this]() { startRemotePull({}, QStringLiteral("select")); });
     publishState();
 }
 
@@ -951,7 +1124,7 @@ void RenditionFlutterBridge::failRemotePull(const QString &operation,
     m_pendingPullOperations.clear();
     m_pendingPullRequestId.clear();
     m_pendingPullReason.clear();
-    updateConnectionState(code);
+    observeLocalCode(code);
     if (!requestId.isEmpty())
         sendError(requestId, code, message);
     publishState();
@@ -1002,22 +1175,55 @@ void RenditionFlutterBridge::clearPendingPresentation()
     m_presentAfterSync = false;
 }
 
-void RenditionFlutterBridge::updateConnectionState(const QString &code)
+// La conexión sólo cambia con evidencia de transporte (transportObserved) o del
+// sistema. Un conflicto CAS o un error de negocio NO son estados de conexión:
+// se persisten en su fila/outbox. Aquí sólo entra AUTH_REQUIRED generado
+// localmente (sin sesión): no hubo petición, pero la sincronización no es posible.
+void RenditionFlutterBridge::observeLocalCode(const QString &code)
 {
-    const QString normalized = code.toUpper();
-    if (normalized.contains(QStringLiteral("NETWORK"))
-        || normalized.contains(QStringLiteral("TIMEOUT"))) {
-        m_connectionState = QStringLiteral("OFFLINE");
-    } else if (normalized.contains(QStringLiteral("AUTH"))
-               || normalized.contains(QStringLiteral("401"))
-               || normalized.contains(QStringLiteral("403"))) {
-        m_connectionState = QStringLiteral("AUTH_REQUIRED");
-    } else if (normalized.contains(QStringLiteral("CONFLICT"))
-               || normalized.contains(QStringLiteral("ROW_VERSION"))) {
-        m_connectionState = QStringLiteral("CONFLICT");
-    } else {
-        m_connectionState = QStringLiteral("ERROR");
+    if (code == QLatin1String("AUTH_REQUIRED"))
+        applyConnectivity(m_link.onTransport(RenditionConnectivity::Outcome::Auth));
+}
+
+void RenditionFlutterBridge::scheduleWorkingSync(int delayMs)
+{
+    m_workingSyncTimer.start(qMax(0, delayMs));
+}
+
+void RenditionFlutterBridge::applyConnectivity(bool changed)
+{
+    scheduleRetry();
+    if (!changed)
+        return;
+    qInfo() << "INGE_RENDITIONS_LINK" << m_link.connectivity() << "failures" << m_link.failures();
+    publishState();
+}
+
+// Reintento controlado: sólo con red disponible, servidor inaccesible y app en
+// primer plano; espera creciente (15 s … 5 min). Sin red se espera al evento.
+void RenditionFlutterBridge::scheduleRetry()
+{
+    const int delay = m_link.retryDelayMs();
+    const auto *app = qobject_cast<QGuiApplication *>(QCoreApplication::instance());
+    const bool foreground = !app || QGuiApplication::applicationState() == Qt::ApplicationActive;
+    if (delay < 0 || !foreground) {
+        m_retryTimer.stop();
+        return;
     }
+    if (!m_retryTimer.isActive())
+        m_retryTimer.start(delay);
+}
+
+// Reconexión: reanuda la cola existente (idempotente: mismos request_id y CAS)
+// y, al terminar, syncFinished trae el estado vigente del servidor.
+void RenditionFlutterBridge::reconnect()
+{
+    if (m_link.link() == RenditionConnectivity::Link::NoNetwork)
+        return;
+    if (m_syncController->busy() || !m_pendingPullOperations.isEmpty())
+        return;
+    m_link.beginAttempt();
+    m_syncController->synchronize();
 }
 
 void RenditionFlutterBridge::publishState()
@@ -1071,7 +1277,11 @@ void RenditionFlutterBridge::publishStateNow()
         // Operation errors are persisted on their owning row/outbox. Command
         // failures go to their request's caller, never a global sticky banner.
         {QStringLiteral("lastError"), QString()},
-        {QStringLiteral("connectionState"), m_connectionState},
+        // Fuente única de conexión: ONLINE | OFFLINE | AUTH_REQUIRED | UNKNOWN
+        // (OFFLINE cubre sin red y servidor inaccesible; detalle en connectivity).
+        {QStringLiteral("connectionState"), m_link.connectionState()},
+        {QStringLiteral("connectivity"), m_link.connectivity()},
+        {QStringLiteral("retryInMs"), m_retryTimer.isActive() ? m_retryTimer.remainingTime() : -1},
         {QStringLiteral("syncPhase"), m_presentAfterSync
              || !m_pendingPresentationRequestId.isEmpty()
                  ? QStringLiteral("PRESENTING")
@@ -1085,6 +1295,10 @@ void RenditionFlutterBridge::publishStateNow()
          m_lastServerConfirmationAt},
         {QStringLiteral("pendingCount"), m_store->pendingCount()},
         {QStringLiteral("editorDrafts"), m_store->editorDrafts()},
+        // Borradores Working de la ficha abierta (sin rutas locales ni URLs firmadas).
+        {QStringLiteral("workingRows"), m_selectedLocalId.isEmpty() ? QVariantList{} : m_store->workingRowsFor(m_selectedLocalId)},
+        {QStringLiteral("workingContract"), m_workingContract},
+        {QStringLiteral("promotedWorkingIds"), m_selectedLocalId.isEmpty() ? QStringList{} : m_store->promotedWorkingIds(m_selectedLocalId)},
         {QStringLiteral("renditions"), publishedRenditions},
         {QStringLiteral("projects"), m_repository->projects()},
         {QStringLiteral("catalogs"), m_repository->expenseCatalogs()},

@@ -75,7 +75,8 @@ public:
                                      const QString &periodEnd,
                                      const QVariantList &projectIds,
                                      const QString &primaryProjectId,
-                                     const QString &documentParentNodeId = {});
+                                     const QString &documentParentNodeId = {},
+                                     const QString &displayName = {});
     Q_INVOKABLE void editRendition(const QString &renditionId,
                                    qint64 expectedRowVersion,
                                    const QString &periodStart,
@@ -151,6 +152,20 @@ public:
     Q_INVOKABLE void archiveAttachment(const QString &attachmentId,
                                        qint64 expectedRowVersion);
 
+    // ---- Working Document (rendition_cloud_working_rows_v01). Argumentos SIEMPRE
+    // construidos y validados por RenditionWorkingContract (mismas reglas que el SQL).
+    void listWorkingRows(const QString &renditionId);
+    void saveWorkingRow(const QVariantMap &arguments);
+    void archiveWorkingRow(const QVariantMap &arguments);
+    void reserveWorkingFile(const QVariantMap &arguments);
+    void confirmWorkingFile(const QString &fileId);
+    void promoteWorkingRow(const QVariantMap &arguments);
+    // Acceso efímero (60 s) a un objeto autorizado por el servidor; la URL firmada
+    // se entrega al solicitante y NUNCA se persiste. operation: workingFileOpen
+    // (get_rendition_working_file_v01) o filesOpenBinary (get_recovery_binary_object_v02).
+    void openAuthorizedObject(const QString &requestId, const QString &operation,
+                              const QVariantMap &arguments);
+
 signals:
     void financialSaved(const QVariantMap &result);
     void expensesLoaded(const QString &renditionId, const QVariantList &rows);
@@ -179,6 +194,9 @@ signals:
     void operationFailed(const QString &operation,
                          const QString &code,
                          const QString &message);
+    // Evidencia real de contacto con Supabase (RenditionConnectivity::Outcome como int):
+    // cada respuesta HTTP o su ausencia, incluso si llega tarde para otra cuenta/época.
+    void transportObserved(int outcome);
     void operationSucceeded(const QString &operation);
     void renditionCreated(const QVariantMap &result);
     void renditionEdited(const QVariantMap &result);
@@ -193,6 +211,12 @@ signals:
     void attachmentAccessReady(const QVariantMap &result);
     void attachmentArchived(const QVariantMap &result);
     void documentLocationSet(const QVariantMap &result);
+    void workingRowsLoaded(const QString &renditionId, const QVariantList &rows);
+    void workingSaved(const QVariantMap &row);
+    void workingArchived(const QVariantMap &row);
+    void workingFileReserved(const QVariantMap &file);
+    void workingFileConfirmed(const QVariantMap &file);
+    void workingPromoted(const QVariantMap &result);
 
 private:
     using SuccessHandler = std::function<void(const QVariant &)>;
@@ -203,6 +227,8 @@ private:
                  const QVariantMap &arguments,
                  SuccessHandler onSuccess);
     bool requireV02(const QString &operation);
+    void signObject(const QString &operation, const QString &requestId, const QString &bucket,
+                    const QString &path, const QString &fileName);
     void setLastError(const QString &message);
     void beginRequest();
     void endRequest();

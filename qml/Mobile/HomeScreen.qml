@@ -5,6 +5,8 @@ import QtCore
 import InGe 1.0
 import "lib/AccountText.js" as AccountText
 import "renditions" as Renditions
+import "assistant" as Assistant
+import InGe.CoreFlow 3.0 as CoreFlowModule
 
 // Home V1 de InGe+ (2026-10-12; Preview 1). Fondo fotográfico real
 // (assets/home, fotos originales del usuario), saludo verificado, tarjetas de
@@ -89,9 +91,10 @@ Item {
     }
     function handleBackStep(source) {
         console.info("INGE_NAV_BACK_SOURCE " + source + " page=" + page)
+        if (assistantSheet.open) { assistantSheet.close(); return true }   // InGe IA global
         if (subAppEnter.running || subAppExit.running)
             return true
-        if ((page === "calicatas" || page === "earth") && dockPath.length > 0) {   // submenú del dock
+        if ((page === "calicatas" || page === "earth" || page === "rendiciones") && dockPath.length > 0) {   // submenú del dock
             dockPath = dockPath.slice(0, -1)
             return true
         }
@@ -594,8 +597,11 @@ Item {
     // -------------------------------------------------------------- Saludo
     // Frases de InGe IA (Gemini vía InGeAssistant, contrato de inge-ai-gemini:
     // messages[{role,text}] -> {ok, respuesta}). Un lote de frases por cuenta
-    // y por día (caché local); se rotan cada 4 s sin consultar al servidor.
-    // Sin IA: saludo local estable y sin atribución.
+    // y por día (caché local); se rotan cada 5 s sin consultar al servidor.
+    // Fallos transitorios: hasta 3 intentos al día, espaciados (30 s, 2 min),
+    // nunca un bloqueo de todo el día por un solo fallo; mientras tanto se
+    // conserva el último lote válido de la cuenta. Sin IA: saludo local
+    // estable y sin atribución.
     property var aiPhrases: []
     property int aiIndex: 0
     property string greetingRequestId: ""
@@ -623,6 +629,7 @@ Item {
         return out
     }
     function refreshGreeting() {
+        greetingRetry.stop()
         greetingRequestId = ""
         aiPhrases = []
         aiIndex = 0
@@ -630,18 +637,28 @@ Item {
         if (userId.length === 0)
             return
         var cache = readMap(store.greetingsJson)[userId]
-        if (cache && cache.date === todayKey() && Array.isArray(cache.phrases)) {
-            var cached = cleanPhrases(cache.phrases)
-            if (cached.length > 0) {
-                aiPhrases = cached
-                greetingText = cached[0]
-                return
-            }
+        var cached = cache && Array.isArray(cache.phrases) ? cleanPhrases(cache.phrases) : []
+        if (cached.length > 0) {                     // último lote válido de ESTA cuenta
+            aiPhrases = cached
+            greetingText = cached[0]
         }
-        if (cache && cache.date === todayKey() && cache.failed === true)
-            return                                   // un intento por día
-        if (typeof InGeAssistant === "undefined" || !InGeAssistant || !InGeAssistant.available)
+        if (cache && cache.date === todayKey() && cached.length > 0)
+            return                                   // lote de hoy: sin consultas
+        requestGreetings()
+    }
+    readonly property int greetingMaxAttempts: 3
+    function greetingAttemptsToday() {
+        var cache = readMap(store.greetingsJson)[userId] || {}
+        return cache.attemptDate === todayKey() ? Number(cache.attempts || 0) : 0
+    }
+    function requestGreetings() {
+        if (greetingRequestId.length > 0 || userId.length === 0)
             return
+        if (typeof InGeAssistant === "undefined" || !InGeAssistant || !InGeAssistant.available)
+            return                                   // se reintenta en onAvailableChanged
+        var attempts = greetingAttemptsToday()
+        if (attempts >= greetingMaxAttempts)
+            return                                   // límite diario: sin solicitudes infinitas
         var name = AccountText.hasVisibleText(firstName) ? firstName : "Engineer"
         greetingRequestId = "home-greetings-" + Date.now()
         var accepted = InGeAssistant.request({
@@ -654,14 +671,35 @@ Item {
                 + "professional and motivating sentence of at most 45 characters about engineering, field work, projects or productivity. "
                 + "No emojis, no quotes inside the lines. Answer ONLY with a JSON array of 6 strings." }]
         })
-        if (!accepted)
+        if (!accepted) {
             greetingRequestId = ""
+            return
+        }
+        // El intento se registra al enviarlo (un cierre de la app no reinicia el contador).
+        var all = readMap(store.greetingsJson)
+        var entry = all[userId] || {}
+        entry.attemptDate = todayKey()
+        entry.attempts = attempts + 1
+        all[userId] = entry
+        store.greetingsJson = JSON.stringify(all)
+    }
+    function greetingFailed() {
+        var attempts = greetingAttemptsToday()
+        if (attempts < greetingMaxAttempts) {
+            greetingRetry.interval = attempts <= 1 ? 30000 : 120000
+            greetingRetry.restart()
+        }
+    }
+    Timer {
+        id: greetingRetry
+        repeat: false
+        onTriggered: home.requestGreetings()
     }
     // Cuando InGeAssistant pasa a disponible (sesión lista), se pide el lote.
     Connections {
         target: typeof InGeAssistant !== "undefined" ? InGeAssistant : null
         function onAvailableChanged() {
-            if (InGeAssistant.available && !home.greetingFromAi && home.greetingRequestId.length === 0)
+            if (InGeAssistant.available && home.greetingRequestId.length === 0)
                 home.refreshGreeting()
         }
         function onReplyReady(reply) {
@@ -675,12 +713,18 @@ Item {
                 try { list = JSON.parse(raw.slice(open, close + 1)) } catch (e) { list = [] }
             }
             var phrases = Array.isArray(list) ? home.cleanPhrases(list) : []
+            if (phrases.length < 2) {
+                // Fallo transitorio o lote insuficiente: se conserva el último lote
+                // válido (o el saludo local) y se reintenta de forma espaciada.
+                home.greetingFailed()
+                return
+            }
             var all = home.readMap(store.greetingsJson)
-            all[home.userId] = phrases.length > 0 ? { date: home.todayKey(), phrases: phrases }
-                                                  : { date: home.todayKey(), failed: true }
+            var entry = all[home.userId] || {}
+            entry.date = home.todayKey()
+            entry.phrases = phrases
+            all[home.userId] = entry
             store.greetingsJson = JSON.stringify(all)
-            if (phrases.length === 0)
-                return                               // queda el saludo local
             home.aiPhrases = phrases
             home.aiIndex = 0
             home.greetingText = phrases[0]
@@ -688,12 +732,21 @@ Item {
     }
     // Rotación local: solo con frases reales, en el inicio, en primer plano.
     Timer {
-        interval: 4000
+        interval: 5000
         repeat: true
         running: home.greetingFromAi && home.aiPhrases.length > 1 && home.visible
                  && home.page === "home" && !home.addOpen
                  && Qt.application.state === Qt.ApplicationActive
-        onTriggered: phraseSwap.restart()
+        onTriggered: {
+            if (phraseSwap.running)
+                return                               // no reinicia una transición en curso
+            if (home.reducedMotion) {                // movimiento reducido: cambio directo
+                home.aiIndex = (home.aiIndex + 1) % home.aiPhrases.length
+                home.greetingText = home.aiPhrases[home.aiIndex]
+                return
+            }
+            phraseSwap.restart()
+        }
     }
     Component.onCompleted: { loadItems(); refreshGreeting(); CalicataCloud.refreshProjects(); syncReminders() }
 
@@ -966,19 +1019,30 @@ Item {
             id: renditionsLoader
             anchors.fill: parent
             active: home.page === "rendiciones" || home.renditionsEverLoaded
-            visible: home.page === "rendiciones" && status === Loader.Ready
-            enabled: visible
+            // Transición propia (no usa subAppProgress, que gobierna Calicatas y
+            // su material): misma duración/easing corporativa y desplazamiento
+            // corto. El Loader no se recrea: formularios y pila se conservan.
+            visible: home.renditionsProgress > 0.001 && status === Loader.Ready
+            enabled: home.page === "rendiciones"
+            opacity: home.renditionsProgress
+            transform: Translate { x: (1 - home.renditionsProgress) * 48 * home.u }
             sourceComponent: Component {
                 Renditions.RenditionsApp {
                     ui: home
                     ctl: typeof RenditionsUi !== "undefined" ? RenditionsUi : null
                     active: home.page === "rendiciones"
+                    haptics: typeof FlowHaptics !== "undefined" ? FlowHaptics : null
+                    dockAnchor: dock
+                    flow: CoreFlowModule.InGeCoreFlow          // motor único (geometría del teclado)
                     onRequestBack: home.page = "home"
+                    onRequestOpenDrive: home.navigate("drive")
+                    onRequestOpenProfile: home.navigate("profile")
                 }
             }
             onStatusChanged: {
                 if (status === Loader.Ready) {
                     home.renditionsEverLoaded = true
+                    if (home.page === "rendiciones") home.runRenditionsTransition(true)
                 } else if (status === Loader.Error) {
                     console.error("INGE_RENDITIONS_LOAD_ERROR renditions/RenditionsApp.qml")
                     home.page = "home"
@@ -1080,6 +1144,35 @@ Item {
     // inicio no reinicia formularios ni pierde borradores.
     property bool calicatasEditorEverLoaded: false
     property bool renditionsEverLoaded: false
+    property real renditionsProgress: 0
+    function runRenditionsTransition(entering) {
+        renditionsEnter.stop()
+        renditionsExit.stop()
+        if (reducedMotion) { renditionsProgress = entering ? 1 : 0; return }
+        if (entering) renditionsEnter.restart()
+        else if (renditionsProgress > 0) renditionsExit.restart()
+    }
+    NumberAnimation {
+        id: renditionsEnter
+        target: home; property: "renditionsProgress"; to: 1
+        duration: 340; easing.type: Easing.OutCubic
+    }
+    NumberAnimation {
+        id: renditionsExit
+        target: home; property: "renditionsProgress"; to: 0
+        duration: 260; easing.type: Easing.InOutCubic
+    }
+    Connections {
+        target: home
+        function onPageChanged() {
+            if (home.page === "rendiciones") {
+                // Primera apertura: espera a que el Loader esté listo (onStatusChanged).
+                if (renditionsLoader.status === Loader.Ready) home.runRenditionsTransition(true)
+            } else if (home.renditionsProgress > 0) {
+                home.runRenditionsTransition(false)
+            }
+        }
+    }
     Loader {
         id: calicatasEditor
         z: 60
@@ -1332,7 +1425,8 @@ Item {
     Binding {
         target: home.dockCtx
         property: "foregroundOwner"
-        value: home.dockForeground ? "calicatas" : (home.page === "earth" ? "earth" : "")
+        value: home.dockForeground ? "calicatas"
+             : (home.page === "earth" ? "earth" : (home.page === "rendiciones" ? "rendiciones" : ""))
         when: home.dockCtx !== null
     }
 
@@ -1342,8 +1436,8 @@ Item {
         { key: "profile", glyph: 0xE19F, page: "profile", name: "Perfil" },
         { key: "settings", glyph: 0xE154, page: "settings", name: "Ajustes" }
     ]
-    readonly property string dockOwner: page === "earth" ? "earth" : "calicatas"
-    readonly property string dockMode: (page === "calicatas" || page === "earth") && dockActions.length > 0
+    readonly property string dockOwner: page === "earth" ? "earth" : (page === "rendiciones" ? "rendiciones" : "calicatas")
+    readonly property string dockMode: (page === "calicatas" || page === "earth" || page === "rendiciones") && dockActions.length > 0
                                        ? "subapp" : "home"
     // Distribución intencional del preset (contrato UX 4.0): los roles de
     // navegación tienen posición fija; no dependen de la prioridad.
@@ -1363,7 +1457,7 @@ Item {
     readonly property bool dockHasNavigation: dockRoles.previous !== null || dockRoles.right !== null
     readonly property var dockSecondary: dockHasNavigation ? dockRoles.tools.slice(1)
                                        : (dockRoles.tools.length > 4 ? dockRoles.tools.slice(3) : [])
-    readonly property var dockMoreNode: ({ id: "__more", label: "Más herramientas", enabled: dockSecondary.length > 0,
+    readonly property var dockMoreNode: ({ id: "__more", label: dockOwner === "rendiciones" ? "Herramientas" : "Más herramientas", enabled: dockSecondary.length > 0,
                                            visible: true, command: "", children: dockSecondary })
     function dockSlotFor(a) {
         return { key: String(a.id), glyph: dockGlyph(a), name: String(a.label || ""),
@@ -1444,7 +1538,7 @@ Item {
         // Una rama con comando propio (p. ej. Ubicación -> mapa) lo conserva
         // como primera entrada: el mismo id publicado, no una acción nueva.
         var own = String(dockMenu.command || "")
-        if (dockMenu.id !== "__more" && own.length > 0
+        if (dockMenu.id !== "__more" && own.length > 0 && dockMenu.tapCommand !== true
                 && !kids.some(function(c) { return String(c.command || "") === own }))
             kids = [Object.assign({}, dockMenu, { children: [] })].concat(kids)
         return kids
@@ -1492,7 +1586,21 @@ Item {
         "action.menu": 0xE37D, "action.edit": 0xE1D0, "action.check": 0xE06C,
         "action.export": 0xE32A, "action.camera": 0xE064, "lab.flask": 0xE0D5,
         "module.stratigraphy": 0xE2A3, "system.forward": 0xE06F, "system.back": 0xE06E,
-        "status.sync": 0xE145, "documents.image": 0xE0F6, "calgen.history": 0xE1F5, "calgen.close": 0xE1B2, "calgen.attach": 0xE12D, "archive.item": 0xE041, "action.save": 0xE14D, "action.more": 0xE0B6
+        "status.sync": 0xE145, "documents.image": 0xE0F6, "calgen.history": 0xE1F5, "calgen.close": 0xE1B2, "calgen.attach": 0xE12D, "archive.item": 0xE041, "action.save": 0xE14D, "action.more": 0xE0B6,
+        // Rendiciones: barras ascendentes, más, carpeta.
+        "renditions.balance": 0xE06A, "renditions.create": 0xE13D, "renditions.folder": 0xE0D7,
+        // Herramientas de Nuevo gasto y diagnóstico (glifos Lucide de la misma fuente).
+        // (iconografía de los previews aprobados: square-check, list, refresh-cw...)
+        "renditions.today": 0xE063, "renditions.period": 0xE16A, "renditions.reuse": 0xE1F5,
+        "renditions.requirements": 0xE16A, "renditions.noReceipt": 0xE0C6, "renditions.help": 0xE082,
+        "renditions.calculator": 0xE1BC, "renditions.validate": 0xE16A, "renditions.breakdown": 0xE106,
+        "renditions.attachments": 0xE0F6, "renditions.replace": 0xE145, "renditions.retry": 0xE19E,
+        "renditions.status": 0xE193, "renditions.trash": 0xE18E, "renditions.ai": 0xE412,
+        "renditions.exit": 0xE1B2,
+        // Navegación de Nuevo gasto: arrow-left, arrow-right, home, log-out, circle-x, list, refresh-cw.
+        "renditions.arrowBack": 0xE048, "renditions.forward": 0xE049, "renditions.home": 0xE0F5,
+        "renditions.logout": 0xE10E, "renditions.cancel": 0xE084, "renditions.list": 0xE106,
+        "renditions.recover": 0xE145
     })
     function dockGlyph(action) {
         var id = String(action.id || "")
@@ -1581,7 +1689,9 @@ Item {
             return
         }
         dockPath = []
-        if (dockChildren(a).length > 0) {
+        // tapCommand (opt-in de la subapp): el toque ejecuta la acción principal y
+        // sus subfunciones quedan en el Deep Press (380 ms). Sin la marca: igual que antes.
+        if (dockChildren(a).length > 0 && !(a.tapCommand === true && String(a.command || "").length > 0)) {
             if (pressGeneration === dockGeneration)
                 dockOpenMenu(slot.key, anchorItem, false)
         } else if (a.command && String(a.command).length > 0) {
@@ -1658,81 +1768,102 @@ Item {
         NumberAnimation { target: home; property: "dockSwapFade"; to: 1.0; duration: 200; easing.type: Easing.OutCubic }
     }
 
-    // Material del dock sobre una subapp: la MISMA GlassSurface, con el
-    // contenido real de detrás (captura a 1/4 + desenfoque) como fondo, como
-    // hacía GlobalContextDock con backdropItem. En gama baja (deviceTier LOW /
-    // ULTRA_LOW) no se captura: cristal de la foto con tinte azul noche denso.
+    // ======================= Liquid Glass del Dock Contextual (motor ÚNICO)
+    // El Dock global es el único dueño de su material. Las subapps sólo
+    // publican acciones y, de forma pasiva, su contenido visual; ninguna
+    // decide color, transparencia, óptica, respaldo ni calidad.
+    //  1. FUENTE (una por pantalla, elegida aquí):
+    //       Home y páginas del Home -> contenido real del Home (homeContent)
+    //       Calicatas               -> editor (calicatasEditor)
+    //       InGe Earth              -> vista del globo (earthNativeLoader)
+    //       Rendiciones             -> subapp completa (renditionsLoader)
+    //     UNA ShaderEffectSource (dockBackdropCapture) captura sólo la franja
+    //     inferior detrás de la cápsula, el botón InGe IA y el Quick Bubble.
+    //     El Dock vive fuera de esas fuentes: sin captura recursiva.
+    //  2. MATERIAL: mismo shader (glass.frag) y mismo preset en las tres
+    //     superficies (dockGlass* abajo); el color sólo varía con el fondo real.
+    //  3. RENDIMIENTO (GraphicsCore.deviceTier, automático): la óptica es la
+    //     misma en todas las gamas; sólo baja la resolución de la captura
+    //     (1/3 alta y media, 1/5 baja, 1/7 ultra baja). El esmerilado lo hace
+    //     el shader (5 muestras): sin pasadas de blur ni capturas por botón.
+    //     La captura se detiene con el Dock oculto o la app en segundo plano.
+    //  4. RESPALDO ÚNICO (DockGlassFallback): sólo mientras la fuente de una
+    //     subapp aún no está lista; cristal neutro claro, igual en todas.
     readonly property bool dockLowCostGlass: GraphicsCore.deviceTier === "LOW"
                                              || GraphicsCore.deviceTier === "ULTRA_LOW"
+    // Calicatas (subAppProgress) conserva su transición; ya no gobierna el material.
     readonly property bool subAppGlassActive: subAppProgress > 0.001
-                                              && calicatasEditor.status === Loader.Ready
-                                              && !dockLowCostGlass
-    // InGe Earth: detrás del Dock está el globo, no la foto del Home. El Dock, el
-    // botón IA y el Quick Bubble muestrean la captura desenfocada del viewport que
-    // publica RetroplasmaEarthView (dockGlassHost), con vidrio neutro y la óptica
-    // opcional de GlassSurface (lente de borde + especular). Fuera de Earth no cambia nada.
-    readonly property Item earthGlassHost: page === "earth" && earthNativeLoader.item
-                                           ? earthNativeLoader.item.dockGlassHost : null
-    readonly property bool earthGlassActive: earthGlassHost !== null && earthGlassHost.glassTexture !== null
-    // Gama baja sobre Earth: sin captura; vidrio neutro translúcido (nunca la foto del Home).
-    readonly property bool earthGlassFallback: page === "earth" && !earthGlassActive
-    readonly property color earthGlassTint: Qt.rgba(10 / 255, 14 / 255, 20 / 255, 0.20)
-    readonly property real earthGlassRefraction: earthGlassActive ? 6 * u : 0
-    readonly property real earthGlassSpecular: earthGlassActive ? 0.55 : 0
-    readonly property var dockGlassUi: earthGlassActive ? earthGlassHost : subAppGlassActive ? subAppGlass : home
-    readonly property color dockGlassTint: earthGlassActive ? earthGlassTint
-                                         : subAppGlassActive ? Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.56)
-                                         : subAppProgress > 0.001 ? Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.84)
-                                         : Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.38)
+    // Home y sus páginas: el contenido REAL del Home (foto con su degradado de
+    // legibilidad, tarjetas y saludo), no sólo la foto desenfocada. Si
+    // homeContent está oculto (desenfoque del panel Agregar), se usa la foto.
+    readonly property Item dockBackdropSource: page === "calicatas" && calicatasEditor.status === Loader.Ready ? calicatasEditor
+                                             : page === "earth" && earthNativeLoader.status === Loader.Ready ? earthNativeLoader
+                                             : page === "rendiciones" && renditionsLoader.status === Loader.Ready ? renditionsLoader
+                                             : page !== "calicatas" && page !== "earth" && page !== "rendiciones" && homeContent.visible
+                                               ? homeContent
+                                             : null
+    readonly property bool dockBackdropReady: dockBackdropSource !== null
+    readonly property bool dockGlassFallback: (page === "calicatas" || page === "earth" || page === "rendiciones")
+                                              && !dockBackdropReady
+    readonly property color earthGlassTint: Qt.rgba(10 / 255, 14 / 255, 20 / 255, 0.20)   // controles laterales de Earth
+    // Preset óptico ÚNICO de la cápsula, el botón InGe IA y el Quick Bubble.
+    // Cristal BLANCO transparente: tinte blanco de opacidad muy baja (la
+    // transparencia la da el muestreo del fondo real), sin velo oscuro.
+    readonly property color dockGlassTint: Qt.rgba(1, 1, 1, 0.12)
+    readonly property real dockGlassRefraction: 6 * u        // lente en el borde
+    readonly property real dockGlassSpecular: 0.55           // filo y brillo superior
+    readonly property real dockGlassBevel: 14 * u            // zona curva del borde
+    readonly property real dockGlassContrast: 0              // sin «smoked»: era la película gris
+    readonly property color dockGlassEdge: Qt.rgba(1, 1, 1, 0.55)       // bisel luminoso blanco
+    readonly property real dockGlassShadowAlpha: 0.14                   // sombra exterior suave
+    // Legibilidad sin oscurecer el cristal: contorno muy fino de los glifos y
+    // textos blancos del Dock (se dibuja con el propio texto, sin pasadas GPU).
+    readonly property color dockGlyphOutline: Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.50)
+    readonly property color dockSeparatorColor: Qt.rgba(130 / 255, 140 / 255, 160 / 255, 0.55)
+    readonly property real dockGlassFrost: 2.5 * u           // esmerilado homogéneo
+    readonly property var dockGlassUi: dockBackdropReady ? dockBackdrop : home
     Item {
-        id: subAppGlass
-        anchors.fill: calicatasEditor
-        readonly property Item backdrop: subAppGlass
-        readonly property var glassTexture: home.subAppGlassActive ? subAppGlassTexture : null
-        readonly property int glassTick: home.glassTick
+        id: dockBackdrop
+        readonly property real band: Math.min(home.height, home.dockArea + 440 * home.u)
+        x: 0
+        y: home.height - band
+        width: home.width
+        height: band
+        readonly property Item backdrop: dockBackdrop
+        readonly property var glassTexture: home.dockBackdropReady ? dockBackdropCapture : null
+        readonly property int glassTick: home.glassTick + Math.round(y + height)
         ShaderEffectSource {
-            id: subAppCapture
-            width: parent.width
-            height: parent.height
-            sourceItem: home.subAppGlassActive ? calicatasEditor : null
-            live: true
+            id: dockBackdropCapture
+            width: dockBackdrop.width
+            height: dockBackdrop.height
+            sourceItem: home.dockBackdropSource
+            // Las fuentes ocupan toda la pantalla desde (0,0): la franja coincide
+            // con la posición real de la cápsula, el botón IA y el Quick Bubble.
+            sourceRect: Qt.rect(0, dockBackdrop.y, dockBackdrop.width, dockBackdrop.height)
+            live: home.dockBackdropReady && home.visible && (dock.visible || iaButton.visible)
+                  && Qt.application.state === Qt.ApplicationActive
             hideSource: false
             visible: false
-            textureSize: Qt.size(Math.max(1, Math.round(width / 4)), Math.max(1, Math.round(height / 4)))
-        }
-        MultiEffect {
-            id: subAppBlur
-            anchors.fill: parent
-            source: subAppCapture
-            blurEnabled: true
-            blurMax: 32
-            blur: 1.0
-            autoPaddingEnabled: false
-        }
-        ShaderEffectSource {
-            id: subAppGlassTexture
-            sourceItem: subAppBlur
-            hideSource: true
-            visible: false
             smooth: true
-            textureSize: Qt.size(Math.max(1, Math.round(subAppBlur.width / 4)),
-                                 Math.max(1, Math.round(subAppBlur.height / 4)))
+            readonly property real divisor: GraphicsCore.deviceTier === "ULTRA_LOW" ? 7
+                                          : home.dockLowCostGlass ? 5 : 3
+            textureSize: Qt.size(Math.max(1, Math.round(width / divisor)), Math.max(1, Math.round(height / divisor)))
         }
     }
 
-    // Vidrio de respaldo para Earth sin captura: neutro, translúcido, con brillo
-    // superior y borde de cristal. Solo existe en Earth; Home y subapps no cambian.
-    component EarthGlassFallback: Rectangle {
+    // Respaldo ÚNICO del material (todas las pantallas): sólo mientras la
+    // fuente de una subapp aún no está lista. Cristal neutro claro, nunca un
+    // color propio de la subapp.
+    component DockGlassFallback: Rectangle {
         anchors.fill: parent
         radius: parent ? parent.radius : 0
-        visible: home.earthGlassFallback
-        color: Qt.rgba(14 / 255, 18 / 255, 24 / 255, 0.42)
+        visible: home.dockGlassFallback
         border.width: 1
-        border.color: Qt.rgba(1, 1, 1, 0.30)
+        border.color: Qt.rgba(1, 1, 1, 0.45)
         gradient: Gradient {
-            GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.16) }
-            GradientStop { position: 0.5; color: Qt.rgba(14 / 255, 18 / 255, 24 / 255, 0.40) }
-            GradientStop { position: 1.0; color: Qt.rgba(14 / 255, 18 / 255, 24 / 255, 0.50) }
+            GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.34) }
+            GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0.18) }
+            GradientStop { position: 1.0; color: Qt.rgba(1, 1, 1, 0.24) }
         }
     }
 
@@ -1779,12 +1910,16 @@ Item {
             radius: dockMenuBox.radius
             margin: 10 * home.u
             tint: home.dockGlassTint
-            refraction: home.earthGlassRefraction
-            specular: home.earthGlassSpecular
-            bevel: 14 * home.u
-            opacity: home.earthGlassFallback ? 0 : 1
+            refraction: home.dockGlassRefraction
+            specular: home.dockGlassSpecular
+            bevel: home.dockGlassBevel
+            contrast: home.dockGlassContrast
+            frost: home.dockGlassFrost
+            edge: home.dockGlassEdge
+            shadowAlpha: home.dockGlassShadowAlpha
+            opacity: home.dockGlassFallback ? 0 : 1
         }
-        EarthGlassFallback {}
+        DockGlassFallback {}
         MouseArea { anchors.fill: parent }
         Flickable {
             anchors.fill: parent
@@ -1807,6 +1942,7 @@ Item {
                         text: (home.dockPath.length > 1 ? "‹  " : "") + (home.dockMenu ? String(home.dockMenu.label || "") : "")
                         elide: Text.ElideRight
                         color: Qt.rgba(1, 1, 1, 0.78)
+                        style: Text.Outline; styleColor: home.dockGlyphOutline
                         font.family: home.fontFamily
                         font.weight: Font.DemiBold
                         font.pixelSize: 13 * home.u
@@ -1846,6 +1982,7 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             text: String.fromCharCode(home.dockGlyph(modelData))
                             color: "white"
+                            style: Text.Outline; styleColor: home.dockGlyphOutline
                             font.family: home.iconFamily
                             font.pixelSize: 20 * home.u
                         }
@@ -1856,6 +1993,7 @@ Item {
                             text: (modelData.selected === true ? "● " : "") + String(modelData.label || "")
                             elide: Text.ElideRight
                             color: "white"
+                            style: Text.Outline; styleColor: home.dockGlyphOutline
                             font.family: home.fontFamily
                             font.pixelSize: 16 * home.u
                         }
@@ -1866,6 +2004,7 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             text: String.fromCharCode(0xE06F)
                             color: Qt.rgba(1, 1, 1, 0.8)
+                            style: Text.Outline; styleColor: home.dockGlyphOutline
                             font.family: home.iconFamily
                             font.pixelSize: 18 * home.u
                         }
@@ -2323,12 +2462,16 @@ Item {
             radius: dock.height / 2
             margin: 10 * home.u
             tint: home.dockGlassTint
-            refraction: home.earthGlassRefraction
-            specular: home.earthGlassSpecular
-            bevel: 14 * home.u
-            opacity: home.earthGlassFallback ? 0 : 1
+            refraction: home.dockGlassRefraction
+            specular: home.dockGlassSpecular
+            bevel: home.dockGlassBevel
+            contrast: home.dockGlassContrast
+            frost: home.dockGlassFrost
+            edge: home.dockGlassEdge
+            shadowAlpha: home.dockGlassShadowAlpha
+            opacity: home.dockGlassFallback ? 0 : 1
         }
-        EarthGlassFallback {}
+        DockGlassFallback {}
         MouseArea { anchors.fill: parent; enabled: home.dockMode !== "home" }   // no atraviesa al editor
         Row {
             anchors.centerIn: parent
@@ -2342,7 +2485,7 @@ Item {
                         visible: index > 0
                         width: 1; height: 26 * home.u
                         anchors.verticalCenter: parent.verticalCenter
-                        color: Qt.rgba(1, 1, 1, 0.30)
+                        color: home.dockSeparatorColor
                     }
                     Item {
                         id: dockCell
@@ -2386,6 +2529,7 @@ Item {
                             font.family: home.iconFamily
                             font.pixelSize: home.dockIconSize
                             color: Qt.rgba(1, 1, 1, dockCell.active ? 1.0 : 0.82)
+                            style: Text.Outline; styleColor: home.dockGlyphOutline
                         }
                         Row {   // "Más herramientas"
                             visible: modelData.more === true
@@ -2396,6 +2540,7 @@ Item {
                                 Rectangle {
                                     width: 5 * home.u; height: width; radius: width / 2
                                     color: Qt.rgba(1, 1, 1, dockCell.active ? 1.0 : 0.82)
+                                    border.width: 1; border.color: home.dockGlyphOutline
                                 }
                             }
                         }
@@ -2475,10 +2620,12 @@ Item {
         color: "transparent"
         GlassSurface {
             ui: home.dockGlassUi; radius: iaButton.width / 2; margin: 10 * home.u; tint: home.dockGlassTint
-            refraction: home.earthGlassRefraction; specular: home.earthGlassSpecular; bevel: 14 * home.u
-            opacity: home.earthGlassFallback ? 0 : 1
+            refraction: home.dockGlassRefraction; specular: home.dockGlassSpecular; bevel: home.dockGlassBevel
+            contrast: home.dockGlassContrast; frost: home.dockGlassFrost
+            edge: home.dockGlassEdge; shadowAlpha: home.dockGlassShadowAlpha
+            opacity: home.dockGlassFallback ? 0 : 1
         }
-        EarthGlassFallback {}
+        DockGlassFallback {}
         Column {
             anchors.centerIn: parent
             Text {
@@ -2487,6 +2634,7 @@ Item {
                 font.family: home.iconFamily
                 font.pixelSize: 28 * home.u
                 color: "white"
+                style: Text.Outline; styleColor: home.dockGlyphOutline
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
@@ -2494,6 +2642,7 @@ Item {
                 font.family: home.fontFamily
                 font.pixelSize: 11 * home.u
                 color: "white"
+                style: Text.Outline; styleColor: home.dockGlyphOutline
             }
         }
         MouseArea {
@@ -2501,10 +2650,9 @@ Item {
             onClicked: {
                 if (home.consumeEditTap())
                     return
-                var on = typeof InGeAssistant !== "undefined" && InGeAssistant && InGeAssistant.available
-                home.iaStatus = on ? "InGe IA está activa; su interfaz de conversación está pendiente de integración."
-                                   : "InGe IA no está disponible en esta versión."
-                iaStatusTimer.restart()
+                // InGe IA GLOBAL: la misma hoja y la misma conversación en todas las
+                // pantallas; el contexto y las herramientas los aporta el módulo activo.
+                assistantSheet.show()
             }
         }
         Accessible.role: Accessible.Button
@@ -2950,6 +3098,156 @@ Item {
                 y: pageTitle.y + pageTitle.height + 20 * frame.ui.u
                 spacing: 12 * frame.ui.u
             }
+        }
+    }
+
+    // ================================================= InGe IA (global)
+    // Un solo controlador y una sola hoja, como el Dock contextual: el módulo
+    // visible publica identidad, instrucciones, datos mínimos autorizados y
+    // herramientas nativas. La hoja se superpone sin destruir la subapp.
+    readonly property var assistantProfiles: ({
+        home: { name: "InGe+ · Inicio", question: "¿En qué te ayudo hoy?",
+                intro: "Pregúntame sobre ingeniería, topografía, geotecnia o cómo usar InGe+.",
+                example: "¿Qué diferencia hay entre una calicata y una perforación?",
+                instructions: "Contexto: pantalla de inicio. Conversa libremente y orienta sobre InGe+: Calicatas (registro geotécnico de "
+                              + "calicatas y estratos), Rendiciones (gastos de campo), InGe Earth (globo y coordenadas) e InGe Drive (documentos)." },
+        calicatas: { name: "Calicatas", question: "¿Qué revisamos de tus calicatas?",
+                     intro: "Puedo explicar estratigrafía, clasificación de suelos y ensayos de la calicata abierta.",
+                     example: "Explícame cómo interpretar los estratos de esta calicata.",
+                     instructions: "Contexto: módulo Calicatas. Actúa como asistente geotécnico (estratigrafía, SUCS/AASHTO, humedad, compacidad, "
+                                   + "ensayos). No inventes resultados de ensayos ni modifiques parámetros: sólo explica y sugiere." },
+        rendiciones: { name: "Rendiciones", question: "¿Qué gastos rellenamos hoy?",
+                       intro: "InGe IA puede ayudarte a registrar tus gastos de forma rápida y sencilla.",
+                       example: "Quiero registrar estos gastos: almuerzo S/ 18, taxi S/ 12 y útiles S/ 24." },
+        earth: { name: "InGe Earth", question: "¿Qué ubicamos hoy?",
+                 intro: "Puedo explicar coordenadas y distancias, y usar tu ubicación o las coordenadas que escribas.",
+                 example: "Distancia entre -12.0464, -77.0428 y -13.5320, -71.9675",
+                 instructions: "Contexto: InGe Earth (globo 3D). Responde sobre coordenadas, sistemas de referencia, distancias y terreno. "
+                               + "No inventes coordenadas ni mediciones: usa sólo las que dé el usuario o las del contexto." }
+    })
+    readonly property string assistantContextId: page === "calicatas" || page === "rendiciones" || page === "earth" ? page : "home"
+    readonly property var assistantProfile: assistantProfiles[assistantContextId]
+    // Datos mínimos autorizados de la calicata abierta (sin ids, rutas ni datos personales).
+    function safeScalars(map, limit) {
+        var out = []
+        var keys = Object.keys(map || {})
+        for (var i = 0; i < keys.length && out.length < limit; ++i) {
+            var k = keys[i], v = map[k]
+            if (/(^id$|_id$|Id$|uuid|user|email|token|owner|path|url|phone|created_by|updated_by)/i.test(k)) continue
+            if (v === null || v === undefined || typeof v === "object") continue
+            var t = String(v).trim()
+            if (t.length && t.length <= 80) out.push(k + ": " + t)
+        }
+        return out.join(", ")
+    }
+    readonly property var activeCalicataDoc: page === "calicatas" && calicatasEditor.item && calicatasEditor.item.currentDoc
+                                             ? calicatasEditor.item.currentDoc : null
+    function calicataSummary(doc) {
+        if (!doc) return ""
+        var cortes = doc.cortes || []
+        var lines = []
+        for (var i = 0; i < cortes.length && i < 12; ++i)
+            lines.push("Estrato " + (i + 1) + ": " + safeScalars(cortes[i], 10))
+        return ("Calicata: " + String(doc.displayName || "") + ". Cabecera: " + safeScalars(doc.header, 10)
+                + ". " + lines.join(" | ") + (doc.observaciones ? ". Observaciones: " + String(doc.observaciones).slice(0, 400) : "")).slice(0, 3500)
+    }
+    readonly property var earthItem: page === "earth" && earthNativeLoader.item ? earthNativeLoader.item : null
+    readonly property var assistantModule: {
+        var p = assistantProfile
+        if (assistantContextId === "rendiciones" && renditionsLoader.item && renditionsLoader.item.assistantModule !== undefined)
+            return renditionsLoader.item.assistantModule
+        if (assistantContextId === "calicatas")
+            return { id: "calicatas", name: p.name, instructions: p.instructions,
+                     data: activeCalicataDoc ? "Calicata abierta: " + String(activeCalicataDoc.displayName || "") : "Sin calicata abierta.",
+                     tools: [{ id: "calicatas.explain", label: "Interpretar la calicata abierta", glyph: 0xE0CC, enabled: activeCalicataDoc !== null }] }
+        if (assistantContextId === "earth") {
+            var t = earthItem ? earthItem.selectedTarget : null
+            var hasTarget = !!t && t.latitude !== undefined
+            return { id: "earth", name: p.name, instructions: p.instructions,
+                     data: hasTarget ? "Punto seleccionado: " + String(t.label || "") + " (" + Number(t.latitude).toFixed(6) + ", " + Number(t.longitude).toFixed(6) + ")" : "",
+                     tools: [{ id: "earth.gps", label: "Mi ubicación", glyph: 0xE111, offline: true, enabled: earthItem !== null },
+                             { id: "earth.goTo", label: "Ir a las coordenadas del mensaje", glyph: 0xE0E8, offline: true, enabled: earthItem !== null },
+                             { id: "earth.distance", label: "Distancia entre puntos", glyph: 0xE14B, offline: true }] }
+        }
+        return { id: "home", name: p.name, instructions: p.instructions, data: "", tools: [] }
+    }
+    // Coordenadas escritas por el USUARIO en su último mensaje (nunca inventadas por el modelo).
+    function lastUserCoordinates() {
+        var list = assistantController.messages
+        for (var i = list.length - 1; i >= 0; --i) {
+            if (list[i].role !== "user") continue
+            var re = /(-?\d{1,2}(?:[.]\d+)?)\s*[,;]\s*(-?\d{1,3}(?:[.]\d+)?)/g
+            var out = [], m
+            while ((m = re.exec(String(list[i].text))) !== null) {
+                var lat = Number(m[1]), lon = Number(m[2])
+                if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) out.push({ latitude: lat, longitude: lon })
+            }
+            return out
+        }
+        return []
+    }
+    function haversineKm(a, b) {
+        var r = 6371.0088, rad = Math.PI / 180
+        var dLat = (b.latitude - a.latitude) * rad, dLon = (b.longitude - a.longitude) * rad
+        var h = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+              + Math.cos(a.latitude * rad) * Math.cos(b.latitude * rad) * Math.sin(dLon / 2) * Math.sin(dLon / 2)
+        return 2 * r * Math.asin(Math.min(1, Math.sqrt(h)))
+    }
+    // Registro de herramientas nativas: sólo comandos existentes y validados.
+    function assistantRunTool(toolId) {
+        var a = assistantController
+        if (toolId.indexOf("renditions.") === 0) {
+            if (renditionsLoader.item && renditionsLoader.item.assistantRunTool !== undefined) renditionsLoader.item.assistantRunTool(toolId, a)
+            return
+        }
+        if (toolId === "calicatas.explain") {
+            if (!activeCalicataDoc) return
+            a.note("Se enviaron a InGe IA los datos de la calicata abierta (cabecera, estratos y observaciones), sin identificadores personales.")
+            a.ask("Interpreta técnicamente los estratos de esta calicata (posibles tipos de suelo, consistencia, nivel freático y "
+                  + "observaciones relevantes). Si un dato falta, dilo; no inventes ensayos.\n" + calicataSummary(activeCalicataDoc),
+                  function(text) { a.push(a.key, { role: "assistant", text: text, kind: "chat" }) })
+            return
+        }
+        if (toolId === "earth.gps") { if (earthItem) { earthItem.requestGps(); a.note("Buscando tu posición GPS en InGe Earth…") } return }
+        var pts = lastUserCoordinates()
+        if (toolId === "earth.goTo") {
+            if (!earthItem) return
+            if (!pts.length) { a.note("Escribe primero las coordenadas en tu mensaje (latitud, longitud en grados decimales)."); return }
+            earthItem.requestedTarget = { latitude: pts[0].latitude, longitude: pts[0].longitude, altitude: 0, label: "coordenadas del chat" }
+            a.note("InGe Earth centrado en " + pts[0].latitude.toFixed(6) + ", " + pts[0].longitude.toFixed(6) + ".")
+            return
+        }
+        if (toolId === "earth.distance") {
+            var t = earthItem ? earthItem.selectedTarget : null
+            if (pts.length === 1 && t && t.latitude !== undefined) pts = [{ latitude: Number(t.latitude), longitude: Number(t.longitude) }, pts[0]]
+            if (pts.length < 2) { a.note("Necesito dos puntos: escríbelos en tu mensaje (lat, lon y lat, lon) o selecciona uno en InGe Earth y escribe el otro."); return }
+            a.note("Distancia geodésica (haversine, radio medio 6371 km) entre " + pts[0].latitude.toFixed(5) + ", " + pts[0].longitude.toFixed(5)
+                   + " y " + pts[1].latitude.toFixed(5) + ", " + pts[1].longitude.toFixed(5) + ": " + haversineKm(pts[0], pts[1]).toFixed(3) + " km.")
+        }
+    }
+    Assistant.InGeAssistantController {
+        id: assistantController
+        userId: home.userId
+        module: home.assistantModule
+        toolRunner: function(toolId) { home.assistantRunTool(toolId) }
+        proposalValidator: function(p) {
+            return renditionsLoader.item && renditionsLoader.item.assistantValidate !== undefined ? renditionsLoader.item.assistantValidate(p) : p
+        }
+    }
+    Assistant.InGeAssistantSheet {
+        id: assistantSheet
+        z: 80                                          // sobre subapps, Dock y editores
+        ui: home
+        flow: CoreFlowModule.InGeCoreFlow
+        controller: assistantController
+        userName: AccountText.hasVisibleText(home.firstName) ? home.firstName : ""
+        question: home.assistantProfile.question
+        intro: home.assistantProfile.intro
+        example: home.assistantProfile.example
+        onProposalAction: function(index, proposal) {
+            if (renditionsLoader.item && renditionsLoader.item.assistantOpen !== undefined
+                    && renditionsLoader.item.assistantOpen(index, proposal, assistantController))
+                assistantSheet.close()
         }
     }
 }

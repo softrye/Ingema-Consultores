@@ -31,6 +31,8 @@ constexpr auto Synced = "SYNCED";
 constexpr auto Conflict = "CONFLICT";
 constexpr auto NeedsReconciliation = "NEEDS_RECONCILIATION";
 constexpr auto Error = "ERROR";
+// Igual a RenditionConnectivity::transportMarker(): operación en espera de servidor.
+constexpr auto TransportRetry = "TRANSPORT_RETRY";
 
 QString stateOf(const QVariantMap &value)
 {
@@ -125,8 +127,11 @@ bool RenditionLocalStore::removeDraft(const QString &localId)
     }
     const auto oldRows = m_renditions, oldOutbox = m_outbox;
     const auto oldDrafts = m_editorDrafts;
+    const auto oldWorking = m_workingRows;
     for (int i = m_outbox.size() - 1; i >= 0; --i)
         if (m_outbox[i].toMap().value(QStringLiteral("aggregateLocalId")).toString() == localId) m_outbox.removeAt(i);
+    for (int i = m_workingRows.size() - 1; i >= 0; --i)   // borradores de un borrador eliminado
+        if (m_workingRows[i].toMap().value(QStringLiteral("renditionLocalId")).toString() == localId) m_workingRows.removeAt(i);
     for (const auto &key : m_editorDrafts.keys())
         if (key == QStringLiteral("header:") + localId || key.startsWith(QStringLiteral("expense:") + localId + ':')
             || m_editorDrafts.value(key).toMap().value(QStringLiteral("renditionLocalId")).toString() == localId) m_editorDrafts.remove(key);
@@ -139,7 +144,7 @@ bool RenditionLocalStore::removeDraft(const QString &localId)
             {{QStringLiteral("expectedRowVersion"), draft.value(QStringLiteral("rowVersion"))}}, QString::fromLatin1(PendingUpdate));
     }
     if (persist()) return true;
-    m_renditions = oldRows; m_outbox = oldOutbox; m_editorDrafts = oldDrafts;
+    m_renditions = oldRows; m_outbox = oldOutbox; m_editorDrafts = oldDrafts; m_workingRows = oldWorking;
     return false;
 }
 
@@ -171,6 +176,7 @@ void RenditionLocalStore::selectAccount(const QString &accountScope)
     m_renditions.clear();
     m_outbox.clear();
     m_editorDrafts.clear();
+    m_workingRows.clear();
     m_nextSequence = 1;
     emit accountIdChanged();
     reload();
@@ -192,6 +198,7 @@ void RenditionLocalStore::reload()
     m_renditions.clear();
     m_outbox.clear();
     m_editorDrafts.clear();
+    m_workingRows.clear();
     m_nextSequence = 1;
     setLastError({});
     const QString path = storagePath();
@@ -209,6 +216,7 @@ void RenditionLocalStore::reload()
                 m_renditions = root.value(QStringLiteral("renditions")).toList();
                 m_outbox = root.value(QStringLiteral("outbox")).toList();
                 m_editorDrafts = root.value(QStringLiteral("editorDrafts")).toMap();
+                m_workingRows = root.value(QStringLiteral("workingRows")).toList();   // aditivo: v2 sin borradores = []
                 m_nextSequence = qMax<qint64>(1,
                     root.value(QStringLiteral("nextSequence"), 1).toLongLong());
                 if (m_outbox.isEmpty() && !m_renditions.isEmpty())
@@ -225,13 +233,17 @@ void RenditionLocalStore::reload()
         const auto operation = entry.value(QStringLiteral("operation")).toString();
         const auto aggregate = entry.value(QStringLiteral("aggregateLocalId")).toString();
         const auto child = entry.value(QStringLiteral("childLocalId")).toString();
-        const QString message = QStringLiteral("La operación fue interrumpida; sincroniza para confirmar su resultado.");
+        // Se reintenta (idempotente) o se reconcilia con el próximo pull de forma
+        // automática: es una espera de servidor, no un aviso para el usuario.
+        const QString message = QString::fromLatin1(TransportRetry);
         if (operation.startsWith(QLatin1String("expense_")))
             markExpenseState(aggregate, child, operation == QLatin1String("expense_create") ? QString::fromLatin1(Error) : QString::fromLatin1(NeedsReconciliation), message);
         else if (operation == QLatin1String("present"))
             markPresentationState(aggregate, QString::fromLatin1(NeedsReconciliation), message);
         else if (operation == "funding_set" || operation == "exchange_set")
             markFinancialState(aggregate, operation, entry.value("requestId").toString(), QString::fromLatin1(Error), message);
+        else if (operation.startsWith(QLatin1String("working_")))
+            markWorkingFailed(operation, child, QString::fromLatin1(Error), message);
         else if (operation.startsWith(QLatin1String("rendition_")))
             markRenditionState(aggregate, operation == QLatin1String("rendition_create") ? QString::fromLatin1(Error) : QString::fromLatin1(NeedsReconciliation), message);
     }
@@ -246,7 +258,8 @@ QString RenditionLocalStore::createDraft(const QString &periodStart,
                                          const QString &primaryProjectId,
                                          const QString &documentParentNodeId,
                                          const QString &spaceId,
-                                         bool stageForSync)
+                                         bool stageForSync,
+                                         const QString &displayName)
 {
     if (m_accountScope.isEmpty()) {
         setLastError(QStringLiteral("Selecciona una cuenta antes de guardar."));
@@ -254,6 +267,11 @@ QString RenditionLocalStore::createDraft(const QString &periodStart,
     }
     const auto invalid = RenditionValidation::header(periodStart, periodEnd, projectIds, primaryProjectId, documentParentNodeId, spaceId);
     if (!invalid.isEmpty()) { setLastError(invalid); return {}; }
+    const QString name = displayName.trimmed().isEmpty() ? QStringLiteral("Rendición") : displayName.trimmed();
+    if (name.size() > 160) {
+        setLastError(QStringLiteral("El nombre de la rendición no puede superar 160 caracteres."));
+        return {};
+    }
     const QString localId = newUuid();
     const QString requestId = newUuid();
     const QString timestamp = nowUtc();
@@ -262,6 +280,7 @@ QString RenditionLocalStore::createDraft(const QString &periodStart,
         {QStringLiteral("remoteId"), QString()},
         {QStringLiteral("requestId"), requestId},
         {QStringLiteral("visibleCode"), QString()},
+        {QStringLiteral("displayName"), name},
         {QStringLiteral("rowVersion"), 0},
         {QStringLiteral("periodStart"), periodStart},
         {QStringLiteral("periodEnd"), periodEnd},
@@ -961,6 +980,7 @@ void RenditionLocalStore::mergeRemoteRenditions(const QVariantList &remoteRows)
                 {QStringLiteral("remoteId"), id},
                 {QStringLiteral("requestId"), QString()},
                 {QStringLiteral("visibleCode"), valueFor(remote, QStringLiteral("visibleCode"), QStringLiteral("visible_code"))},
+                {QStringLiteral("displayName"), valueFor(remote, QStringLiteral("displayName"), QStringLiteral("display_name"))},
                 {QStringLiteral("rowVersion"), valueFor(remote, QStringLiteral("rowVersion"), QStringLiteral("row_version"))},
                 {QStringLiteral("periodStart"), valueFor(remote, QStringLiteral("periodStart"), QStringLiteral("period_start"))},
                 {QStringLiteral("periodEnd"), valueFor(remote, QStringLiteral("periodEnd"), QStringLiteral("period_end"))},
@@ -1021,6 +1041,8 @@ void RenditionLocalStore::mergeRemoteRenditions(const QVariantList &remoteRows)
                             QString::fromLatin1(PendingUpdate));
         }
         draft.insert(QStringLiteral("visibleCode"), valueFor(remote, QStringLiteral("visibleCode"), QStringLiteral("visible_code")));
+        if (remote.contains(QStringLiteral("displayName")) || remote.contains(QStringLiteral("display_name")))
+            draft.insert(QStringLiteral("displayName"), valueFor(remote, QStringLiteral("displayName"), QStringLiteral("display_name")));
         draft.insert(QStringLiteral("status"), remoteStatus);
         draft.insert(QStringLiteral("baseCurrency"), valueFor(remote, QStringLiteral("baseCurrency"), QStringLiteral("base_currency")));
         draft.insert(QStringLiteral("reference"), referenceFor(remote));
@@ -1080,6 +1102,8 @@ void RenditionLocalStore::mergeRemoteRenditions(const QVariantList &remoteRows)
             draft.insert(QStringLiteral("projectIds"), valueFor(remote, QStringLiteral("projectIds"), QStringLiteral("project_ids")));
             draft.insert(QStringLiteral("primaryProjectId"), valueFor(remote, QStringLiteral("primaryProjectId"), QStringLiteral("primary_project_id")));
             draft.insert(QStringLiteral("primaryProjectName"), valueFor(remote, QStringLiteral("primaryProjectName"), QStringLiteral("primary_project_name")));
+            if (remote.contains(QStringLiteral("displayName")) || remote.contains(QStringLiteral("display_name")))
+                draft.insert(QStringLiteral("displayName"), valueFor(remote, QStringLiteral("displayName"), QStringLiteral("display_name")));
             draft.insert(QStringLiteral("updatedAt"), valueFor(remote, QStringLiteral("updatedAt"), QStringLiteral("updated_at")));
             draft.remove(QStringLiteral("serverSnapshot"));
             draft.remove(QStringLiteral("serverRowVersion"));
@@ -1334,14 +1358,23 @@ QVariantMap RenditionLocalStore::syncStatus(const QString &localId, bool active)
     int pending = 0;
     QString state = QString::fromLatin1(Synced);
     QString error;
-    auto inspect = [&](const QVariantMap &row, const QString &key) {
+    QString reconcileReason;
+    // Una operación que sólo espera conexión (marca TRANSPORT_RETRY) no es un error
+    // ni un conflicto: cuenta como pendiente y no publica texto (lo comunica el aura).
+    auto inspect = [&](const QVariantMap &row, const QString &key, const QString &errorKey) {
         const QString status = row.value(key).toString();
+        const QString rowError = row.value(errorKey).toString();
+        const bool waitingForServer = rowError == QLatin1String(TransportRetry);
         if (status == QLatin1String(Conflict)) state = QString::fromLatin1(Conflict);
-        else if (status == QLatin1String(NeedsReconciliation) && state != QLatin1String(Conflict)) state = QString::fromLatin1(NeedsReconciliation);
-        else if (status == QLatin1String(Error) && state == QLatin1String(Synced)) state = QString::fromLatin1(Error);
-        if (error.isEmpty()) error = row.value(QStringLiteral("syncError")).toString();
+        else if (status == QLatin1String(NeedsReconciliation) && state != QLatin1String(Conflict)) {
+            state = QString::fromLatin1(NeedsReconciliation);
+            reconcileReason = QStringLiteral("AMBIGUOUS");
+        }
+        else if (status == QLatin1String(Error) && state == QLatin1String(Synced) && !waitingForServer)
+            state = QString::fromLatin1(Error);
+        if (error.isEmpty() && !waitingForServer) error = rowError;
     };
-    inspect(draft, QStringLiteral("syncState"));
+    inspect(draft, QStringLiteral("syncState"), QStringLiteral("syncError"));
     QSet<QString> counted;
     for (const auto &value : m_outbox) {
         const auto entry = value.toMap();
@@ -1349,21 +1382,24 @@ QVariantMap RenditionLocalStore::syncStatus(const QString &localId, bool active)
             || entry.value(QStringLiteral("state")).toString() == QLatin1String(Synced)) continue;
         if (entry.value(QStringLiteral("operation")).toString() == QLatin1String("present")
             && entry.value(QStringLiteral("state")).toString() == QLatin1String(LocalOnly)) continue;
+        if (entry.value(QStringLiteral("state")).toString() == QLatin1String(LocalOnly)) continue;
         ++pending;
         counted.insert(entry.value(QStringLiteral("childLocalId")).toString());
-        inspect(entry, QStringLiteral("state"));
-        if (error.isEmpty()) error = entry.value(QStringLiteral("lastError")).toString();
+        // Un borrador Working en conflicto es por FILA: no bloquea la ficha completa
+        // (se publica aparte en workingConflictCount).
+        if (entry.value(QStringLiteral("operation")).toString().startsWith(QLatin1String("working_"))) continue;
+        inspect(entry, QStringLiteral("state"), QStringLiteral("lastSafeError"));   // clave de markOutboxState
     }
     for (const auto &value : draft.value(QStringLiteral("expenses")).toList()) {
         const auto expense = value.toMap();
         if (expense.value(QStringLiteral("archived")).toBool()) continue;
-        inspect(expense, QStringLiteral("syncState"));
+        inspect(expense, QStringLiteral("syncState"), QStringLiteral("syncError"));
         if (stateOf(expense) != QLatin1String(Synced)
             && !counted.contains(expense.value(QStringLiteral("localId")).toString())) ++pending;
         for (const auto &v : expense.value(QStringLiteral("attachments")).toList()) {
             const auto attachment = v.toMap();
             if (!attachment.value(QStringLiteral("archived_at")).toString().isEmpty()) continue;
-            inspect(attachment, QStringLiteral("syncState"));
+            inspect(attachment, QStringLiteral("syncState"), QStringLiteral("syncError"));
             if (attachment.value(QStringLiteral("phase")).toString() != QLatin1String("READY")
                 && !counted.contains(attachment.value(QStringLiteral("localId")).toString())) ++pending;
         }
@@ -1379,11 +1415,19 @@ QVariantMap RenditionLocalStore::syncStatus(const QString &localId, bool active)
                 || summary.value(QStringLiteral("total_expenses")).toInt() != draft.value(QStringLiteral("expenseCount")).toInt()
                 || qAbs(summary.value(QStringLiteral("total_declared_pen")).toDouble() - draft.value(QStringLiteral("totalPen")).toDouble()) > 0.005
                 || qAbs(summary.value(QStringLiteral("total_declared_usd")).toDouble() - draft.value(QStringLiteral("totalUsd")).toDouble()) > 0.005
-                || summary.value(QStringLiteral("rendition_row_version")).toLongLong() != draft.value(QStringLiteral("rowVersion")).toLongLong())
+                || summary.value(QStringLiteral("rendition_row_version")).toLongLong() != draft.value(QStringLiteral("rowVersion")).toLongLong()) {
+                // Sólo falta descargar el detalle en este equipo: no es un conflicto
+                // ni bloquea el trabajo local; se completa con el próximo pull.
                 state = QString::fromLatin1(NeedsReconciliation);
+                reconcileReason = QStringLiteral("DETAIL_NOT_LOADED");
+            }
         }
     }
-    return {{QStringLiteral("syncState"), state}, {QStringLiteral("pendingCount"), pending}, {QStringLiteral("syncError"), error}};
+    if (state != QLatin1String(NeedsReconciliation)) reconcileReason.clear();
+    return {{QStringLiteral("syncState"), state}, {QStringLiteral("pendingCount"), pending},
+            {QStringLiteral("syncError"), error}, {QStringLiteral("reconcileReason"), reconcileReason},
+            {QStringLiteral("workingCount"), activeWorkingCount(localId)},
+            {QStringLiteral("workingConflictCount"), workingConflictCount(localId)}};
 }
 
 bool RenditionLocalStore::adoptDocumentLocation(
@@ -1467,6 +1511,10 @@ QString RenditionLocalStore::ensurePresentationRequestId(const QString &localId)
 QString RenditionLocalStore::presentationBlocker(const QString &localId) const
 {
     const QVariantMap draft = rendition(localId);
+    // Igual que el servidor (rendition_working_snapshot_guard_v01): ninguna versión
+    // presentada puede omitir filas de gasto sin terminar.
+    if (const int working = activeWorkingCount(localId); working > 0)
+        return QStringLiteral("Hay %1 borrador(es) de gasto sin terminar. Regístralos o descártalos antes de presentar.").arg(working);
     if (syncStatus(localId).value(QStringLiteral("syncState")).toString() != QLatin1String(Synced))
         return QStringLiteral("Sincroniza los cambios pendientes antes de presentar.");
     if (draft.value(QStringLiteral("documentNodeId")).toString().isEmpty())
@@ -1671,6 +1719,11 @@ QVariantList RenditionLocalStore::pendingOperations() const
         // la confirmación humana, reutilizando su request_id persistido.
         if (operation == QLatin1String("present"))
             continue;
+        if (operation.startsWith(QLatin1String("working_"))) {           // borradores en nube
+            const QVariantMap working = workingOperation(item);
+            if (!working.isEmpty()) operations.append(working);
+            continue;
+        }
         const bool idempotent = operation == "funding_set" || operation == "exchange_set"
             || operation == QLatin1String("rendition_create")
             || operation == QLatin1String("rendition_delete")
@@ -1753,6 +1806,8 @@ bool RenditionLocalStore::markRenditionSynced(const QString &localId,
     draft.insert(QStringLiteral("remoteId"), id);
     if (remote.contains("can_edit_content")) draft.insert(QStringLiteral("canEditContent"), remote.value("can_edit_content"));
     draft.insert(QStringLiteral("visibleCode"), valueFor(remote, QStringLiteral("visibleCode"), QStringLiteral("visible_code")));
+    if (remote.contains(QStringLiteral("displayName")) || remote.contains(QStringLiteral("display_name")))
+        draft.insert(QStringLiteral("displayName"), valueFor(remote, QStringLiteral("displayName"), QStringLiteral("display_name")));
     draft.insert(QStringLiteral("status"), remote.value(QStringLiteral("status"), draft.value(QStringLiteral("status"))));
     draft.insert(QStringLiteral("rowVersion"), remoteRowVersion(remote,
                  draft.value(QStringLiteral("rowVersion")).toLongLong()));
@@ -2166,6 +2221,7 @@ bool RenditionLocalStore::persist()
         {QStringLiteral("renditions"), m_renditions},
         {QStringLiteral("outbox"), m_outbox}
         ,{QStringLiteral("editorDrafts"), m_editorDrafts}
+        ,{QStringLiteral("workingRows"), m_workingRows}
     };
     const QByteArray bytes = QJsonDocument::fromVariant(root).toJson(QJsonDocument::Compact);
     if (file.write(bytes) != bytes.size()) {
@@ -2266,6 +2322,7 @@ qint64 RenditionLocalStore::remoteRowVersion(const QVariantMap &remote,
 QVariantMap RenditionLocalStore::canonicalDraftPayload(const QVariantMap &draft)
 {
     return {
+        {QStringLiteral("displayName"), draft.value(QStringLiteral("displayName"))},
         {QStringLiteral("periodStart"), draft.value(QStringLiteral("periodStart"))},
         {QStringLiteral("periodEnd"), draft.value(QStringLiteral("periodEnd"))},
         {QStringLiteral("projectIds"), draft.value(QStringLiteral("projectIds"))},

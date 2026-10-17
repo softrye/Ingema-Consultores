@@ -12,6 +12,10 @@ Column {
     property string placeholder: "Seleccionar"
     property string error: ""
     property bool readOnly: false
+    // Variante aprobada de Nuevo gasto: etiqueta fuerte, caja de 56 dp, icono
+    // inicial [glyph] y, si la opción la trae, segunda línea [detail].
+    property bool formStyle: false
+    property int glyph: 0
     signal picked(string value)
 
     spacing: 6 * ui.u
@@ -22,30 +26,64 @@ Column {
                 return String(options[i].label)
         return ""
     }
+    function detailFor(v) {
+        for (var i = 0; i < options.length; ++i)
+            if (String(options[i].value) === String(v))
+                return String(options[i].detail || "")
+        return ""
+    }
+    readonly property string selectedDetail: formStyle ? detailFor(value) : ""
 
     Text {
         visible: select.label.length > 0
         text: select.label
-        color: S.muted
+        color: select.formStyle ? S.text : S.muted
         font.family: select.ui.fontFamily
-        font.pixelSize: 13 * select.ui.u
+        font.pixelSize: (select.formStyle ? 15 : 13) * select.ui.u
+        font.weight: select.formStyle ? Font.DemiBold : Font.Normal
     }
     Rectangle {
         width: parent.width
-        height: 48 * select.ui.u
-        radius: 12 * select.ui.u
-        color: Qt.rgba(1, 1, 1, select.readOnly ? 0.03 : (fieldTap.pressed ? 0.14 : 0.08))
+        height: (select.formStyle ? (select.selectedDetail.length ? 62 : 56) : 48) * select.ui.u
+        radius: (select.formStyle ? 16 : 12) * select.ui.u
+        color: select.formStyle ? Qt.rgba(1, 1, 1, select.readOnly ? 0.45 : (fieldTap.pressed ? 0.6 : 0.78))
+                                : S.ink(select.readOnly ? 0.03 : (fieldTap.pressed ? 0.14 : 0.08))
         border.width: 1
-        border.color: select.error.length > 0 ? S.danger : S.border
+        border.color: select.error.length > 0 ? S.danger : (select.formStyle ? S.fieldBorder : S.border)
         Text {
-            x: 14 * select.ui.u
-            width: parent.width - 52 * select.ui.u
+            visible: select.glyph > 0
+            x: 16 * select.ui.u
+            width: 28 * select.ui.u
             anchors.verticalCenter: parent.verticalCenter
-            text: select.labelFor(select.value) || select.placeholder
-            color: select.labelFor(select.value).length > 0 ? S.text : S.faint
-            font.family: select.ui.fontFamily
-            font.pixelSize: 16 * select.ui.u
-            elide: Text.ElideRight
+            horizontalAlignment: Text.AlignHCenter
+            text: String.fromCharCode(select.glyph)
+            color: S.navy
+            font.family: select.ui.iconFamily
+            font.pixelSize: 22 * select.ui.u
+        }
+        Column {
+            x: (select.glyph > 0 ? 66 : 14) * select.ui.u
+            width: parent.width - x - 44 * select.ui.u
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 1 * select.ui.u
+            Text {
+                width: parent.width
+                text: select.labelFor(select.value) || select.placeholder
+                color: select.labelFor(select.value).length > 0 ? S.text : S.faint
+                font.family: select.ui.fontFamily
+                font.pixelSize: 16 * select.ui.u
+                font.weight: select.selectedDetail.length ? Font.DemiBold : Font.Normal
+                elide: Text.ElideRight
+            }
+            Text {
+                visible: select.selectedDetail.length > 0
+                width: parent.width
+                text: select.selectedDetail
+                color: S.muted
+                font.family: select.ui.fontFamily
+                font.pixelSize: 13 * select.ui.u
+                elide: Text.ElideRight
+            }
         }
         Text {
             visible: !select.readOnly
@@ -56,7 +94,7 @@ Column {
             rotation: 90
             font.family: select.ui.iconFamily
             font.pixelSize: 18 * select.ui.u
-            color: S.muted
+            color: select.formStyle ? S.navy : S.muted
         }
         MouseArea {
             id: fieldTap
@@ -87,7 +125,7 @@ Column {
         x: parent ? (parent.width - width) / 2 : 0
         y: parent ? (parent.height - height) / 2 : 0
         padding: 0
-        background: Rectangle { radius: 18 * select.ui.u; color: "#1A2440"; border.width: 1; border.color: S.border }
+        background: Rectangle { radius: 18 * select.ui.u; color: S.popup; border.width: 1; border.color: S.border }
         Text {
             x: 18 * select.ui.u
             y: 16 * select.ui.u
@@ -110,8 +148,8 @@ Column {
                 required property var modelData
                 width: list.width
                 height: Math.max(52 * select.ui.u, optionText.implicitHeight + 20 * select.ui.u)
-                color: optionTap.pressed ? Qt.rgba(1, 1, 1, 0.10)
-                     : (String(modelData.value) === String(select.value) ? Qt.rgba(47 / 255, 111 / 255, 224 / 255, 0.30) : "transparent")
+                color: optionTap.pressed ? S.ink(0.10)
+                     : (String(modelData.value) === String(select.value) ? Qt.rgba(6 / 255, 84 / 255, 162 / 255, 0.12) : "transparent")
                 Column {
                     id: optionText
                     x: 18 * select.ui.u

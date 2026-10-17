@@ -81,31 +81,41 @@ const live = () => request({ operation: 'live-token' });
 test('CHAT: 200 on the primary model answers with one call', async () => {
   const p = provider(() => answer('Pasos'));
   const result = await p.handler(chat()); const body = await result.json();
-  assert.equal(result.status, 200); assert.equal(body.respuesta, 'Pasos'); assert.equal(body.model, 'gemini-3.8-flash');
-  assert.equal(p.google.length, 1); assert.equal(p.google[0].model, 'gemini-3.8-flash');
-  assert.ok(p.logs.includes('INGE_AI_CHAT_ATTEMPT model=gemini-3.8-flash attempt=1'));
-  assert.ok(p.logs.some(l => l.startsWith('INGE_AI_CHAT_OK model=gemini-3.8-flash')));
+  assert.equal(result.status, 200); assert.equal(body.respuesta, 'Pasos'); assert.equal(body.model, 'gemini-3.6-flash');
+  assert.equal(p.google.length, 1); assert.equal(p.google[0].model, 'gemini-3.6-flash');
+  assert.ok(p.logs.includes('INGE_AI_CHAT_ATTEMPT model=gemini-3.6-flash attempt=1'));
+  assert.ok(p.logs.some(l => l.startsWith('INGE_AI_CHAT_OK model=gemini-3.6-flash')));
 });
 test('CHAT: primary 503 -> retry -> 200, short jittered backoff', async () => {
   const p = provider((model, i) => i === 0 ? providerError(503, 'UNAVAILABLE', 'overloaded') : answer('Pasos'));
   const body = await (await p.handler(chat())).json();
   assert.equal(body.respuesta, 'Pasos'); assert.equal(p.google.length, 2);
-  assert.deepEqual(p.google.map(g => g.model), ['gemini-3.8-flash', 'gemini-3.8-flash']);
+  assert.deepEqual(p.google.map(g => g.model), ['gemini-3.6-flash', 'gemini-3.6-flash']);
   assert.ok(p.waits[0] >= 350 && p.waits[0] <= 600);
   assert.ok(p.logs.includes('INGE_AI_CHAT_RETRY status=503 attempt=1 wait_ms=475'));
 });
 test('CHAT: persistent primary 503 -> fallback model -> 200', async () => {
-  const p = provider(model => model === 'gemini-3.8-flash' ? providerError(503, 'UNAVAILABLE', 'overloaded') : answer('Desde respaldo'));
+  const p = provider(model => model === 'gemini-3.6-flash' ? providerError(503, 'UNAVAILABLE', 'overloaded') : answer('Desde respaldo'));
   const result = await p.handler(chat()); const body = await result.json();
-  assert.equal(result.status, 200); assert.equal(body.respuesta, 'Desde respaldo'); assert.equal(body.model, 'gemini-3.6-flash');
-  assert.deepEqual(p.google.map(g => g.model), ['gemini-3.8-flash', 'gemini-3.8-flash', 'gemini-3.8-flash', 'gemini-3.6-flash']);
-  assert.ok(p.logs.includes('INGE_AI_CHAT_FALLBACK from=gemini-3.8-flash to=gemini-3.6-flash status=503'));
+  assert.equal(result.status, 200); assert.equal(body.respuesta, 'Desde respaldo'); assert.equal(body.model, 'gemini-3.5-flash-lite');
+  assert.deepEqual(p.google.map(g => g.model), ['gemini-3.6-flash', 'gemini-3.6-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']);
+  assert.ok(p.logs.includes('INGE_AI_CHAT_FALLBACK from=gemini-3.6-flash to=gemini-3.5-flash-lite status=503'));
   assert.ok(p.waits[1] >= 800 && p.waits[1] <= 1300);
 });
-test('CHAT: 429 is retried and can fall back as well', async () => {
-  const p = provider(model => model === 'gemini-3.8-flash' ? providerError(429, 'RESOURCE_EXHAUSTED', 'busy') : answer('ok'));
+test('CHAT: 429 skips same-model retry and uses fallback', async () => {
+  const p = provider(model => model === 'gemini-3.6-flash' ? providerError(429, 'RESOURCE_EXHAUSTED', 'busy') : answer('ok'));
   const body = await (await p.handler(chat())).json();
-  assert.equal(body.respuesta, 'ok'); assert.equal(p.google.length, 4);
+  assert.equal(body.respuesta, 'ok'); assert.equal(p.google.length, 2);
+});
+test('CHAT: both models 429 -> only 2 requests and structured cooldown', async () => {
+  const p = provider(() => providerError(429, 'RESOURCE_EXHAUSTED', 'quota'));
+  const result = await p.handler(chat());
+  const body = await result.json();
+  assert.equal(result.status, 429);
+  assert.deepEqual(p.google.map(g => g.model), ['gemini-3.6-flash', 'gemini-3.5-flash-lite']);
+  assert.equal(body.code, 'GEMINI_RATE_LIMIT');
+  assert.equal(body.retry_after_seconds, 60);
+  assert.equal(body.retryable, true);
 });
 test('CHAT: 400 is permanent: no retry, no fallback', async () => {
   const p = provider(() => providerError(400, 'INVALID_ARGUMENT', 'bad'));
@@ -118,7 +128,7 @@ test('CHAT: everything busy -> sanitized retryable failure, no secrets', async (
   const p = provider(() => providerError(503, 'UNAVAILABLE', 'Overloaded key=AIzaSyFAKEFAKEFAKEFAKE123 Bearer abc'));
   const result = await p.handler(chat()); const body = await result.json();
   assert.equal(result.status, 502); assert.equal(p.google.length, 5); assert.equal(body.attempts, 5);
-  assert.equal(body.error, 'El servicio de IA está temporalmente ocupado. Intenta nuevamente.');
+  assert.equal(body.error, 'Gemini no está disponible temporalmente. Intenta nuevamente.');
   assert.equal(body.code, 'GEMINI_UNAVAILABLE'); assert.equal(body.provider_status, 503); assert.equal(body.gateway_status, 502);
   assert.equal(body.retryable, true);
   const visible = JSON.stringify(body) + p.logs.join('\n');
@@ -126,7 +136,7 @@ test('CHAT: everything busy -> sanitized retryable failure, no secrets', async (
 });
 test('CHAT: one logical request: history sent once per attempt, quota consumed once, single answer', async () => {
   provider.quota = 0;
-  const p = provider(model => model === 'gemini-3.8-flash' ? providerError(503, 'UNAVAILABLE', 'x') : answer('ok'));
+  const p = provider(model => model === 'gemini-3.6-flash' ? providerError(503, 'UNAVAILABLE', 'x') : answer('ok'));
   const body = await (await p.handler(chat())).json();
   assert.equal(provider.quota, 1);
   for (const sent of p.google) {
@@ -139,7 +149,7 @@ test('CHAT: one logical request: history sent once per attempt, quota consumed o
 test('CHAT: fallback can be disabled with an empty GEMINI_CHAT_FALLBACK_MODEL', async () => {
   const p = provider(() => providerError(503, 'UNAVAILABLE', 'x'), { GEMINI_CHAT_FALLBACK_MODEL: '' });
   await p.handler(chat());
-  assert.equal(p.google.length, 3); assert.equal(p.google.every(g => g.model === 'gemini-3.8-flash'), true);
+  assert.equal(p.google.length, 3); assert.equal(p.google.every(g => g.model === 'gemini-3.6-flash'), true);
 });
 test('LIVE TOKEN: constraint model is exactly gemini-3.8-live and the token is returned', async () => {
   const p = provider(() => Response.json({ name: 'auth_tokens/abc' }));

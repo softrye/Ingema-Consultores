@@ -15,7 +15,7 @@ int main() {
     const QVariantMap saved{{"localId", "local-1"}, {"remoteId", "remote-1"},
         {"rowVersion", 4}, {"documentParentNodeId", "folder"}, {"spaceId", "space"},
         {"periodStart", "2026-09-01"}, {"periodEnd", "2026-09-30"},
-        {"totalPen", 20.0}, {"versionNumber", 1}};
+        {"totalPen", 20.0}, {"versionNumber", 1}, {"displayName", "Informe de campo"}};
     const QVariantMap rpc{{"projects", QVariantList{
         QVariantMap{{"id", "p1"}, {"is_primary", false}},
         QVariantMap{{"id", "p2"}, {"is_primary", true}, {"name", "Principal"}}}},
@@ -25,6 +25,9 @@ int main() {
     assert(normalized.value("primaryProjectId") == "p2");
     assert(normalized.value("versionNumber") == 2);
     assert(normalized.value("totalPen").toDouble() == 20);
+    assert(normalized.value("displayName") == "Informe de campo");
+    assert(RenditionContract::normalize({{"display_name", "JENNIFER"}}, saved).value("displayName") == "JENNIFER");
+    assert(RenditionContract::normalize({{"display_name", QVariant()}}, saved).contains("displayName"));
     auto draft = saved;
     for (auto it = normalized.cbegin(); it != normalized.cend(); ++it) draft.insert(it.key(), it.value());
     QVariantMap expense{{"localId", "expense-1"}, {"projectId", "p2"}, {"expenseDate", "2026-09-08"},
@@ -47,6 +50,7 @@ int main() {
         assert(reopened.value(key) == draft.value(key));
     const auto sparse = RenditionContract::normalize({{"status", "PRESENTADA"}}, reopened);
     assert(sparse.value("primaryProjectId") == "p2");
+    assert(sparse.value("displayName") == "Informe de campo");
     assert(sparse.value("projectIds").toList().size() == 2);
     assert(RenditionContract::normalize({{"projects", QVariantList{}}}, reopened).value("projectIds").toList().isEmpty());
     std::cout << "PASS: RPC projects, explicit primary, sparse responses, versions, expense validation, separate totals, JSON roundtrip\n";

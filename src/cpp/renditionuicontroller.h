@@ -22,6 +22,8 @@ class RenditionUiController final : public QObject
     Q_PROPERTY(bool ready READ ready NOTIFY stateChanged)
     Q_PROPERTY(QStringList pendingKeys READ pendingKeys NOTIFY pendingChanged)
     Q_PROPERTY(bool aiEnabled READ aiEnabled CONSTANT)
+    // Incidencias centralizadas (RenditionDiagnostics): {level, incidents, errors, attention}.
+    Q_PROPERTY(QVariantMap diagnostics READ diagnostics NOTIFY diagnosticsChanged)
 
 public:
     explicit RenditionUiController(QObject *bridge, QObject *parent = nullptr);
@@ -47,6 +49,9 @@ public:
     Q_INVOKABLE QString formatCents(const QVariant &cents, const QString &currency) const;
     Q_INVOKABLE QVariantMap totals(const QVariantList &expenses) const;
     Q_INVOKABLE QVariantMap fundBalance(const QVariantMap &rendition) const;
+    // Avance de completitud (0..100) derivado de los requisitos reales de
+    // presentación; known=false cuando faltan datos para evaluarlo.
+    Q_INVOKABLE QVariantMap completion(const QVariantMap &rendition) const;
     Q_INVOKABLE QString fundingError(const QVariantMap &values) const;
     Q_INVOKABLE QString rateError(const QString &rate) const;
     Q_INVOKABLE QVariantList catalog(const QString &kind) const;
@@ -57,13 +62,29 @@ public:
     Q_INVOKABLE QString syncLabel(const QString &syncState) const;
     Q_INVOKABLE QString statusLabel(const QString &status) const;
     Q_INVOKABLE QString errorText(const QString &code, const QString &message) const;
+    // Política de avisos: la pérdida de conexión, timeouts y reintentos automáticos
+    // NO se muestran como texto/toast; los comunica el aura (estado publicado).
+    Q_INVOKABLE bool silentError(const QString &code) const;
+    // Texto persistido de una fila apto para mostrarse (oculta marcas técnicas).
+    Q_INVOKABLE QString visibleSyncError(const QString &text) const;
+    // Estado mostrado de una fila cruda (gasto/sustento): un ERROR que sólo espera
+    // conexión (marca de transporte) se presenta como pendiente, nunca como error.
+    Q_INVOKABLE QString effectiveSyncState(const QVariantMap &row) const;
     Q_INVOKABLE QVariantMap describeLocalFile(const QUrl &url) const;
+
+    QVariantMap diagnostics() const { return m_diagnostics; }
+    // Falla de una acción explícita del usuario (antes un toast): se registra como
+    // incidencia consultable en "Estado de Rendiciones" y vence en 3 min o al
+    // repetirse con éxito la misma acción (key). Nunca contiene secretos.
+    Q_INVOKABLE void reportIssue(const QString &key, const QVariantMap &issue);
+    Q_INVOKABLE void resolveIssue(const QString &key);
     Q_INVOKABLE QString today() const;
     Q_INVOKABLE bool validDate(const QString &value) const;
 
 signals:
     void stateChanged();
     void pendingChanged();
+    void diagnosticsChanged();
     void finished(const QString &requestId, const QString &operation, const QString &key,
                   bool ok, const QVariantMap &result, const QString &code, const QString &message);
     // Error de comando sin solicitud correlacionada (p. ej. openDocumentTarget).
@@ -75,8 +96,12 @@ private slots:
 
 private:
     struct Pending { QString operation; QString key; };
+    void recomputeDiagnostics();
     QPointer<QObject> m_bridge;
     QVariantMap m_state;
+    QVariantMap m_diagnostics;
+    QVariantMap m_issues;            // key -> issue (+ "at" ms)
+    bool m_issueTickScheduled = false;
     bool m_ready = false;
     QHash<QString, Pending> m_pending;
 };

@@ -7,6 +7,15 @@
 // refraction/specular/bevel > 0 añaden lente en el borde y brillo especular;
 // con los tres en 0 (valor por defecto de GlassSurface) la salida es idéntica a
 // la anterior para Home, Calicatas y el resto de superficies. Salida premultiplicada.
+// Material único del Dock (2026-10-15): contrast/frost > 0 añaden contraste
+// adaptativo (oscurece sólo donde el fondo muestreado es claro, para iconos
+// blancos legibles sin teñir el cristal) y esmerilado propio de 5 muestras
+// (mismo grano de vidrio con texturas más o menos desenfocadas). En 0 no
+// cambian nada para el resto de superficies.
+// Composición: el interior es la reconstrucción del fondo REAL (textura
+// alineada por `region`) y se emite con alfa 1 premultiplicada; mezclarla con
+// el contenido nítido que hay detrás produciría doble imagen (fantasma) en la
+// zona refractada. La transparencia la aporta el muestreo, no el alfa.
 
 layout(location = 0) in vec2 qt_TexCoord0;
 layout(location = 0) out vec4 fragColor;
@@ -26,8 +35,18 @@ layout(std140, binding = 0) uniform buf {
     float refraction;   // px: el borde muestrea hacia el centro (lente); 0 = sin refracción
     float specular;     // 0..1: brillo especular superior y filo de luz; 0 = sin brillo
     float bevel;        // px: ancho de la zona curva del borde
+    float contrast;     // 0..1: contraste adaptativo sobre fondos claros; 0 = sin efecto
+    float frost;        // px: esmerilado en el shader (5 muestras); 0 = sin efecto
 };
 layout(binding = 1) uniform sampler2D source;
+
+// Muestra la textura del fondo en coordenadas locales de la superficie; fuera
+// del rectángulo se fija al borde (sin UV fuera de rango ni repeticiones).
+vec3 backdropAt(vec2 at, vec2 rectSize)
+{
+    vec2 uv = region.xy + clamp(at / rectSize, 0.0, 1.0) * region.zw;
+    return texture(source, uv).rgb;
+}
 
 void main()
 {
@@ -51,9 +70,22 @@ void main()
         vec2 fromCenter = (local - 0.5 * rectSize) / max(0.5 * rectSize, vec2(1.0));
         sampleAt -= fromCenter * refraction * rimZone * rimZone;
     }
-    vec2 uv = region.xy + clamp(sampleAt / rectSize, 0.0, 1.0) * region.zw;
-    vec3 backdrop = texture(source, uv).rgb;
+    vec3 backdrop = backdropAt(sampleAt, rectSize);
+    if (frost > 0.0) {
+        backdrop = 0.40 * backdrop
+                 + 0.15 * (backdropAt(sampleAt + vec2(frost, 0.0), rectSize)
+                         + backdropAt(sampleAt - vec2(frost, 0.0), rectSize)
+                         + backdropAt(sampleAt + vec2(0.0, frost), rectSize)
+                         + backdropAt(sampleAt - vec2(0.0, frost), rectSize));
+    }
     vec3 glass = mix(backdrop, tint.rgb, tint.a);
+    if (contrast > 0.0) {
+        // Luminancia del fondo real: sobre blanco/tarjetas el cristal se vuelve
+        // humo azulado (iconos blancos legibles); sobre fondos oscuros no cambia.
+        float luma = dot(backdrop, vec3(0.2126, 0.7152, 0.0722));
+        vec3 smoked = glass * 0.52 + vec3(0.03, 0.05, 0.09);
+        glass = mix(glass, smoked, contrast * smoothstep(0.35, 0.90, luma));
+    }
     // Profundidad discreta: un poco más de luz arriba que abajo.
     float t = clamp(local.y / rectSize.y, 0.0, 1.0);
     glass = mix(glass, vec3(1.0), 0.05 * (1.0 - t));
