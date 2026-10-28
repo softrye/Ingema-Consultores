@@ -95,6 +95,7 @@ private:
     bool m_selectionPullPending = false; // detalle elegido durante otro pull
     int m_selectionSerial = 0;           // token de cada apertura de detalle (select)
     QSet<QString> m_pendingPullOperations;
+    QTimer m_pullWatchdog;               // un pull sin todas sus respuestas no queda colgado
     bool m_presentAfterSync = false;
     QTimer m_publishTimer;
 };

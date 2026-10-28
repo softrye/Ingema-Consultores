@@ -91,6 +91,8 @@ RenditionFlutterBridge::RenditionFlutterBridge(
             m_receivedSnapshot = row;
         }
         sendResult(id, {{QStringLiteral("rows"), rows}});
+        if (operation == QLatin1String("filesRecover"))
+            m_repository->listRenditions(50, {}, {});
     });
     m_publishTimer.setSingleShot(true);
     m_publishTimer.setInterval(24);
@@ -291,7 +293,7 @@ RenditionFlutterBridge::RenditionFlutterBridge(
     connect(m_repository, &RenditionRepository::currentRenditionChanged,
             this, [this]() {
         const QVariantMap remote = m_repository->currentRendition();
-        if (!remote.isEmpty()) m_store->mergeRemoteRenditions({remote});
+        if (!remote.isEmpty()) m_store->mergeRemoteRenditions({remote},false);
         if (m_documentTargetLoading && !m_documentTargetRemoteId.isEmpty()
             && value(remote, QStringLiteral("id"), QStringLiteral("rendition_id")) == m_documentTargetRemoteId) {
             for (const auto &entry : m_store->renditions()) {
@@ -318,6 +320,9 @@ RenditionFlutterBridge::RenditionFlutterBridge(
     connect(m_syncController, &RenditionSyncController::busyChanged, this, publish);
     connect(m_syncController, &RenditionSyncController::syncFinished, this,
             [this](int) {
+        if (m_store->rendition(m_selectedLocalId).value(QStringLiteral("trashed")).toBool()
+            || m_store->rendition(m_selectedLocalId).value(QStringLiteral("fileArchived")).toBool())
+            m_selectedLocalId.clear();
         if (m_presentAfterSync) {
             startRemotePull({}, QStringLiteral("present_preflight"));
             return;
@@ -714,9 +719,24 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
         return;
     }
 
+    if (operation == QLatin1String("trashDraft") || operation == QLatin1String("archiveRendition")) {
+        if (m_syncController->busy() || m_repository->busy()) { sendError(requestId, "SYNC_BUSY", "Espera a que termine la sincronización."); return; }
+        const QString localId = arguments.value(QStringLiteral("localId")).toString();
+        const bool archive=operation==QLatin1String("archiveRendition");
+        const bool staged=archive ? m_store->requestRenditionArchive(localId) : m_store->requestDraftTrash(localId);
+        if (!staged) { sendError(requestId, archive ? "RENDITION_ARCHIVE_FAILED" : "DRAFT_TRASH_FAILED", m_store->lastError()); return; }
+        // Same durable queue and error path as sync. Complete the command only
+        // after the server receipt and the refreshed list, never optimistically.
+        m_pendingSyncRequestId = requestId;
+        publishState();
+        m_syncController->synchronize();
+        return;
+    }
     if (operation == QLatin1String("deleteDraft")) {
         if (m_syncController->busy() || m_repository->busy()) { sendError(requestId, "SYNC_BUSY", "Espera a que termine la sincronización."); return; }
         const QString localId = arguments.value(QStringLiteral("localId")).toString();
+        // Deletion has its own owner/draft/CAS checks in the delete RPC; the
+        // content-edit capability (often absent in list rows) is not its gate.
         if (!m_store->removeDraft(localId)) { sendError(requestId, "DRAFT_DELETE_FAILED", m_store->lastError()); return; }
         if (m_selectedLocalId == localId) m_selectedLocalId.clear();
         sendResult(requestId, {{QStringLiteral("pendingSync"), true}});
@@ -1060,6 +1080,19 @@ void RenditionFlutterBridge::startRemotePull(const QString &requestId,
     }
     publishState();
 
+    // Vigilante: si alguna respuesta del pull no llega, se cancela y se avisa
+    // (antes «Presentar» quedaba en «sincronización en curso» para siempre).
+    if (!m_pullWatchdog.isSingleShot()) {
+        m_pullWatchdog.setSingleShot(true);
+        connect(&m_pullWatchdog, &QTimer::timeout, this, [this]() {
+            if (m_pendingPullOperations.isEmpty()) return;
+            qWarning().noquote() << "INGE_RENDITIONS_PULL_TIMEOUT pending=" << QStringList(m_pendingPullOperations.values()).join(QLatin1Char(','));
+            failRemotePull(QString(), QStringLiteral("PULL_TIMEOUT"),
+                           QStringLiteral("El servidor tardó demasiado en responder. Inténtalo de nuevo."));
+        });
+    }
+    m_pullWatchdog.start(45000);
+
     m_repository->listProjects();
     m_repository->listExpenseCatalogs();
     m_repository->listRenditions(50, {}, {});
@@ -1081,6 +1114,8 @@ void RenditionFlutterBridge::completeRemotePullOperation(
 {
     if (!m_pendingPullOperations.remove(operation))
         return;
+    if (m_pendingPullOperations.isEmpty())
+        m_pullWatchdog.stop();
     if (!m_pendingPullOperations.isEmpty())
         return;
 
@@ -1122,6 +1157,7 @@ void RenditionFlutterBridge::failRemotePull(const QString &operation,
         clearPendingPresentation();
     }
     m_pendingPullOperations.clear();
+    m_pullWatchdog.stop();
     m_pendingPullRequestId.clear();
     m_pendingPullReason.clear();
     observeLocalCode(code);

@@ -32,6 +32,39 @@ Item {
     property bool finished: false
 
     // Navegación de carpetas (InGe Drive)
+    // Nueva rendición en 3 pasos (Proyecto → Período → Detalles).
+    readonly property bool stepped: !editing
+    property int step: 1
+    function iso(d) { return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2) }
+    function parseIso(v) { var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || "")); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date() }
+    function presetRange(kind) {
+        var t = parseIso(ctl.today())
+        if (kind === "month") return [iso(new Date(t.getFullYear(), t.getMonth(), 1)), iso(new Date(t.getFullYear(), t.getMonth() + 1, 0))]
+        var monday = new Date(t.getFullYear(), t.getMonth(), t.getDate() - ((t.getDay() + 6) % 7))
+        return [iso(monday), iso(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6))]
+    }
+    readonly property string activePreset: {
+        var w = presetRange("week"), m = presetRange("month")
+        return start === w[0] && end === w[1] ? "week" : start === m[0] && end === m[1] ? "month" : "custom"
+    }
+    readonly property int periodDays: Math.max(0, Math.round((parseIso(end) - parseIso(start)) / 86400000) + 1)
+    function primaryName() {
+        var rows = app.st.projects || []
+        for (var i = 0; i < rows.length; ++i) if (S.text_(rows[i], "id", "project_id") === primary) return String(S.text_(rows[i], "name") || ctl.projectLabel(primary))
+        return primary.length ? ctl.projectLabel(primary) : ""
+    }
+    function shortDate(v) {
+        var d = parseIso(v)
+        return d.getDate() + " " + ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "set", "oct", "nov", "dic"][d.getMonth()]
+    }
+    function nextStep() {
+        error = ""
+        if (step === 1 && !primary.length) { error = "Elige el proyecto de la rendición."; return }
+        if (step === 2 && (!start.length || !end.length || start > end)) { error = "Revisa el período: la fecha final no puede ser anterior a la inicial."; return }
+        if (step === 2 && !displayName.trim().length)              // nombre sugerido (editable)
+            displayName = primaryName() + " · " + shortDate(start) + (start !== end ? " – " + shortDate(end) : "")
+        if (step < 3) { step++; formFlick.contentY = 0 } else save()
+    }
     property bool browsing: false
     property bool browsingBusy: false
     property string browseSpace: ""
@@ -48,8 +81,9 @@ Item {
         var source = draft && draft.periodStart ? draft : null
         var b = editing ? original : {}
         displayName = source ? String(source.displayName || "") : S.text_(b, "displayName", "display_name")
-        start = source ? String(source.periodStart) : String(b.periodStart || ctl.today())
-        end = source ? String(source.periodEnd) : String(b.periodEnd || ctl.today())
+        var week = presetRange("week")
+        start = source ? String(source.periodStart) : String(b.periodStart || (editing ? ctl.today() : week[0]))
+        end = source ? String(source.periodEnd) : String(b.periodEnd || (editing ? ctl.today() : week[1]))
         projects = source ? (source.projectIds || []).slice() : (b.projectIds || []).slice()
         primary = source ? String(source.primaryProjectId || "") : String(b.primaryProjectId || "")
         folder = source ? String(source.documentParentNodeId || "") : String(b.documentParentNodeId || "")
@@ -108,6 +142,7 @@ Item {
     // ------------------------------------------------------- InGe Drive
     function openFolders() {
         if (!primary.length) { error = "Elige primero el proyecto principal."; return }
+        error = ""                                    // el aviso de carpeta no sigue visible al elegirla
         var life = page.life
         browsingBusy = true
         app.call("projectWorkspace", { projectId: primary }, "workspace", function(ok, result, code, message) {
@@ -147,6 +182,7 @@ Item {
         })
     }
     function chooseFolder(row) {
+        error = ""
         var life = page.life
         var nodeId = S.text_(row, "id")
         browsingBusy = true
@@ -189,15 +225,61 @@ Item {
             page.finished = true
             autosave.stop()
             page.app.call("saveEditorDraft", { key: page.draftKey, draft: {} }, "")
-            page.app.toast("Rendición guardada en el equipo · pendiente de sincronizar con el servidor.", "success")
             if (!life.alive) return
             if (page.editing) page.app.closePage()
             else page.app.openCreated(String(saved.localId))
         })
     }
 
-    Flickable {
+    // Composición aprobada (imagen 1): «1. Proyecto» en mosaicos con aura de color,
+    // «2. Período» compacto (dos fechas verticales a la izquierda; carpeta y nombre
+    // apilados a la derecha) y «Crear rendición». Vidrio claro existente; sin fondos.
+    readonly property var tileTones: [S.corporateBlue, "#F28C28", "#2EB872", "#8B5CF6"]
+    component Block: Rectangle {
+        id: block
+        property var ui
+        property int glyph: 0
+        property string heading: ""
+        property string subtitle: ""
+        default property alias content: blockBody.data
+        width: parent ? parent.width : 0
+        height: blockColumn.implicitHeight + 32 * ui.u
+        radius: 24 * ui.u
+        color: S.cardGlass
+        border.width: 1; border.color: S.edge(0.9)
+        Column {
+            id: blockColumn
+            x: 14 * block.ui.u; y: 16 * block.ui.u
+            width: parent.width - 28 * block.ui.u
+            spacing: 14 * block.ui.u
+            Row {
+                spacing: 12 * block.ui.u
+                Rectangle {
+                    width: 44 * block.ui.u; height: width; radius: 12 * block.ui.u
+                    color: S.tintSoft
+                    Text { anchors.centerIn: parent; text: String.fromCharCode(block.glyph); color: S.navy
+                           font.family: block.ui.iconFamily; font.pixelSize: 22 * block.ui.u }
+                }
+                Column {
+                    anchors.verticalCenter: parent.verticalCenter
+                    Text { text: block.heading; color: S.text; font.family: block.ui.fontFamily; font.pixelSize: 18 * block.ui.u; font.weight: Font.DemiBold }
+                    Text { text: block.subtitle; color: S.muted; font.family: block.ui.fontFamily; font.pixelSize: 14 * block.ui.u }
+                }
+            }
+            Column { id: blockBody; width: parent.width; spacing: 10 * block.ui.u }
+        }
+    }
+
+    Rectangle {
         anchors.fill: parent
+        visible: page.embedded && page.stepped
+        radius: 22 * page.ui.u
+        color: S.lite(246, 248, 252, 0.97)
+    }
+    Flickable {
+        id: formFlick
+        anchors.fill: parent
+        anchors.bottomMargin: page.stepped ? stepActions.height + 8 * page.ui.u : 0
         visible: !page.browsing
         contentWidth: width
         contentHeight: form.height + (page.embedded ? 30 : 140) * page.ui.u
@@ -205,10 +287,10 @@ Item {
         clip: true
         Column {
             id: form
-            x: page.embedded ? 22 * page.ui.u : page.ui.gutter
-            y: page.embedded ? 12 * page.ui.u : 8 * page.ui.u
+            x: page.embedded ? 12 * page.ui.u : page.ui.gutter
+            y: page.embedded ? 8 * page.ui.u : 8 * page.ui.u
             width: parent.width - 2 * x
-            spacing: 14 * page.ui.u
+            spacing: 12 * page.ui.u
 
             Text {
                 width: parent.width
@@ -227,15 +309,326 @@ Item {
                 font.family: page.ui.fontFamily; font.pixelSize: 14 * page.ui.u
             }
 
-            RField {
-                width: parent.width
-                ui: page.ui
-                label: "Nombre de la rendición"
-                text: page.displayName
-                placeholder: "Ej.: Visita de campo — Huarmey"
-                maxLength: 160
-                readOnly: page.editing || !page.writable
-                onEdited: { page.displayName = text; page.changed() }
+            Row {
+                id: stepBar
+                objectName: "renditionStepBar"
+                visible: page.stepped
+                width: parent.width; spacing: 6 * page.ui.u
+                Repeater {
+                    model: ["Proyecto", "Período", "Detalles"]
+                    delegate: Column {
+                        id: stepCell
+                        required property string modelData
+                        required property int index
+                        width: (stepBar.width - 2 * stepBar.spacing) / 3; spacing: 6 * page.ui.u
+                        Rectangle { width: stepCell.width; height: 5 * page.ui.u; radius: height / 2
+                                    color: stepCell.index < page.step ? S.accent : S.ink(0.10)
+                                    Behavior on color { ColorAnimation { duration: 240 } } }
+                        Text { text: stepCell.modelData; color: stepCell.index < page.step ? S.text : S.muted
+                               font.family: page.ui.fontFamily; font.pixelSize: 12 * page.ui.u; font.weight: Font.DemiBold }
+                    }
+                }
+            }
+
+            // ------------------------------------------------------ 1. Proyecto
+            Block {
+                visible: !page.stepped || page.step === 1
+                ui: page.ui; glyph: 0xE0D7; heading: page.stepped ? "¿Para qué proyecto?" : "1. Proyecto"
+                subtitle: page.stepped ? "Toca un proyecto; con «···» lo marcas como principal" : "Selecciona el proyecto de la rendición"
+                Text {
+                    width: parent.width
+                    visible: (page.app.st.projects || []).length === 0
+                    text: "No hay proyectos autorizados para rendiciones en tu cuenta (o aún se están cargando)."
+                    color: S.muted; wrapMode: Text.WordWrap
+                    font.family: page.ui.fontFamily; font.pixelSize: 14 * page.ui.u
+                }
+                Grid {
+                    id: projectGrid
+                    width: parent.width
+                    columns: page.stepped ? 1 : 2
+                    spacing: 10 * page.ui.u
+                    Repeater {
+                        model: page.app.st.projects || []
+                        delegate: Item {
+                            id: tile
+                            required property var modelData
+                            required property int index
+                            readonly property string projectId: S.text_(modelData, "id", "project_id")
+                            readonly property bool checked: page.projects.indexOf(projectId) >= 0
+                            readonly property bool isPrimary: page.primary === projectId
+                            readonly property color tone: page.tileTones[index % page.tileTones.length]
+                            width: (projectGrid.width - (projectGrid.columns - 1) * projectGrid.spacing) / projectGrid.columns
+                            height: 70 * page.ui.u
+                            Rectangle {                    // aura de color (selección)
+                                anchors.fill: parent; anchors.margins: -3 * page.ui.u
+                                radius: 22 * page.ui.u
+                                color: "transparent"
+                                border.width: 3 * page.ui.u
+                                border.color: Qt.rgba(tile.tone.r, tile.tone.g, tile.tone.b, tile.checked ? 0.38 : 0.14)
+                                Behavior on border.color { ColorAnimation { duration: 160 } }
+                            }
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 20 * page.ui.u
+                                color: tileTap.pressed ? S.glass(0.75) : S.glass(0.92)
+                                border.width: 1
+                                border.color: Qt.rgba(tile.tone.r, tile.tone.g, tile.tone.b, tile.checked ? 0.85 : 0.30)
+                            }
+                            Text {
+                                id: folderGlyph
+                                x: 14 * page.ui.u; anchors.verticalCenter: parent.verticalCenter
+                                text: String.fromCharCode(0xE0D7); color: tile.tone
+                                font.family: page.ui.iconFamily; font.pixelSize: 26 * page.ui.u
+                            }
+                            Column {
+                                x: 50 * page.ui.u
+                                width: parent.width - x - 48 * page.ui.u
+                                anchors.verticalCenter: parent.verticalCenter
+                                Text { width: parent.width; text: String(S.text_(tile.modelData, "name") || page.ctl.projectLabel(tile.projectId)).toUpperCase()
+                                       color: S.text; elide: Text.ElideRight
+                                       font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u; font.weight: Font.DemiBold }
+                                Text { visible: tile.checked; text: tile.isPrimary ? "Principal" : "Asociado"
+                                       color: tile.isPrimary ? tile.tone : S.muted
+                                       font.family: page.ui.fontFamily; font.pixelSize: 12 * page.ui.u }
+                            }
+                            MouseArea { id: tileTap; anchors.fill: parent; enabled: page.writable; onClicked: page.toggleProject(tile.projectId) }
+                            Rectangle {                    // ··· : hacer principal (sólo si está asociado)
+                                width: 40 * page.ui.u; height: width; radius: width / 2
+                                anchors.right: parent.right; anchors.rightMargin: 8 * page.ui.u
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: moreTap.pressed ? S.ink(0.12) : S.ink(0.05)
+                                Text { anchors.centerIn: parent; text: String.fromCharCode(0xE0B6); color: S.text
+                                       font.family: page.ui.iconFamily; font.pixelSize: 18 * page.ui.u }
+                                MouseArea {
+                                    id: moreTap; anchors.fill: parent; enabled: page.writable
+                                    onClicked: { if (!tile.checked) page.toggleProject(tile.projectId); page.setPrimary(tile.projectId) }
+                                }
+                                Accessible.role: Accessible.Button
+                                Accessible.name: "Hacer principal"
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ------------------------------------------------------- 2. Período
+            Block {
+                visible: page.stepped && page.step === 2
+                ui: page.ui; glyph: 0xE063; heading: "¿Qué período cubre?"
+                subtitle: page.periodDays + (page.periodDays === 1 ? " día" : " días") + " · gastos dentro de este rango"
+                Row {
+                    id: presetRow
+                    width: parent.width; spacing: 8 * page.ui.u
+                    Repeater {
+                        model: [{ k: "week", l: "Esta semana" }, { k: "month", l: "Este mes" }, { k: "custom", l: "Otro" }]
+                        delegate: Rectangle {
+                            id: presetCell
+                            required property var modelData
+                            readonly property bool on: page.activePreset === modelData.k
+                            width: (presetRow.width - 2 * presetRow.spacing) / 3; height: 48 * page.ui.u; radius: 14 * page.ui.u
+                            color: on ? Qt.rgba(6 / 255, 84 / 255, 162 / 255, 0.10) : S.glass(0.9)
+                            border.width: on ? 2 : 1; border.color: on ? S.accent : S.fieldBorder
+                            Behavior on color { ColorAnimation { duration: 160 } }
+                            Text { anchors.centerIn: parent; text: presetCell.modelData.l; color: presetCell.on ? S.accent : S.text
+                                   font.family: page.ui.fontFamily; font.pixelSize: 14 * page.ui.u; font.weight: presetCell.on ? Font.Bold : Font.Normal }
+                            MouseArea { anchors.fill: parent; enabled: page.writable
+                                        onClicked: {
+                                            if (presetCell.modelData.k === "custom") { startPicker.openPicker(); return }
+                                            var r = page.presetRange(presetCell.modelData.k); page.start = r[0]; page.end = r[1]; page.changed()
+                                        } }
+                            Accessible.role: Accessible.RadioButton
+                            Accessible.name: modelData.l
+                            Accessible.checked: on
+                        }
+                    }
+                }
+                Row {
+                    id: stepDates
+                    width: parent.width; spacing: 8 * page.ui.u
+                    Repeater {
+                        model: [{ key: "start", label: "Desde" }, { key: "end", label: "Hasta" }]
+                        delegate: Rectangle {
+                            id: stepDate
+                            required property var modelData
+                            width: (stepDates.width - stepDates.spacing) / 2; height: 64 * page.ui.u; radius: 16 * page.ui.u
+                            color: stepDateTap.pressed ? S.glass(0.7) : S.glass(0.9)
+                            border.width: 1; border.color: S.fieldBorder
+                            Column {
+                                x: 14 * page.ui.u; anchors.verticalCenter: parent.verticalCenter; spacing: 2 * page.ui.u
+                                Text { text: stepDate.modelData.label; color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 12 * page.ui.u; font.weight: Font.DemiBold }
+                                Text { text: S.date(stepDate.modelData.key === "start" ? page.start : page.end); color: S.text
+                                       font.family: page.ui.fontFamily; font.pixelSize: 17 * page.ui.u; font.weight: Font.Bold }
+                            }
+                            Text { anchors.right: parent.right; anchors.rightMargin: 12 * page.ui.u; anchors.verticalCenter: parent.verticalCenter
+                                   text: String.fromCharCode(0xE063); color: S.accent; font.family: page.ui.iconFamily; font.pixelSize: 20 * page.ui.u }
+                            MouseArea { id: stepDateTap; anchors.fill: parent; enabled: page.writable
+                                        onClicked: (stepDate.modelData.key === "start" ? startPicker : endPicker).openPicker() }
+                            Accessible.role: Accessible.Button
+                            Accessible.name: modelData.label
+                        }
+                    }
+                }
+            }
+
+            // ---------------------------------------------- 3. Detalles (al crear)
+            Block {
+                visible: page.stepped && page.step === 3
+                ui: page.ui; glyph: 0xE0CC; heading: "Últimos detalles"; subtitle: "Nombre y carpeta de InGe Drive"
+                RField {
+                    id: stepName
+                    objectName: "renditionStepName"
+                    width: parent.width
+                    ui: page.ui; formStyle: true; label: "Nombre de la rendición"; maxLength: 160
+                    text: page.displayName
+                    readOnly: !page.writable
+                    onEdited: { page.displayName = text; page.changed() }
+                }
+                Rectangle {
+                    width: parent.width; height: 68 * page.ui.u; radius: 16 * page.ui.u
+                    color: stepFolderTap.pressed ? S.glass(0.7) : S.glass(0.9)
+                    border.width: page.folder.length ? 1 : 1.5
+                    border.color: page.folder.length ? S.fieldBorder : S.accentSoft
+                    Text { x: 14 * page.ui.u; anchors.verticalCenter: parent.verticalCenter; text: String.fromCharCode(0xE0D7); color: S.accent
+                           font.family: page.ui.iconFamily; font.pixelSize: 24 * page.ui.u }
+                    Column {
+                        x: 50 * page.ui.u; width: parent.width - x - 90 * page.ui.u
+                        anchors.verticalCenter: parent.verticalCenter; spacing: 2 * page.ui.u
+                        Text { text: "Carpeta en InGe Drive"; color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 12 * page.ui.u; font.weight: Font.DemiBold }
+                        Text { width: parent.width; elide: page.folder.length ? Text.ElideMiddle : Text.ElideRight
+                               text: page.browsingBusy ? "Abriendo InGe Drive…" : page.folder.length ? (page.folderName.length ? page.folderName : "Carpeta seleccionada") : "Elige una carpeta"
+                               color: page.folder.length ? S.text : S.accent
+                               font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u; font.weight: Font.Bold }
+                    }
+                    Text { anchors.right: parent.right; anchors.rightMargin: 14 * page.ui.u; anchors.verticalCenter: parent.verticalCenter
+                           text: page.folder.length ? "Cambiar" : "Elegir"; color: S.accent
+                           font.family: page.ui.fontFamily; font.pixelSize: 14 * page.ui.u; font.weight: Font.Bold }
+                    MouseArea { id: stepFolderTap; anchors.fill: parent; enabled: page.writable && !page.browsingBusy; onClicked: page.openFolders() }
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "Carpeta en InGe Drive"
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap; color: S.muted
+                    text: "Proyecto: " + page.primaryName() + "\nPeríodo: " + S.date(page.start) + " – " + S.date(page.end)
+                    font.family: page.ui.fontFamily; font.pixelSize: 13.5 * page.ui.u
+                }
+            }
+
+            // Composición aprobada al editar (sin pasos).
+            Block {
+                visible: !page.stepped
+                ui: page.ui; glyph: 0xE063; heading: "2. Período"; subtitle: "Define el rango de fechas de la rendición"
+                Row {
+                    id: periodRow
+                    width: parent.width
+                    spacing: 10 * page.ui.u
+                    readonly property real dateWidth: Math.max(86 * page.ui.u, (width - 2 * spacing) * 0.22)
+                    readonly property real blockHeight: 2 * 96 * page.ui.u + 10 * page.ui.u
+                    Repeater {
+                        model: [{ key: "start", label: "Fecha\ninicio", tone: S.accentSoft }, { key: "end", label: "Fecha\nfin", tone: "#8B5CF6" }]
+                        delegate: Rectangle {
+                            id: dateBox
+                            required property var modelData
+                            readonly property string value: modelData.key === "start" ? page.start : page.end
+                            readonly property color tone: modelData.tone
+                            width: periodRow.dateWidth
+                            height: periodRow.blockHeight
+                            radius: 18 * page.ui.u
+                            color: dateTap.pressed ? S.glass(0.7) : S.glass(0.9)
+                            border.width: 1.5
+                            border.color: Qt.rgba(dateBox.tone.r, dateBox.tone.g, dateBox.tone.b, 0.55)
+                            Column {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                y: 18 * page.ui.u
+                                width: parent.width - 8 * page.ui.u
+                                spacing: 10 * page.ui.u
+                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: String.fromCharCode(0xE063); color: S.navy
+                                       font.family: page.ui.iconFamily; font.pixelSize: 26 * page.ui.u }
+                                Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: dateBox.modelData.label; color: S.text
+                                       font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u }
+                                Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: dateBox.value.length ? S.date(dateBox.value) : "—"
+                                       color: S.text; fontSizeMode: Text.HorizontalFit; minimumPixelSize: 10
+                                       font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u; font.weight: Font.DemiBold }
+                            }
+                            Rectangle { x: 6 * page.ui.u; width: parent.width - 12 * page.ui.u; height: 1; y: parent.height - 52 * page.ui.u; color: S.ink(0.08) }
+                            Text { anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - 38 * page.ui.u
+                                   text: String.fromCharCode(0xE06D); color: S.navy; font.family: page.ui.iconFamily; font.pixelSize: 20 * page.ui.u }
+                            MouseArea { id: dateTap; anchors.fill: parent; enabled: page.writable
+                                        onClicked: (dateBox.modelData.key === "start" ? startPicker : endPicker).openPicker() }
+                            Accessible.role: Accessible.Button
+                            Accessible.name: dateBox.modelData.label.replace("\n", " ") + " " + dateBox.value
+                        }
+                    }
+                    Column {
+                        width: parent.width - 2 * periodRow.dateWidth - 2 * periodRow.spacing
+                        spacing: 10 * page.ui.u
+                        Rectangle {                        // Carpeta documental (selector real InGe Drive)
+                            width: parent.width; height: 96 * page.ui.u
+                            radius: 18 * page.ui.u
+                            color: folderBoxTap.pressed ? S.glass(0.7) : S.glass(0.9)
+                            border.width: 1.5; border.color: Qt.rgba(46 / 255, 184 / 255, 114 / 255, 0.50)
+                            opacity: page.writable && page.primary.length > 0 ? 1 : 0.6
+                            Text { x: 12 * page.ui.u; anchors.verticalCenter: parent.verticalCenter; text: String.fromCharCode(0xE0D7); color: S.navy
+                                   font.family: page.ui.iconFamily; font.pixelSize: 26 * page.ui.u }
+                            Column {
+                                x: 48 * page.ui.u; width: parent.width - x - 30 * page.ui.u
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 3 * page.ui.u
+                                Text { width: parent.width; text: "Carpeta documental"; color: S.text; elide: Text.ElideRight
+                                       font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u; font.weight: Font.DemiBold }
+                                Text { width: parent.width; maximumLineCount: 2; wrapMode: Text.WordWrap; elide: Text.ElideRight
+                                       text: page.browsingBusy ? "Abriendo InGe Drive…"
+                                             : page.folder.length ? (page.folderName.length ? page.folderName : "Carpeta seleccionada")
+                                             : !page.primary.length ? "Elige primero el proyecto" : "Selecciona la carpeta donde se guardarán los documentos"
+                                       color: page.folder.length ? S.text : S.muted
+                                       font.family: page.ui.fontFamily; font.pixelSize: 12 * page.ui.u }
+                            }
+                            Text { anchors.right: parent.right; anchors.rightMargin: 8 * page.ui.u; anchors.verticalCenter: parent.verticalCenter
+                                   text: String.fromCharCode(0xE06D); color: S.navy; font.family: page.ui.iconFamily; font.pixelSize: 18 * page.ui.u }
+                            MouseArea { id: folderBoxTap; anchors.fill: parent; enabled: page.writable && !page.browsingBusy; onClicked: page.openFolders() }
+                            Accessible.role: Accessible.Button
+                            Accessible.name: "Carpeta documental"
+                        }
+                        Rectangle {                        // Nombre de la rendición (editable)
+                            width: parent.width; height: 96 * page.ui.u
+                            radius: 18 * page.ui.u
+                            color: S.glass(0.9)
+                            border.width: 1.5
+                            border.color: nameInput.activeFocus ? S.accentSoft : Qt.rgba(59 / 255, 130 / 255, 214 / 255, 0.45)
+                            Text { x: 12 * page.ui.u; anchors.verticalCenter: parent.verticalCenter; text: String.fromCharCode(0xE0CC); color: S.navy
+                                   font.family: page.ui.iconFamily; font.pixelSize: 26 * page.ui.u }
+                            Column {
+                                x: 48 * page.ui.u; width: parent.width - x - 10 * page.ui.u
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 2 * page.ui.u
+                                Text { width: parent.width; text: "Nombre de la rendición"; color: S.text; elide: Text.ElideRight
+                                       font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u; font.weight: Font.DemiBold }
+                                TextField {
+                                    id: nameInput
+                                    objectName: "renditionNameInput"
+                                    width: parent.width
+                                    height: 48 * page.ui.u
+                                    padding: 0; leftPadding: 0
+                                    background: null
+                                    text: page.displayName
+                                    placeholderText: "Asigna un nombre identificativo"
+                                    placeholderTextColor: S.faint
+                                    readOnly: page.editing || !page.writable
+                                    maximumLength: 160
+                                    color: S.text
+                                    selectByMouse: true
+                                    inputMethodHints: Qt.ImhNoPredictiveText
+                                    font.family: page.ui.fontFamily; font.pixelSize: 16 * page.ui.u
+                                    onTextEdited: { page.displayName = text; page.changed() }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Calendarios reales (lógica de RDateField: mínimo/máximo); sin caja propia.
+                RDateField { id: startPicker; visible: false; width: 0; ui: page.ui; value: page.start; readOnly: !page.writable; animatePicker: true
+                             onPicked: function(v) { page.start = v; page.changed() } }
+                RDateField { id: endPicker; visible: false; width: 0; ui: page.ui; value: page.end; minimum: page.start; readOnly: !page.writable; animatePicker: true
+                             onPicked: function(v) { page.end = v; page.changed() } }
             }
             Text {
                 width: parent.width
@@ -243,89 +636,6 @@ Item {
                 text: "El nombre existente se administra desde el archivo .rend en InGeDrive/Web. El código se conserva como identificador."
                 color: S.muted; wrapMode: Text.WordWrap
                 font.family: page.ui.fontFamily; font.pixelSize: 13 * page.ui.u
-            }
-            Text { visible: !page.embedded; text: "Proyectos asociados"; color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 17 * page.ui.u; font.weight: Font.DemiBold }
-            Text {
-                width: parent.width
-                visible: (page.app.st.projects || []).length === 0
-                text: "No hay proyectos autorizados para rendiciones en tu cuenta (o aún se están cargando)."
-                color: S.muted; wrapMode: Text.WordWrap
-                font.family: page.ui.fontFamily; font.pixelSize: 14 * page.ui.u
-            }
-            Repeater {
-                model: page.app.st.projects || []
-                delegate: Rectangle {
-                    required property var modelData
-                    readonly property string projectId: S.text_(modelData, "id", "project_id")
-                    readonly property bool checked: page.projects.indexOf(projectId) >= 0
-                    width: form.width
-                    height: 60 * page.ui.u
-                    radius: 16 * page.ui.u
-                    color: checked ? Qt.rgba(6 / 255, 84 / 255, 162 / 255, 0.08) : "#FFFFFF"
-                    border.width: 1; border.color: checked ? Qt.rgba(6 / 255, 84 / 255, 162 / 255, 0.35) : S.ink(0.07)
-                    Text {
-                        x: 22 * page.ui.u
-                        width: parent.width - (parent.checked ? primaryChip.width : 0) - 64 * page.ui.u
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: (parent.checked ? "✓  " : "") + page.ctl.projectLabel(parent.projectId)
-                        color: S.text; elide: Text.ElideRight
-                        font.family: page.ui.fontFamily; font.pixelSize: 17 * page.ui.u
-                    }
-                    Text {
-                        visible: !parent.checked
-                        anchors.right: parent.right; anchors.rightMargin: 18 * page.ui.u
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: String.fromCharCode(0xE06F)
-                        font.family: page.ui.iconFamily; font.pixelSize: 20 * page.ui.u
-                        color: S.muted
-                    }
-                    MouseArea { anchors.fill: parent; enabled: page.writable; onClicked: page.toggleProject(parent.projectId) }
-                    RChip {
-                        id: primaryChip
-                        anchors.right: parent.right; anchors.rightMargin: 10 * page.ui.u
-                        anchors.verticalCenter: parent.verticalCenter
-                        ui: page.ui
-                        visible: parent.checked
-                        label: page.primary === parent.projectId ? "Principal" : "Hacer principal"
-                        selected: page.primary === parent.projectId
-                        enabledChip: page.writable
-                        onActivated: page.setPrimary(parent.projectId)
-                    }
-                }
-            }
-
-            Text { text: "Período"; color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 19 * page.ui.u; font.weight: Font.DemiBold }
-            Row {
-                width: parent.width
-                spacing: 10 * page.ui.u
-                RDateField {
-                    width: (parent.width - 10 * page.ui.u) / 2
-                    ui: page.ui; label: "Desde"; value: page.start; readOnly: !page.writable
-                    onPicked: function(v) { page.start = v; page.changed() }
-                }
-                RDateField {
-                    width: (parent.width - 10 * page.ui.u) / 2
-                    ui: page.ui; label: "Hasta"; value: page.end; minimum: page.start; readOnly: !page.writable
-                    onPicked: function(v) { page.end = v; page.changed() }
-                }
-            }
-
-            Text { text: "Carpeta documental"; color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 19 * page.ui.u; font.weight: Font.DemiBold }
-            Text {
-                width: parent.width
-                text: page.folder.length ? (page.folderName.length ? page.folderName : "Carpeta seleccionada") : "Sin carpeta seleccionada"
-                color: page.folder.length ? S.text : S.muted
-                wrapMode: Text.WordWrap
-                font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u
-            }
-            RButton {
-                width: parent.width
-                ui: page.ui
-                glyph: 0xE0D7
-                label: page.folder.length ? "Cambiar carpeta" : "Elegir carpeta del proyecto principal"
-                busy: page.browsingBusy
-                enabledButton: page.writable && page.primary.length > 0
-                onActivated: page.openFolders()
             }
 
             Text {
@@ -336,21 +646,46 @@ Item {
                 font.family: page.ui.fontFamily; font.pixelSize: 14 * page.ui.u
             }
             RButton {
+                visible: !page.stepped
                 width: parent.width
+                height: 56 * page.ui.u
+                radius: 18 * page.ui.u
                 ui: page.ui
                 primary: true
-                glyph: 0xE14D
+                glyph: 0xE0C8                           // file-plus (Lucide)
                 label: page.editing ? "Guardar cambios" : "Crear rendición"
                 busy: page.app.busy("header:" + (page.editing ? page.original.localId : "new"))
                 enabledButton: page.writable
                 onActivated: page.save()
             }
-            Text {
-                width: parent.width
-                text: "Se guarda primero en el equipo y luego se sincroniza con el servidor; el estado de sincronización se muestra en la ficha."
-                color: S.faint; wrapMode: Text.WordWrap
-                font.family: page.ui.fontFamily; font.pixelSize: 13 * page.ui.u
-            }
+        }
+    }
+
+    // Acciones de los pasos: siempre visibles al pie de la hoja.
+    Row {
+        id: stepActions
+        objectName: "renditionStepActions"
+        visible: page.stepped && !page.browsing
+        anchors.bottom: parent.bottom; anchors.bottomMargin: 4 * page.ui.u
+        x: page.embedded ? 12 * page.ui.u : page.ui.gutter
+        width: parent.width - 2 * x
+        height: 54 * page.ui.u
+        spacing: 10 * page.ui.u
+        RButton {
+            visible: page.step > 1
+            width: (parent.width - parent.spacing) / 3; height: parent.height; radius: 16 * page.ui.u
+            ui: page.ui; label: "Atrás"; color: S.ink(0.06)
+            onActivated: { page.error = ""; page.step--; formFlick.contentY = 0 }
+        }
+        RButton {
+            objectName: "renditionStepNext"
+            width: page.step > 1 ? (parent.width - parent.spacing) * 2 / 3 : parent.width; height: parent.height; radius: 16 * page.ui.u
+            ui: page.ui; primary: true
+            glyph: page.step === 3 ? 0xE0C8 : 0
+            label: page.step === 3 ? "Crear rendición" : "Continuar"
+            busy: page.app.busy("header:new")
+            enabledButton: page.writable
+            onActivated: page.nextStep()
         }
     }
 

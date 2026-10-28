@@ -10,6 +10,8 @@
 #include "renditionworkingcontract.h"
 
 #include <QFile>
+#include <QDateTime>
+#include <QDebug>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QFileInfo>
@@ -597,9 +599,35 @@ void RenditionRepository::listVersions(const QString &renditionId)
 
 void RenditionRepository::deleteDraft(const QString &renditionId, qint64 expectedRowVersion)
 {
+    // Safe correlation for logcat: identifiers/version only, never session data.
+    qInfo().noquote() << "INGE_RENDITIONS_DELETE rpc=delete_my_rendition_draft_v01"
+                      << "p_rendition_id=" << renditionId
+                      << "p_expected_row_version=" << expectedRowVersion;
     callRpc(QStringLiteral("rendition_delete"), QStringLiteral("delete_my_rendition_draft_v01"),
         {{QStringLiteral("p_rendition_id"), renditionId}, {QStringLiteral("p_expected_row_version"), expectedRowVersion}},
         [this](const QVariant &payload) { emit draftDeleted(firstRow(payload)); });
+}
+
+void RenditionRepository::trashDraft(const QString &renditionId,
+                                     qint64 expectedRowVersion,
+                                     const QString &requestId)
+{
+    callRpc(QStringLiteral("rendition_trash"), QStringLiteral("trash_my_rendition_draft_v01"),
+            {{QStringLiteral("p_rendition_id"), renditionId},
+             {QStringLiteral("p_expected_row_version"), expectedRowVersion},
+             {QStringLiteral("p_request_id"), requestId}},
+            [this](const QVariant &payload) { emit draftTrashed(firstRow(payload)); });
+}
+
+void RenditionRepository::archiveRendition(const QString &renditionId,
+                                           qint64 expectedRowVersion,
+                                           const QString &requestId)
+{
+    callRpc(QStringLiteral("rendition_archive"), QStringLiteral("archive_my_rendition_v01"),
+            {{QStringLiteral("p_rendition_id"), renditionId},
+             {QStringLiteral("p_expected_row_version"), expectedRowVersion},
+             {QStringLiteral("p_request_id"), requestId}},
+            [this](const QVariant &payload) { emit renditionArchived(firstRow(payload)); });
 }
 
 void RenditionRepository::presentRendition(const QString &renditionId,
@@ -979,6 +1007,7 @@ void RenditionRepository::callRpc(const QString &operation,
     const QByteArray body = QJsonDocument::fromVariant(arguments).toJson(
         QJsonDocument::Compact);
     QNetworkReply *reply = client->nam()->post(request, body);
+    const qint64 startedMs = QDateTime::currentMSecsSinceEpoch();
     QTimer::singleShot(30000, reply, [reply]() {
         if (!reply->isFinished()) reply->abort();
     });
@@ -988,23 +1017,31 @@ void RenditionRepository::callRpc(const QString &operation,
 
     connect(reply, &QNetworkReply::finished, this,
             [this, reply = QPointer<QNetworkReply>(reply), operation, requestEpoch,
-             onSuccess = std::move(onSuccess)]() mutable {
+             startedMs, onSuccess = std::move(onSuccess)]() mutable {
         endRequest();
         if (!reply)
             return;
 
         const int status = reply->attribute(
             QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QByteArray raw = reply->readAll();
+        // Tras abort() por timeout Qt puede cerrar el dispositivo del reply.
+        // readAll() sobre un dispositivo cerrado genera un warning adicional.
+        const QByteArray raw = reply->isOpen() ? reply->readAll() : QByteArray{};
         const QNetworkReply::NetworkError networkError = reply->error();
         const QString networkMessage = reply->errorString();
         reply->deleteLater();
         // Antes del filtro de época: una respuesta tardía también prueba que el servidor responde.
-        emit transportObserved(int(RenditionConnectivity::classifyHttp(
-            status, networkError != QNetworkReply::NoError)));
-
+        // Una respuesta de la cuenta anterior NO es evidencia de conectividad
+        // para la sesion actual (logout/cambio de cuenta).
         if (requestEpoch != m_requestEpoch)
             return;
+        const qint64 elapsedMs = QDateTime::currentMSecsSinceEpoch() - startedMs;
+        if (networkError != QNetworkReply::NoError || status >= 500 || elapsedMs >= 2000)
+            qInfo().noquote() << "INGE_RENDITIONS_RPC op=" << operation
+                              << "http=" << status << "networkError=" << int(networkError)
+                              << "elapsedMs=" << elapsedMs;
+        emit transportObserved(int(RenditionConnectivity::classifyHttp(
+            status, networkError != QNetworkReply::NoError)));
 
         QJsonParseError parseError;
         const QJsonDocument document = QJsonDocument::fromJson(raw, &parseError);

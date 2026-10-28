@@ -99,7 +99,9 @@ QVariantList RenditionLocalStore::renditions() const
 {
     QVariantList visible;
     for (const auto &row : m_renditions)
-        if (!row.toMap().value(QStringLiteral("archived")).toBool()) visible.append(row);
+        if (!row.toMap().value(QStringLiteral("archived")).toBool()
+            && !row.toMap().value(QStringLiteral("trashed")).toBool()
+            && !row.toMap().value(QStringLiteral("fileArchived")).toBool()) visible.append(row);
     return visible;
 }
 
@@ -108,9 +110,15 @@ bool RenditionLocalStore::removeDraft(const QString &localId)
     const int index = renditionIndex(localId);
     if (index < 0) return false;
     auto draft = m_renditions[index].toMap();
+    if (draft.value(QStringLiteral("trashed")).toBool() || draft.value(QStringLiteral("trashRequested")).toBool()
+        || draft.value(QStringLiteral("fileArchived")).toBool() || draft.value(QStringLiteral("archiveRequested")).toBool()) {
+        setLastError(QStringLiteral("La rendición tiene una operación de Archivero o Papelera pendiente o confirmada.")); return false;
+    }
     if (draft.value(QStringLiteral("archived")).toBool()) return true;
-    if (!assertDraftStatus(draft)) return false;
-    if (draft.value("status").toString() != "BORRADOR" || !draft.value("currentVersionId").toString().isEmpty()) {
+    // Content editing is a different capability. For remote rows the delete RPC
+    // enforces active profile, ownership, no submitted versions and row-version CAS.
+    if (draft.value(QStringLiteral("isSnapshot")).toBool()
+        || draft.value("status").toString() != "BORRADOR" || !draft.value("currentVersionId").toString().isEmpty()) {
         setLastError(QStringLiteral("Sólo se elimina un borrador sin versiones presentadas.")); return false;
     }
     const auto remote = draft.value(QStringLiteral("remoteId")).toString();
@@ -160,6 +168,128 @@ bool RenditionLocalStore::markDraftDeleted(const QString &localId, const QVarian
     m_renditions[index] = draft;
     markOutboxState(QStringLiteral("rendition_delete"), localId, {}, QString::fromLatin1(Synced));
     return persist();
+}
+
+bool RenditionLocalStore::requestDraftTrash(const QString &localId)
+{
+    return requestRenditionLifecycle(localId,false);
+}
+
+bool RenditionLocalStore::requestRenditionArchive(const QString &localId)
+{
+    return requestRenditionLifecycle(localId,true);
+}
+
+bool RenditionLocalStore::requestRenditionLifecycle(const QString &localId, bool archive)
+{
+    const int index = renditionIndex(localId);
+    if (index < 0) { setLastError(QStringLiteral("La rendición local ya no existe.")); return false; }
+    auto draft = m_renditions[index].toMap();
+    const QString pendingKey=archive ? QStringLiteral("archiveRequested") : QStringLiteral("trashRequested");
+    const QString operation=archive ? QStringLiteral("rendition_archive") : QStringLiteral("rendition_trash");
+    if (draft.value(pendingKey).toBool()) return true;
+    if (draft.value(QStringLiteral("archived")).toBool() || draft.value(QStringLiteral("trashed")).toBool()
+        || draft.value(QStringLiteral("fileArchived")).toBool() || draft.value(QStringLiteral("trashRequested")).toBool()
+        || draft.value(QStringLiteral("archiveRequested")).toBool() || draft.value(QStringLiteral("isSnapshot")).toBool()
+        || (archive ? !RenditionContract::canArchiveState(draft)
+                    : (draft.value(QStringLiteral("status")).toString() != QLatin1String("BORRADOR")
+                       || !draft.value(QStringLiteral("currentVersionId")).toString().isEmpty()))) {
+        setLastError(archive ? QStringLiteral("La rendición no está disponible para archivar o está en revisión.")
+                             : QStringLiteral("Solo se envía a la Papelera un borrador activo sin versiones presentadas.")); return false;
+    }
+    const QString remote = draft.value(QStringLiteral("remoteId")).toString();
+    if (remote.isEmpty() || stateOf(draft) != QLatin1String(Synced)
+        || draft.value(QStringLiteral("rowVersion")).toLongLong() <= 0) {
+        setLastError(QStringLiteral("Sincroniza la rendición antes de continuar.")); return false;
+    }
+    for (const auto &value : m_outbox) {
+        const auto op = value.toMap();
+        if (op.value(QStringLiteral("aggregateLocalId")).toString() == localId
+            && op.value(QStringLiteral("state")).toString() != QLatin1String(Synced)
+            && op.value(QStringLiteral("state")).toString() != QLatin1String(LocalOnly)) {
+            setLastError(QStringLiteral("Sincroniza los cambios pendientes antes de continuar.")); return false;
+        }
+    }
+    for (const auto &expense : draft.value(QStringLiteral("expenses")).toList()) {
+        if (!expense.toMap().value(QStringLiteral("archived")).toBool()
+            && stateOf(expense.toMap()) != QLatin1String(Synced)) {
+            setLastError(QStringLiteral("Sincroniza los gastos antes de continuar.")); return false;
+        }
+    }
+    const auto oldRows = m_renditions, oldOutbox = m_outbox;
+    draft.insert(pendingKey,true);
+    draft.insert(QStringLiteral("syncState"),QString::fromLatin1(PendingUpdate));
+    m_renditions[index] = draft;
+    upsertOutbox(operation,localId,remote,{},newUuid(),
+        {{QStringLiteral("expectedRowVersion"),draft.value(QStringLiteral("rowVersion"))}},QString::fromLatin1(PendingUpdate));
+    if (persist()) return true;
+    m_renditions=oldRows; m_outbox=oldOutbox; return false;
+}
+
+bool RenditionLocalStore::markDraftTrashed(const QString &localId, const QVariantMap &remote)
+{
+    return markRenditionLifecycle(localId,remote,false);
+}
+
+bool RenditionLocalStore::markRenditionArchived(const QString &localId, const QVariantMap &remote)
+{
+    return markRenditionLifecycle(localId,remote,true);
+}
+
+bool RenditionLocalStore::markRenditionLifecycle(const QString &localId, const QVariantMap &remote, bool archive)
+{
+    const int index = renditionIndex(localId);
+    if (index < 0) return false;
+    auto draft = m_renditions[index].toMap();
+    if (remoteId(remote) != draft.value(QStringLiteral("remoteId")).toString()
+        || remote.value(QStringLiteral("lifecycle")).toString() != (archive ? QLatin1String("ARCHIVED") : QLatin1String("TRASHED"))
+        || remote.value(QStringLiteral("node_id")).toString().isEmpty()
+        || remote.value(QStringLiteral("node_version")).toLongLong() <= 0
+        || remoteRowVersion(remote,0) < draft.value(QStringLiteral("rowVersion")).toLongLong()
+        || remoteRowVersion(remote,0) <= 0
+        || (!draft.value(QStringLiteral("documentNodeId")).toString().isEmpty()
+            && draft.value(QStringLiteral("documentNodeId")).toString() != remote.value(QStringLiteral("node_id")).toString())) {
+        setLastError(QStringLiteral("El servidor no confirmó el cambio de Archivero o Papelera.")); return false;
+    }
+    const auto oldRows=m_renditions, oldOutbox=m_outbox;
+    draft.insert(archive ? QStringLiteral("fileArchived") : QStringLiteral("trashed"),true);
+    draft.remove(archive ? QStringLiteral("archiveRequested") : QStringLiteral("trashRequested"));
+    draft.remove(QStringLiteral("syncError"));
+    draft.insert(QStringLiteral("rowVersion"),remoteRowVersion(remote,0));
+    draft.insert(QStringLiteral("documentNodeId"),remote.value(QStringLiteral("node_id")));
+    draft.insert(QStringLiteral("documentNodeVersion"),remote.value(QStringLiteral("node_version")));
+    draft.insert(QStringLiteral("syncState"),QString::fromLatin1(Synced));
+    m_renditions[index]=draft;
+    markOutboxState(archive ? QStringLiteral("rendition_archive") : QStringLiteral("rendition_trash"),localId,{},QString::fromLatin1(Synced));
+    if (persist()) return true;
+    m_renditions=oldRows; m_outbox=oldOutbox; return false;
+}
+
+bool RenditionLocalStore::rejectDraftTrash(const QString &localId, const QString &error)
+{
+    return rejectRenditionLifecycle(localId,error,false);
+}
+
+bool RenditionLocalStore::rejectRenditionArchive(const QString &localId, const QString &error)
+{
+    return rejectRenditionLifecycle(localId,error,true);
+}
+
+bool RenditionLocalStore::rejectRenditionLifecycle(const QString &localId, const QString &error, bool archive)
+{
+    const int index=renditionIndex(localId);
+    if (index < 0) return false;
+    const auto oldRows=m_renditions, oldOutbox=m_outbox;
+    auto draft=m_renditions[index].toMap();
+    draft.remove(archive ? QStringLiteral("archiveRequested") : QStringLiteral("trashRequested"));
+    draft.remove(QStringLiteral("syncError"));
+    draft.insert(QStringLiteral("syncState"),QString::fromLatin1(Synced));
+    m_renditions[index]=draft;
+    // A definitive rejection did not mutate the server. Keep the failed receipt
+    // locally for diagnosis; a future explicit action gets a new request_id.
+    markOutboxState(archive ? QStringLiteral("rendition_archive") : QStringLiteral("rendition_trash"),localId,{},QString::fromLatin1(LocalOnly),error);
+    if (persist()) return true;
+    m_renditions=oldRows; m_outbox=oldOutbox; return false;
 }
 
 RenditionLocalStore::RenditionLocalStore(const QString &accountScope, QObject *parent)
@@ -943,7 +1073,9 @@ void RenditionLocalStore::reconcileCompleteRenditionList(const QVariantList &rem
     for (int i = 0; i < m_renditions.size(); ++i) {
         auto draft = m_renditions[i].toMap();
         const auto id = draft.value("remoteId").toString();
-        if (id.isEmpty() || visible.contains(id) || draft.value("archived").toBool()) continue;
+        if (id.isEmpty() || visible.contains(id) || draft.value("archived").toBool()
+            || draft.value("trashed").toBool() || draft.value("trashRequested").toBool()
+            || draft.value("fileArchived").toBool() || draft.value("archiveRequested").toBool()) continue;
         bool pending = stateOf(draft) != QLatin1String(Synced);
         for (const auto &op : m_outbox) {
             const auto row = op.toMap();
@@ -963,7 +1095,7 @@ void RenditionLocalStore::reconcileCompleteRenditionList(const QVariantList &rem
     if (changed) persist();
 }
 
-void RenditionLocalStore::mergeRemoteRenditions(const QVariantList &remoteRows)
+void RenditionLocalStore::mergeRemoteRenditions(const QVariantList &remoteRows, bool fromActiveList)
 {
     bool changed = false;
     for (const QVariant &value : remoteRows) {
@@ -973,6 +1105,16 @@ void RenditionLocalStore::mergeRemoteRenditions(const QVariantList &remoteRows)
             continue;
         int index = renditionIndexByRemoteId(id);
         if (index >= 0 && m_renditions[index].toMap().value(QStringLiteral("archived")).toBool()) continue;
+        // A missing row/old list cannot decide an in-flight trash request. Replay
+        // the same request_id first; after acknowledgement a fresh list is recovery.
+        if (index >= 0) {
+            const auto saved=m_renditions[index].toMap();
+            if (saved.value(QStringLiteral("trashRequested")).toBool() || saved.value(QStringLiteral("archiveRequested")).toBool()) continue;
+            // Archived details remain readable. Only the ACTIVE list is proof of
+            // reactivation; a read-only detail response must not unhide the row.
+            if (!fromActiveList && (saved.value(QStringLiteral("fileArchived")).toBool()
+                                    || saved.value(QStringLiteral("trashed")).toBool())) continue;
+        }
         remote = RenditionContract::normalize(remote, index < 0 ? QVariantMap{} : m_renditions.at(index).toMap());
         if (index < 0) {
             QVariantMap draft{
@@ -1008,7 +1150,12 @@ void RenditionLocalStore::mergeRemoteRenditions(const QVariantList &remoteRows)
             continue;
         }
         QVariantMap draft = m_renditions.at(index).toMap();
-        draft.insert(QStringLiteral("canEditContent"), remote.value(QStringLiteral("canEditContent"), false));
+        // La lista no trae el permiso efectivo (sólo el detalle): si falta, se
+        // conserva el último confirmado. Antes se forzaba a false y bloqueaba
+        // «Presentar» en todo borrador tras refrescar la lista.
+        if (remote.contains(QStringLiteral("canEditContent")) || remote.contains(QStringLiteral("can_edit_content")))
+            draft.insert(QStringLiteral("canEditContent"),
+                         remote.value(QStringLiteral("canEditContent"), remote.value(QStringLiteral("can_edit_content"), false)));
         draft.insert(QStringLiteral("isBlocked"), remote.value(QStringLiteral("is_blocked"), false));
 
         for (const auto &key : {QStringLiteral("funding"),QStringLiteral("exchangeRate")}) {
@@ -1030,6 +1177,11 @@ void RenditionLocalStore::mergeRemoteRenditions(const QVariantList &remoteRows)
         // A delayed response must never roll back a newer local server version.
         if (localVersion > 0 && observedVersion < localVersion)
             continue;
+        if (draft.value(QStringLiteral("trashed")).toBool() || draft.value(QStringLiteral("fileArchived")).toBool()) {
+            draft.remove(QStringLiteral("trashed"));
+            draft.remove(QStringLiteral("fileArchived"));
+            draft.remove(QStringLiteral("remoteMissing"));
+        }
         if (localState == QLatin1String(NeedsReconciliation)
             && RenditionContract::canEditWorkingCopy(remote) && observedVersion == localVersion) {
             // The failed CAS did not commit. Replay the original intention;
@@ -1727,6 +1879,8 @@ QVariantList RenditionLocalStore::pendingOperations() const
         const bool idempotent = operation == "funding_set" || operation == "exchange_set"
             || operation == QLatin1String("rendition_create")
             || operation == QLatin1String("rendition_delete")
+            || operation == QLatin1String("rendition_trash")
+            || operation == QLatin1String("rendition_archive")
             || operation == QLatin1String("expense_delete")
             || operation == QLatin1String("expense_create")
             || operation == QLatin1String("attachment_reserve")
@@ -1735,7 +1889,8 @@ QVariantList RenditionLocalStore::pendingOperations() const
             && state != QLatin1String(PendingUpdate)
             && !(state == QLatin1String(Error) && idempotent)
             && !(state == QLatin1String(NeedsReconciliation)
-                 && (operation == QLatin1String("attachment_reserve") || operation.endsWith(QLatin1String("_delete")))))
+                 && (operation == QLatin1String("attachment_reserve") || operation.endsWith(QLatin1String("_delete"))
+                     || operation == QLatin1String("rendition_trash") || operation == QLatin1String("rendition_archive"))))
             continue;
         QVariantMap payload = item.value(QStringLiteral("payload")).toMap();
         const QString aggregateLocalId = item.value(QStringLiteral("aggregateLocalId")).toString();
@@ -1756,7 +1911,8 @@ QVariantList RenditionLocalStore::pendingOperations() const
             payload.insert(QStringLiteral("expenseRemoteId"), confirmedId);
         }
         if (!RenditionContract::canEditWorkingCopy(draft)
-            && operation != QLatin1String("present") && operation != QLatin1String("rendition_delete"))
+            && operation != QLatin1String("present") && operation != QLatin1String("rendition_delete")
+            && operation != QLatin1String("rendition_trash") && operation != QLatin1String("rendition_archive"))
             continue;
         if ((operation == "funding_set" || operation == "exchange_set" || operation == QLatin1String("expense_create")
              || operation.startsWith(QLatin1String("attachment_")))
@@ -1783,7 +1939,9 @@ QVariantList RenditionLocalStore::pendingOperations() const
 bool RenditionLocalStore::markRenditionSyncing(const QString &localId)
 {
     const QVariantMap draft = rendition(localId);
-    const QString operation = draft.value(QStringLiteral("archived")).toBool() ? QStringLiteral("rendition_delete") : draft.value(QStringLiteral("remoteId")).toString().isEmpty()
+    const QString operation = draft.value(QStringLiteral("archiveRequested")).toBool() ? QStringLiteral("rendition_archive")
+        : draft.value(QStringLiteral("trashRequested")).toBool() ? QStringLiteral("rendition_trash")
+        : draft.value(QStringLiteral("archived")).toBool() ? QStringLiteral("rendition_delete") : draft.value(QStringLiteral("remoteId")).toString().isEmpty()
         ? QStringLiteral("rendition_create") : QStringLiteral("rendition_update");
     markOutboxState(operation, localId, {}, QString::fromLatin1(Syncing));
     return markRenditionState(localId, QString::fromLatin1(Syncing));
@@ -1868,7 +2026,9 @@ bool RenditionLocalStore::markRenditionState(const QString &localId,
     else
         draft.insert(QStringLiteral("syncError"), error);
     m_renditions[index] = draft;
-    const QString operation = draft.value(QStringLiteral("archived")).toBool() ? QStringLiteral("rendition_delete") : draft.value(QStringLiteral("remoteId")).toString().isEmpty()
+    const QString operation = draft.value(QStringLiteral("archiveRequested")).toBool() ? QStringLiteral("rendition_archive")
+        : draft.value(QStringLiteral("trashRequested")).toBool() ? QStringLiteral("rendition_trash")
+        : draft.value(QStringLiteral("archived")).toBool() ? QStringLiteral("rendition_delete") : draft.value(QStringLiteral("remoteId")).toString().isEmpty()
         ? QStringLiteral("rendition_create") : QStringLiteral("rendition_update");
     markOutboxState(operation, localId, {}, state, error);
     return persist();

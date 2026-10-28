@@ -1,4 +1,4 @@
-// Prueba QML host de la subapp Rendiciones: carga las pantallas reales
+﻿// Prueba QML host de la subapp Rendiciones: carga las pantallas reales
 // (qml/Mobile/renditions) con el RenditionUiController real y un bridge
 // SINTÉTICO que imita el contrato JSON de RenditionFlutterBridge (comandos,
 // commandResult por requestId y eventos "state"). Recorre el flujo
@@ -336,7 +336,9 @@ int main(int argc, char **argv)
     // REN-06/07: nueva rendición con proyecto y carpeta de InGe Drive.
     js("openCreate()");
     check(waitFor([&]() { return js("createSheet.editor !== null").toBool(); }), "new rendition sheet opened");
-    js("var e = createSheet.editor; e.start = '2026-10-01'; e.end = '2026-10-31'; e.toggleProject('p1'); e.toggleProject('p2'); e.setPrimary('p1'); e.changed()");
+    check(js("modalOpen").toBool() && !js("stack.currentItem.listInteractive").toBool(), "SCROLL background list frozen while 'Nueva rendición' is open");
+    check(root->findChild<QObject *>("renditionNameInput") != nullptr, "IMG1 name editable inside the compact period block");
+    js("var e = createSheet.editor; e.displayName = 'Visita de campo Huarmey'; e.start = '2026-10-01'; e.end = '2026-10-31'; e.toggleProject('p1'); e.toggleProject('p2'); e.setPrimary('p1'); e.changed()");
     check(waitFor([&]() { return bridge.count("saveEditorDraft") >= 1; }, 2000), "REN-21 header autosave persisted");
     check(waitFor([&]() { return bridge.drafts.contains("header:new"); }), "draft stored under header:new");
     js("createSheet.editor.openFolders()");
@@ -348,6 +350,23 @@ int main(int argc, char **argv)
     check(waitFor([&]() { return js("createSheet.editor.folder").toString() == "f1"; }), "folder validated by folderCapabilities");
     js("createSheet.editor.save(); createSheet.editor.save()");
     check(waitFor([&]() { return js("stack.currentItem.localId === 'local-1'").toBool(); }), "REN-06 created rendition opens detail");
+    check(js("stack.currentItem.tab === 'expenses' && stack.currentItem.expensesTab.visible").toBool(), "UI03 expense overview is the initial visible route");
+    check(!js("modalOpen").toBool(), "SCROLL sheet closed releases the background");
+    check(waitFor([&]() { return js("dockActions.map(function(a) { return a.id }).join(',')").toString()
+                                 == "renditions.search,renditions.info,renditions.new,renditions.activity"; }),
+          "IMG2 rendition dock: Buscar, Información, +, Actividad (no Atrás)");
+    check(js("dockActions[2].tapCommand === true && dockActions[2].children.length === 4").toBool(), "IMG2 + taps quick expense; Deep Press shows creation options");
+    js("dockCommand('renditions.quickExpense')");
+    check(waitFor([&]() { auto *p = root->findChild<QObject *>("expenseEditorPopup"); return p && p->property("visible").toBool(); }),
+          "IMG2 + opens the approved expense editor (new expense)");
+    QMetaObject::invokeMethod(root->findChild<QObject *>("expandedExpenseForm"), "requestClose");
+    js("dockCommand('renditions.info')");
+    check(waitFor([&]() { return js("infoPanel.open && infoPanel.financialRows.length === 6 && infoPanel.generalRows.length === 4").toBool(); }), "IMG2 Información selector with real values");
+    js("dockCommand('renditions.activity')");
+    check(js("activityPanel.open && !infoPanel.open").toBool(), "IMG2 Actividad selector replaces Información");
+    js("dockCommand('renditions.search')");
+    check(js("searchPanel.open && searchPanel.tab !== null").toBool(), "IMG2 Buscar selector bound to the real expenses list");
+    js("searchPanel.close()");
     check(bridge.count("create") == 1, "REN-26 double tap sends one create");
     const auto create = bridge.lastCommand("create").value("arguments").toMap();
     check(create.value("periodStart") == "2026-10-01" && create.value("periodEnd") == "2026-10-31"
@@ -390,6 +409,21 @@ int main(int argc, char **argv)
           && attachment.value("clientIntentId").toString().endsWith(attachment.value("localUri").toString()), "REN-16 attachSupport contract");
     check(js("stack.currentItem.objectName === '' && stack.currentItem.localId === 'local-1'").toBool(), "back on detail");
     check(waitFor([&]() { return root->findChild<QObject *>("expensesTab")->property("expenses").toList().size() == 1; }), "REN-13 expense listed in detail");
+    {   // IMG2-B/C: gasto expandido en la misma ficha (formulario compacto + comprobantes), guarda con CAS.
+        QObject *tabObj = root->findChild<QObject *>("expensesTab");
+        QMetaObject::invokeMethod(tabObj, "expand", Q_ARG(QVariant, tabObj->property("expenses").toList().first()));
+        check(waitFor([&]() { return root->findChild<QObject *>("expandedExpenseForm") != nullptr
+                                     && root->findChild<QObject *>("expenseEditorPopup") != nullptr && root->findChild<QObject *>("expenseEditorPopup")->property("visible").toBool(); }), "IMG2 expense opens its editor in the same rendition");
+        QObject *quick = root->findChild<QObject *>("expandedExpenseForm");
+        check(quick->property("files").toList().size() >= 1, "IMG2 attachments listed inside the expanded expense");
+        const int saves = bridge.count("saveExpense");
+        QMetaObject::invokeMethod(quick, "save");
+        check(waitFor([&]() { return bridge.count("saveExpense") == saves + 1; }), "IMG2 inline save uses saveExpense");
+        const auto inlineArgs = bridge.lastCommand("saveExpense").value("arguments").toMap();
+        check(inlineArgs.value("expenseLocalId") == "exp-1" && inlineArgs.contains("expectedExpenseRowVersion")
+              && inlineArgs.value("expense").toMap().value("concept") == "Almuerzo de campo para cuadrilla", "IMG2 inline edit keeps identity, CAS and data");
+        check(waitFor([&]() { return tabObj->property("expandedId").toString().isEmpty(); }), "IMG2 expanded form closes after saving");
+    }
 
     // REN-14/15: fondo PEN/USD y tipo de cambio manual.
     QObject *financial = root->findChild<QObject *>("financialTab");
@@ -434,9 +468,9 @@ int main(int argc, char **argv)
     check(waitFor([&]() { return review->property("versions").toList().size() == 1; }), "REN-19 versions listed");
     check(!js("stack.currentItem.writable").toBool(), "REN-25 presented rendition read only");
 
-    // REN-05: desde otra pestaña, atrás vuelve primero al Resumen (detalle aprobado);
-    // desde el Resumen, vuelve a la lista y libera la selección.
-    check(back() && js("stack.currentItem.tab").toString() == "summary" && depth() == 2, "back from review returns to summary");
+    // REN-05: desde otra pestaña, atrás vuelve primero a la vista general de gastos;
+    // desde la vista general, vuelve a la lista y libera la selección.
+    check(back() && js("stack.currentItem.tab").toString() == "expenses" && depth() == 2, "back from review returns to expense overview");
     check(back() && waitFor([&]() { return depth() == 1; }), "back to renditions home");
     check(waitFor([&]() { return bridge.count("closeDetail") >= 1; }), "detail closed in bridge");
     check(!back(), "REN-05 at root back returns to InGe+ Home");
@@ -581,12 +615,12 @@ int main(int argc, char **argv)
         bridge.renditions[i] = r;
     }
     bridge.push();
-    js("stack.currentItem.tab = 'summary'");
+    js("stack.currentItem.tab = 'expenses'");
     check(waitFor([&]() { return js("stack.currentItem.conflict").toBool(); }), "C1 real CAS conflict detected");
     check(js("syncMode").toString() == "error" && bridge.connection == "ONLINE", "C2 conflict is error, not offline");
     check(!js("stack.currentItem.editable").toBool(), "C3 local changes protected (no edit over conflict)");
     check(js("stack.currentItem.suggestions[0].key").toString() == "sync", "C4 safe resolution offered (bring server version)");
-    check(visibleText("Conflicto con el servidor"), "C5 conflict indicator inside its management screen");
+    check(!root->findChild<QObject *>("addQuickExpense")->property("enabledButton").toBool(), "C5 quick creation blocked during a real conflict");
     back();
     check(waitFor([&]() { return depth() == 1; }), "C6 back to list");
 
@@ -670,7 +704,7 @@ int main(int argc, char **argv)
     js("var cb = confirmDialog.acceptCallback; confirmDialog.close(); cb()");
     check(waitFor([&]() { return bridge.count("archiveWorking") == 1 && !visibleText("borrador sin registrar"); }), "G6 draft discarded");
     back();                                                   // sección Gastos -> Resumen (detalle aprobado)
-    check(waitFor([&]() { return js("stack.currentItem.tab").toString() == "summary"; }), "G7 back to summary");
+    check(waitFor([&]() { return js("stack.currentItem.tab").toString() == "expenses"; }), "G7 back to expense overview");
     back();
     check(waitFor([&]() { return depth() == 1; }), "G7 back to list");
 

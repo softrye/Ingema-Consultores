@@ -71,6 +71,11 @@ public:
 
     Q_INVOKABLE void refreshProjects();
     Q_INVOKABLE void listProjectCalicatas(const QString &projectId);
+    // Home de Calicatas: UNA consulta de solo lectura con todos los proyectos
+    // autorizados (project_id=in.(...), RLS decide). No toca el espejo de
+    // unicidad del editor (m_projectCalicatas) ni cancela listProjectCalicatas.
+    // serial lo elige QML y vuelve en la señal (respuestas viejas se ignoran allí).
+    Q_INVOKABLE void listHomeCalicatas(const QStringList &projectIds, int serial);
     Q_INVOKABLE void resolveProjectWorkspace(const QString &projectId);
     Q_INVOKABLE void loadRemoteDocument(CalicataDocument *document, const QString &projectId,
                                         const QString &calicataId);
@@ -117,6 +122,13 @@ public:
     Q_INVOKABLE void activateCloudPhotoVersion(CalicataDocument *document, int idx, const QString &versionId);
     Q_INVOKABLE void discardCloudPhotoVersion(CalicataDocument *document, int idx, const QString &versionId, bool discarded);
     Q_INVOKABLE void loadRemoteLogos(CalicataDocument *document, const QString &resourcesDir);
+    // Home de Calicatas: fotografía vigente de una calicata remota (solo lectura;
+    // misma tabla, bucket y descarga firmada que la ficha). Responde con
+    // calicataCoverReady(calicataId, url) — url vacía si no hay foto o falla.
+    Q_INVOKABLE void requestCalicataCover(const QString &projectId, const QString &calicataId);
+    Q_INVOKABLE void listLogoLibrary(CalicataDocument *document, const QString &parentNodeId = QString());
+    Q_INVOKABLE void selectLibraryLogo(CalicataDocument *document, const QString &categoryCode,
+                                      const QString &spaceId, const QString &nodeId, const QString &resourcesDir);
     Q_INVOKABLE void restoreRemoteLogo(CalicataDocument *document, const QString &categoryCode,
                                        const QString &storagePath, const QString &resourcesDir);
     // activity_logs of this calicata, newest first, 30 per page.
@@ -147,6 +159,11 @@ signals:
     void projectsLoadFailed(const QString &message);
     void projectCalicatasLoaded(const QString &projectId, const QVariantList &rows);
     void projectCalicatasLoadFailed(const QString &projectId, const QString &message);
+    void homeCalicatasLoaded(int serial, const QVariantList &rows);
+    // Respuesta real de list_my_project_memberships_v01 (projectsChanged también
+    // se emite al cambiar de cuenta, con la lista vacía, antes de consultar).
+    void projectsLoaded(int count);
+    void homeCalicatasLoadFailed(int serial, const QString &message);
     void workspaceResolved(const QString &projectId, const QString &spaceId);
     void workspaceResolveFailed(const QString &projectId, const QString &message);
     void remoteLoadSucceeded(const QString &localDocumentId, const QString &projectId,
@@ -181,6 +198,10 @@ signals:
     void photoHistoryLoaded(const QString &localDocumentId, int idx, const QVariantList &versions);
     void remoteLogoLoaded(const QString &localDocumentId, const QString &categoryCode,
                           const QString &localPath, const QVariantList &history);
+    void remoteLogoReadFailed(const QString &localDocumentId, const QString &categoryCode, const QString &message);
+    void calicataCoverReady(const QString &calicataId, const QUrl &localUrl);
+    void logoLibraryListed(const QString &localDocumentId, const QString &spaceId, const QString &parentNodeId,
+                           const QVariantList &items, const QString &error);
     void remoteLogoRestored(const QString &localDocumentId, const QString &categoryCode,
                             const QString &localPath, const QString &error);
     void activityLoaded(const QString &localDocumentId, const QVariantList &rows, int offset, bool hasMore);
@@ -237,7 +258,8 @@ private:
     void finishMediaEntry(const QString &entryId, const QString &state, const QString &message,
                           const QVariantMap &changes);
     void downloadStorageObject(const QString &path, const QString &destAbs,
-                               std::function<void(bool ok, const QString &message)> done);
+                               std::function<void(bool ok, const QString &message)> done,
+                               const QString &bucket = QString());
     void uploadStorageObject(const QString &path, const QString &localFile, const QString &mimeType,
                              std::function<void(bool ok, const QString &message)> done,
                              const QString &bucket = QString());
@@ -250,6 +272,9 @@ private:
                            std::function<void(bool ok, const QVariantList &rows, const QString &error)> done);
 
     QVariantList m_projects;
+    bool m_projectsRefreshPending = false;
+    QHash<QString, quint64> m_logoReads;
+    QHash<QString, bool> m_coverRequests;          // calicataId -> lectura en curso (sin duplicados)
     QString m_contextOwner;
     quint64 m_contextEpoch = 0;
     quint64 m_projectListRequest = 0;

@@ -1091,6 +1091,10 @@ Rectangle {
         }
     }
     Popup {
+        // Entrada/salida suaves (fundido + leve escala), como el resto de hojas.
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
+                            NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 220; easing.type: Easing.OutCubic } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 140; easing.type: Easing.InCubic } }
         id: popup
         parent: root
         modal: true

@@ -948,8 +948,24 @@ public final class InGeQtActivity extends QtActivity {
         }
     }
 
+    // Puente para Qt (BiometricGate): disponibilidad y verificación con sondeo
+    // del resultado (-2 inactivo, -1 en curso, 0 rechazada, 1 aprobada).
+    private static volatile int sQtBiometricState = -2;
+    public static boolean qtBiometricAvailable() {
+        final InGeQtActivity activity = currentActivity();
+        return activity != null && activity.isBiometricAvailable();
+    }
+    public static void qtStartBiometric() {
+        final InGeQtActivity activity = currentActivity();
+        if (activity == null) { sQtBiometricState = 0; return; }
+        sQtBiometricState = -1;
+        activity.runOnUiThread(() -> activity.authenticateBiometric(ok -> sQtBiometricState = ok ? 1 : 0));
+    }
+    public static int qtBiometricState() { return sQtBiometricState; }
+    public static void qtBiometricConsume() { sQtBiometricState = -2; }
+
     // Verificación biométrica del sistema (BiometricPrompt en
-    // InGeBiometricActivity). Sin consumidor visual tras Visual Zero.
+    // InGeBiometricActivity).
     private void authenticateBiometric(java.util.function.Consumer<Boolean> result) {
         if (!isBiometricAvailable() || pendingBiometricResult != null) {
             result.accept(false);

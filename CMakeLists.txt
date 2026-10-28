@@ -154,7 +154,7 @@ if(NOT ANDROID AND NOT IOS AND NOT INGE_BUILD_MOBILE)
         excelpdfpreviewdialog.h excelpdfpreviewdialog.cpp
         appcontext.h appcontext.cpp
         supabaseclient.h supabaseclient.cpp
-        authsession.h authsession.cpp
+        authsession.h authsession.cpp biometricgate.h
         clouddocs.h clouddocs.cpp
         supabasestorageclient.h supabasestorageclient.cpp
         settingshelper.h
@@ -254,6 +254,9 @@ if(INGE_BUILD_MOBILE)
     # Calicatas: editor original restaurado (Qt Quick Controls, estilo Basic)
     # y sus recursos con las rutas qrc originales.
     find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS QuickControls2)
+    # Mapa topográfico del Home de Calicatas: Qt Location (Map + plugin geoservices "osm").
+    # Enlazarlo hace que androiddeployqt empaquete el módulo QML QtLocation y el plugin.
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Location)
     if(QT_VERSION_MAJOR GREATER_EQUAL 6)
         find_package(Qt6 REQUIRED COMPONENTS QuickDialogs2)
     endif()
@@ -282,11 +285,14 @@ if(INGE_BUILD_MOBILE)
         "${INGE_PROJECT_ROOT}/supabaseclient.h"
         "${INGE_PROJECT_ROOT}/supabaseclient.cpp"
         "${INGE_PROJECT_ROOT}/authsession.h"
+        "${INGE_PROJECT_ROOT}/biometricgate.h"
         "${INGE_PROJECT_ROOT}/authsession.cpp"
         "${INGE_PROJECT_ROOT}/clouddocs.h"
         "${INGE_PROJECT_ROOT}/clouddocs.cpp"
         "${INGE_PROJECT_ROOT}/src/documents/nothingdocuments.h"
         "${INGE_PROJECT_ROOT}/src/documents/nothingdocuments.cpp"
+        "${INGE_PROJECT_ROOT}/src/cpp/supabaserealtimechannel.h"
+        "${INGE_PROJECT_ROOT}/src/cpp/supabaserealtimechannel.cpp"
         "${INGE_PROJECT_ROOT}/src/documents/nothingfileops.h"
         "${INGE_PROJECT_ROOT}/src/documents/nothingfileops.cpp"
         "${INGE_PROJECT_ROOT}/betadiagnostics.h"
@@ -525,12 +531,13 @@ if(INGE_BUILD_MOBILE)
             Qt${QT_VERSION_MAJOR}::Quick
             Qt${QT_VERSION_MAJOR}::QuickControls2
             Qt${QT_VERSION_MAJOR}::Positioning
+            Qt${QT_VERSION_MAJOR}::Location
             Qt${QT_VERSION_MAJOR}::Concurrent
             Qt${QT_VERSION_MAJOR}::Xml
         )
 
         if(QT_VERSION_MAJOR GREATER_EQUAL 6)
-            target_include_directories(AppCalicatasMobile PRIVATE "${INGE_PROJECT_ROOT}/src/documents")
+            target_include_directories(AppCalicatasMobile PRIVATE "${INGE_PROJECT_ROOT}/src/documents" "${INGE_PROJECT_ROOT}/src/cpp")
             target_link_libraries(AppCalicatasMobile PRIVATE Qt6::GuiPrivate Qt6::QuickDialogs2)
         endif()
 
@@ -621,12 +628,15 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/pages/CalicataReview.qml"
             "${MOBILE_QML_DIR}/pages/CalicataSurface.qml"
             "${MOBILE_QML_DIR}/pages/CalicatasEditorPage.qml"
+            "${MOBILE_QML_DIR}/pages/CalicatasHome.qml"
+            "${MOBILE_QML_DIR}/pages/CalicatasTopoMap.qml"
             "${MOBILE_QML_DIR}/lib/CalicataRules.js"
             "${MOBILE_QML_DIR}/lib/CalicataElevation.js"
             "${MOBILE_QML_DIR}/lib/CalicataExcelImport.js"
             "${MOBILE_QML_DIR}/lib/GpsBus.js"
             "${MOBILE_QML_DIR}/lib/CalicataFormLogic.js"
             "${MOBILE_QML_DIR}/lib/CalicataWorkspaceLogic.js"
+            "${MOBILE_QML_DIR}/lib/CalicataDiagnostics.js"
             "${MOBILE_QML_DIR}/lib/AccountText.js"
             "${MOBILE_QML_DIR}/lib/PhotoEditSchema.js"
             # Rendiciones: subapp QML nativa (RenditionsUi -> RenditionFlutterBridge).
@@ -651,13 +661,22 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/renditions/ReviewPanel.qml"
             "${MOBILE_QML_DIR}/renditions/RenditionReceived.qml"
             "${MOBILE_QML_DIR}/renditions/RendicionesSyncAura.qml"
+            "${MOBILE_QML_DIR}/renditions/RendicionesSyncStars.qml"
+            "${MOBILE_QML_DIR}/renditions/RendicionesSyncBackdrop.qml"
             "${MOBILE_QML_DIR}/renditions/RGlassMenu.qml"
             "${MOBILE_QML_DIR}/renditions/RMenuItem.qml"
-            "${MOBILE_QML_DIR}/renditions/RenditionsDock.qml"
             "${MOBILE_QML_DIR}/renditions/RenditionCard.qml"
             "${MOBILE_QML_DIR}/renditions/FilesBrowser.qml"
             "${MOBILE_QML_DIR}/renditions/RConfetti.qml"
             "${MOBILE_QML_DIR}/renditions/RenditionsDiagnostics.qml"
+            "${MOBILE_QML_DIR}/renditions/RExpenseQuickForm.qml"
+            "${MOBILE_QML_DIR}/renditions/REditableTile.qml"
+            "${MOBILE_QML_DIR}/renditions/RPackedLayout.qml"
+            "${MOBILE_QML_DIR}/settings/SettingsApp.qml"
+            "${MOBILE_QML_DIR}/settings/SettingsPage.qml"
+            "${MOBILE_QML_DIR}/settings/SettingsGroup.qml"
+            "${MOBILE_QML_DIR}/settings/SettingsRow.qml"
+            "${MOBILE_QML_DIR}/settings/SettingsSwitch.qml"
             "${MOBILE_QML_DIR}/assistant/InGeAssistantSheet.qml"
             "${MOBILE_QML_DIR}/assistant/InGeAssistantController.qml"
         )
@@ -676,6 +695,11 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/assets/home/field_01.webp"
             "${MOBILE_QML_DIR}/assets/home/field_02.webp"
             "${MOBILE_QML_DIR}/assets/home/field_03.webp"
+            "${MOBILE_QML_DIR}/assets/space/space_bg.webp"
+            "${MOBILE_QML_DIR}/assets/space/galaxy.webp"
+            "${MOBILE_QML_DIR}/assets/space/space_bg_light.webp"
+            "${MOBILE_QML_DIR}/assets/space/galaxy_light.webp"
+            "${MOBILE_QML_DIR}/assets/space/accretion.webp"
             # InGe.CoreFlow 3.0: singletons registrados desde main_mobile.cpp.
             "${MOBILE_QML_DIR}/flowcore/InGeCoreFlow.qml"
             "${MOBILE_QML_DIR}/flowcore/FlowIcons.qml"
@@ -752,6 +776,7 @@ if(INGE_BUILD_MOBILE)
                 calicatadocument.h calicatadocument.cpp
                 docsops.h
                 src/documents/nothingdocuments.h
+                src/cpp/supabaserealtimechannel.h
                 fsutil.h fsutil.cpp
         )
 

@@ -1,7 +1,8 @@
 import QtQuick
+import "../renditions/RStyle.js" as RS
 
-// Fondo básico de los controles de Calicatas: color sólido, estado (pulsado,
-// seleccionado, foco, error) y borde. Sin vidrio, capturas ni animaciones.
+// Mismo material translúcido que RCard/SectionCard/RGlassMenu de Rendiciones.
+// Sólo mezcla alfa: sin capturas, desenfoques ni efectos por control.
 Rectangle {
     id: surface
 
@@ -18,9 +19,11 @@ Rectangle {
     property bool selected: false
     property bool enabledLook: true
 
-    readonly property color neutral: level === "control"
-        ? (dark ? "#232B3A" : "#F2F4F7")
-        : (dark ? "#171D29" : "#FFFFFF")
+    readonly property real materialAlpha: level === "card" ? RS.cardGlass.a
+        : level === "sheet" ? RS.popup.a : RS.surface.a
+    readonly property color neutral: dark
+        ? Qt.rgba(28 / 255, 45 / 255, 80 / 255, materialAlpha)
+        : level === "card" ? RS.cardGlass : level === "sheet" ? RS.popup : RS.surface
     readonly property color toneColor: tone === "primary" ? accent
         : tone === "danger" ? Qt.tint(neutral, Qt.rgba(danger.r, danger.g, danger.b, dark ? 0.28 : 0.14))
         : (tone === "tinted" || selected) ? Qt.tint(neutral, Qt.rgba(accent.r, accent.g, accent.b, dark ? 0.28 : 0.14))
@@ -33,6 +36,6 @@ Rectangle {
     border.width: error || focused || selected ? 2 : (tone === "clear" ? 0 : 1)
     border.color: error ? danger
                   : (focused || selected) ? accent
-                  : (dark ? "#3A4456" : "#D5DBE3")
+                  : (dark ? Qt.rgba(1, 1, 1, 0.10) : (level === "control" ? RS.border : Qt.rgba(1, 1, 1, 0.90)))
     opacity: enabledLook ? 1 : 0.48
 }

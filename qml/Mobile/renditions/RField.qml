@@ -9,6 +9,22 @@ import "RStyle.js" as S
 Column {
     id: field
     property var ui
+    // Desplaza el Flickable contenedor para que el campo quede visible (teclado incluido).
+    function reveal() {
+        var f = field.parent
+        while (f && !(f.contentY !== undefined && f.flicking !== undefined)) f = f.parent
+        if (!f || !f.contentItem) return
+        if (typeof f.ensureActiveFocusVisible === "function") { f.ensureActiveFocusVisible(); return }   // contenedor IME-aware
+        var y = field.mapToItem(f.contentItem, 0, 0).y
+        var margin = 16 * field.ui.u
+        var target = f.contentY
+        if (y - margin < f.contentY) target = y - margin
+        else if (y + field.height + margin > f.contentY + f.height) target = y + field.height + margin - f.height
+        f.contentY = Math.max(0, Math.min(target, Math.max(0, f.contentHeight - f.height)))
+    }
+    Timer { id: reshowKeyboard; interval: 220; property var target: null
+            onTriggered: if (target) { target.forceActiveFocus(); Qt.inputMethod.show(); target = null } }
+    Timer { id: revealLater; interval: 320; onTriggered: field.reveal() }   // tras ajustar el teclado
     property string label: ""
     property alias text: input.text
     property string placeholder: ""
@@ -42,14 +58,39 @@ Column {
         font.family: field.ui.fontFamily
         font.pixelSize: 16 * field.ui.u
         readOnly: field.readOnly
+        onActiveFocusChanged: if (activeFocus) { Qt.callLater(field.reveal); revealLater.restart() }
+        onTextChanged: if (!activeFocus) cursorPosition = 0
         maximumLength: field.maxLength
         inputMethodHints: field.numeric ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
         leftPadding: 14 * field.ui.u + field.leadSpace
         rightPadding: 14 * field.ui.u
         selectByMouse: true
+        EnterKey.type: Qt.EnterKeyNext
+        onAccepted: {
+            var next = input.nextItemInFocusChain(true)
+            for (var guard = 0; next && next !== input && guard < 40; ++guard) {
+                if (next.visible && next.enabled && next.cursorPosition !== undefined && !next.readOnly) {
+                    // Si cambia el tipo de teclado (texto ⇄ numérico), Android sólo lo
+                    // reconfigura al reabrirlo: se cierra y se abre en el mismo instante.
+                    var retype = next.inputMethodHints !== input.inputMethodHints
+                    if (retype) {
+                        // Como un toque: se cierra el teclado y el campo recibe el foco
+                        // ya cerrado; al abrirse, Android usa el tipo del nuevo campo.
+                        input.focus = false
+                        Qt.inputMethod.hide()
+                        reshowKeyboard.target = next
+                        reshowKeyboard.restart()
+                    } else next.forceActiveFocus()
+                    return
+                }
+                next = next.nextItemInFocusChain(true)
+            }
+            Qt.inputMethod.hide()
+            input.focus = false
+        }
         background: Rectangle {
             radius: (field.formStyle ? 16 : 12) * field.ui.u
-            color: field.formStyle ? Qt.rgba(1, 1, 1, field.readOnly ? 0.45 : 0.78) : S.ink(field.readOnly ? 0.03 : 0.08)
+            color: field.formStyle ? S.glass(field.readOnly ? 0.45 : 0.78) : S.ink(field.readOnly ? 0.03 : 0.08)
             border.width: 1
             border.color: field.error.length > 0 ? S.danger
                         : (input.activeFocus ? S.accentSoft : (field.formStyle ? S.fieldBorder : S.border))

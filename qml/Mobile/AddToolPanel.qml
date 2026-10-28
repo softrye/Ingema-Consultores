@@ -273,14 +273,6 @@ Item {
                     onActivated: panel.addRequested({ key: "tool:settings", type: "tool", kind: "settings",
                                                       title: "Configuración", subtitle: "Ajustes de InGe+", span: 1 })
                 }
-                OptionRow {
-                    ui: panel
-                    width: content.width; compact: true; glyph: 0xE19F
-                    title: "Perfil"; subtitle: "Gestiona tu cuenta y preferencias."
-                    added: panel.has("tool:profile")
-                    onActivated: panel.addRequested({ key: "tool:profile", type: "tool", kind: "profile",
-                                                      title: "Perfil", subtitle: "Tu cuenta", span: 1 })
-                }
             }
         }
     }

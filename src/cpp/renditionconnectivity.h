@@ -78,6 +78,7 @@ public:
         const Link before = m_link;
         m_network = available;
         if (!available) {
+            m_onlineFailureStreak = 0;
             m_link = Link::NoNetwork;
         } else if (m_link == Link::NoNetwork) {
             // Red recuperada: aún sin evidencia del servidor. Se mantiene la
@@ -94,16 +95,24 @@ public:
         const Link before = m_link;
         switch (outcome) {
         case Outcome::Reachable:
+            m_onlineFailureStreak = 0;
             m_link = Link::Online;
             m_network = true;
             m_failures = 0;
             break;
         case Outcome::Auth:
+            m_onlineFailureStreak = 0;
             m_link = Link::AuthRequired;
             m_network = true;
             m_failures = 0;
             break;
         case Outcome::Unreachable: {
+            // Un unico RPC fallido no tumba un enlace ONLINE confirmado:
+            // varios RPC comparten la misma red y pueden tener resultados distintos.
+            // Exigir dos fallos consecutivos evita falsos avisos SERVER_UNREACHABLE.
+            if (m_link == Link::Online && ++m_onlineFailureStreak < 2)
+                return false;
+            m_onlineFailureStreak = 0;
             // Un intento (pull de ~8 RPC) cuenta UNA vez: la espera crece por intento.
             const bool firstLoss = !offline();
             m_link = m_network ? Link::ServerUnreachable : Link::NoNetwork;
@@ -160,6 +169,7 @@ private:
     Link m_link = Link::Unknown;
     bool m_network = true;   // sin información del sistema se asume posible (se verifica)
     int m_failures = 0;
+    int m_onlineFailureStreak = 0;
     bool m_attemptOpen = false;
 };
 

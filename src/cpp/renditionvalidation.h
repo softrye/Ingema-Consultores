@@ -47,9 +47,6 @@ inline QString expense(const QVariantMap &draft, const QVariantMap &row) {
         return QStringLiteral("Moneda no admitida.");
     if (!meaningfulText(row.value(QStringLiteral("concept")).toString()))
         return QStringLiteral("Concepto: describe qué se compró o qué servicio se realizó.");
-    const auto justification = row.value(QStringLiteral("justification")).toString().trimmed();
-    if (!justification.isEmpty() && !meaningfulText(justification))
-        return QStringLiteral("Justificación: explica la relación del gasto con el trabajo.");
     for (const auto &key : {"concept", "categoryCode", "paymentMethodCode", "supportTypeCode"})
         if (row.value(QLatin1String(key)).toString().trimmed().isEmpty())
             return QStringLiteral("Falta completar: %1.").arg(QLatin1String(key));

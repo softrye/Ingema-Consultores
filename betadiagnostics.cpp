@@ -230,7 +230,7 @@ void BetaDiagnostics::record(const QString &category, const QString &severity,
                              const QJsonObject &context)
 {
     if (QThread::currentThread() != thread()) {
-        QMetaObject::invokeMethod(this, [=]() {
+        QMetaObject::invokeMethod(this, [this, category, severity, code, message, metrics, context]() {
             record(category, severity, code, message, metrics, context);
         }, Qt::QueuedConnection);
         return;

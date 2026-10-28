@@ -16,6 +16,11 @@ RGlassMenu {
     property var diagnostics: ({})
     property Component aiExtension: null
     property bool aiEnabled: false
+    // Reutilización por Calicatas ("Estado de Calicatas"): título, texto sin
+    // incidencias y pie opcional. Los valores por defecto son los de Rendiciones.
+    property string title: "Estado de Rendiciones"
+    property string emptyText: "Todo en orden. No hay fallos técnicos activos.\nLos gastos por completar aparecen como sugerencias dentro de cada rendición; no son fallos."
+    property Component footer: null
     property string busyKey: ""                 // acción en curso (anti doble toque)
     signal runAction(var incident)
     cardWidth: 380 * ui.u
@@ -37,7 +42,7 @@ RGlassMenu {
             width: parent.width - 56 * panel.ui.u
             anchors.verticalCenter: parent.verticalCenter
             spacing: 2 * panel.ui.u
-            Text { text: "Estado de Rendiciones"; color: S.text
+            Text { text: panel.title; color: S.text
                    font.family: panel.ui.fontFamily; font.pixelSize: 19 * panel.ui.u; font.weight: Font.DemiBold }
             Text {
                 objectName: "diagnosticsSummary"
@@ -131,7 +136,7 @@ RGlassMenu {
                 visible: panel.incidents.length === 0
                 width: rows.width
                 topPadding: 8 * panel.ui.u; bottomPadding: 8 * panel.ui.u
-                text: "Todo en orden. No hay fallos técnicos activos.\nLos gastos por completar aparecen como sugerencias dentro de cada rendición; no son fallos."
+                text: panel.emptyText
                 color: S.muted; wrapMode: Text.WordWrap
                 font.family: panel.ui.fontFamily; font.pixelSize: 14 * panel.ui.u
             }
@@ -140,6 +145,11 @@ RGlassMenu {
                 width: rows.width
                 active: panel.aiEnabled && panel.aiExtension !== null
                 sourceComponent: panel.aiExtension
+            }
+            Loader {
+                width: rows.width
+                active: panel.footer !== null
+                sourceComponent: panel.footer
             }
         }
     }

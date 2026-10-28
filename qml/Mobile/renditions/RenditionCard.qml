@@ -1,5 +1,6 @@
 import QtQuick
 import "RStyle.js" as S
+import ".." as Mobile
 
 // Tarjeta de rendición del diseño aprobado. Datos reales del estado publicado.
 // - Los dos puntos = estado ADMINISTRATIVO de la ficha (Borrador ámbar,
@@ -12,6 +13,7 @@ Rectangle {
     property var ctl
     property var row: ({})
     signal activated()
+    signal held()                                  // pulsación prolongada → menú 3D Touch
 
     readonly property string code: S.text_(row, "visibleCode", "visible_code")
     readonly property string renditionName: S.renditionDisplayName(S.text_(row, "displayName", "display_name"), code)
@@ -49,16 +51,48 @@ Rectangle {
 
     implicitHeight: content.implicitHeight + 34 * ui.u
     radius: 22 * ui.u
-    color: tap.pressed ? Qt.rgba(247 / 255, 249 / 255, 252 / 255, 0.95) : Qt.rgba(1, 1, 1, 0.90)
-    border.width: 1
-    border.color: S.ink(0.05)
+    readonly property bool glassOn: S.dark && !!ui && !!ui.cardGlassUi
+    // Fuera de pantalla no se dibuja el vidrio (ahorra pasadas de GPU al desplazar).
+    readonly property bool onScreen: {
+        if (!glassOn) return false
+        var tick = ui.cardGlassUi.glassTick
+        var p = mapToItem(null, 0, 0)
+        return p.y + height > -20 && p.y < (Window.height > 0 ? Window.height : 2400) + 20
+    }
+    color: glassOn ? (tap.pressed ? Qt.rgba(1, 1, 1, 0.06) : "transparent")
+                   : (tap.pressed ? S.lite(247, 249, 252, 0.95) : S.glass(0.90))
+    border.width: glassOn ? 0 : 1
+    border.color: S.dark ? Qt.rgba(1, 1, 1, 0.12) : S.ink(0.05)
+    Mobile.GlassSurface {                             // Liquid Glass real (material del Dock) en oscuro
+        ui: card.glassOn ? card.ui.cardGlassUi : null
+        visible: card.onScreen
+        radius: card.radius
+        margin: 10 * card.ui.u
+        tint: card.ui.dockGlassTint
+        refraction: card.ui.dockGlassRefraction
+        specular: card.ui.dockGlassSpecular
+        bevel: card.ui.dockGlassBevel
+        contrast: card.ui.dockGlassContrast
+        frost: card.ui.dockGlassFrost
+        edge: card.ui.dockGlassEdge
+        shadowAlpha: card.ui.dockGlassShadowAlpha
+    }
+    Rectangle {                                       // brillo superior del vidrio oscuro
+        visible: S.dark && !card.glassOn
+        anchors.fill: parent; anchors.margins: 1; radius: parent.radius - 1
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.10) }
+            GradientStop { position: 0.45; color: Qt.rgba(1, 1, 1, 0.0) }
+        }
+    }
     scale: tap.pressed ? 0.985 : 1
     Behavior on scale { NumberAnimation { duration: 110; easing.type: Easing.OutQuad } }
 
     // Sombra suave estática.
-    Rectangle { z: -1; anchors.fill: parent; anchors.topMargin: 6 * card.ui.u; anchors.margins: -1; radius: card.radius; color: S.ink(0.045) }
+    Rectangle { z: -1; anchors.fill: parent; anchors.topMargin: 6 * card.ui.u; anchors.margins: -1; radius: card.radius; visible: !card.glassOn; color: S.dark ? Qt.rgba(0, 0, 0, 0.35) : S.ink(0.045) }
 
-    MouseArea { id: tap; anchors.fill: parent; onClicked: card.activated() }
+    MouseArea { id: tap; anchors.fill: parent; pressAndHoldInterval: 380
+                onClicked: card.activated(); onPressAndHold: card.held() }
 
     Column {
         id: content
