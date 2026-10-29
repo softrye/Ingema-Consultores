@@ -103,18 +103,18 @@ RGlassMenu {
                             Rectangle { width: 10 * panel.ui.u; height: width; radius: width / 2
                                         anchors.verticalCenter: parent.verticalCenter
                                         color: row.blocking ? S.danger : S.warning }
-                            Text { width: parent.width - 18 * panel.ui.u; text: row.modelData.title; color: S.text; wrapMode: Text.WordWrap
+                            Text { width: parent.width - 18 * panel.ui.u; text: row.modelData.title; color: S.text; wrapMode: Text.Wrap
                                    font.family: panel.ui.fontFamily; font.pixelSize: 16 * panel.ui.u; font.weight: Font.DemiBold }
                         }
-                        Text { width: parent.width; text: row.modelData.area + "  ·  " + row.modelData.code; color: S.muted; wrapMode: Text.WordWrap
+                        Text { width: parent.width; text: row.modelData.area + "  ·  " + row.modelData.code; color: S.muted; wrapMode: Text.Wrap
                                font.family: panel.ui.fontFamily; font.pixelSize: 13 * panel.ui.u }
                         Text { width: parent.width; topPadding: 4 * panel.ui.u; text: "Qué sucede: " + row.modelData.what
-                               color: S.text; wrapMode: Text.WordWrap; font.family: panel.ui.fontFamily; font.pixelSize: 14 * panel.ui.u }
+                               color: S.text; wrapMode: Text.Wrap; font.family: panel.ui.fontFamily; font.pixelSize: 14 * panel.ui.u }
                         Text { width: parent.width; visible: String(row.modelData.cause || "").length > 0
-                               text: "Causa: " + String(row.modelData.cause || ""); color: S.muted; wrapMode: Text.WordWrap
+                               text: "Causa: " + String(row.modelData.cause || ""); color: S.muted; wrapMode: Text.Wrap
                                font.family: panel.ui.fontFamily; font.pixelSize: 13 * panel.ui.u }
                         Text { width: parent.width; text: "Cómo solucionarlo: " + row.modelData.how
-                               color: S.text; wrapMode: Text.WordWrap; font.family: panel.ui.fontFamily; font.pixelSize: 14 * panel.ui.u }
+                               color: S.text; wrapMode: Text.Wrap; font.family: panel.ui.fontFamily; font.pixelSize: 14 * panel.ui.u }
                         RButton {
                             visible: String(row.act.kind || "").length > 0
                             objectName: "incidentAction:" + row.modelData.key
@@ -132,7 +132,7 @@ RGlassMenu {
                 width: rows.width
                 topPadding: 8 * panel.ui.u; bottomPadding: 8 * panel.ui.u
                 text: "Todo en orden. No hay fallos técnicos activos.\nLos gastos por completar aparecen como sugerencias dentro de cada rendición; no son fallos."
-                color: S.muted; wrapMode: Text.WordWrap
+                color: S.muted; wrapMode: Text.Wrap
                 font.family: panel.ui.fontFamily; font.pixelSize: 14 * panel.ui.u
             }
             // Punto de extensión: sugerencias de InGe IA (desactivado en esta versión).

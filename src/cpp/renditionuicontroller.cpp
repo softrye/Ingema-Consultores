@@ -471,6 +471,10 @@ QString RenditionUiController::statusLabel(const QString &status) const
 QString RenditionUiController::errorText(const QString &code, const QString &message) const
 {
     static const QHash<QString, QString> known{
+        {QStringLiteral("RENDITION_EXPENSE_JUSTIFICATION_REQUIRED"), QStringLiteral("Completa la justificación del gasto en Comprobante.")},
+        {QStringLiteral("RENDITION_EXPENSE_SUPPORT_DETAIL_REQUIRED"), QStringLiteral("Describe el otro sustento en Detalle del comprobante.")},
+        {QStringLiteral("RENDITION_EXPENSE_PAYMENT_DETAIL_REQUIRED"), QStringLiteral("Describe el otro medio de pago en Detalle de pago.")},
+        {QStringLiteral("RENDITION_VALIDATION_ERROR"), QStringLiteral("No se pudo cambiar el estado. Revisa los gastos y las incidencias de sincronización antes de volver a intentarlo.")},
         {QStringLiteral("QUOTE_ORIGIN_NOT_CONFIGURED"),
          QStringLiteral("La cotización automática BCRP/SBS no está configurada en este equipo. "
                         "Registra el tipo de cambio manualmente; se conserva el valor guardado.")},
@@ -479,6 +483,8 @@ QString RenditionUiController::errorText(const QString &code, const QString &mes
         {QStringLiteral("ACCOUNT_CHANGED"), QStringLiteral("La cuenta cambió; vuelve a abrir la consulta.")}};
     if (known.contains(code))
         return known.value(code);
+    if (known.contains(message.trimmed()))
+        return known.value(message.trimmed());
     // Working Document (Web PR #6): p. ej. presentar con filas sin terminar creadas en la Web.
     const QString working = RenditionWorkingContract::message(code);
     if (!working.isEmpty())

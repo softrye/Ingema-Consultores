@@ -371,7 +371,8 @@ Item {
                 color: S.text; wrapMode: Text.WordWrap
                 font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u
             }
-            Row {
+            Flow {
+                width: parent.width
                 spacing: 10 * page.ui.u
                 RButton { ui: page.ui; glyph: 0xE06E; label: "Subir"; enabledButton: page.path.length > 0 && !page.browsingBusy; onActivated: page.folderUp() }
                 RButton {

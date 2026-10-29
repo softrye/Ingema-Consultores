@@ -520,6 +520,9 @@ bool RenditionLocalStore::saveLocalExpense(const QString &renditionLocalId,
                                         : QStringLiteral("expense_update");
     const int pendingOutbox = outboxIndex(operation, renditionLocalId,
                                           expenseLocalId);
+    if (localOnly && pendingOutbox >= 0
+        && RenditionValidation::rejectedExpenseCreate(m_outbox.at(pendingOutbox).toMap()))
+        expense.insert(QStringLiteral("requestId"), newUuid());
     if (!stageForSync && pendingOutbox >= 0
         && m_outbox.at(pendingOutbox).toMap().value(
                QStringLiteral("state")).toString()
@@ -547,6 +550,7 @@ bool RenditionLocalStore::saveLocalExpense(const QString &renditionLocalId,
             const QByteArray previousHash = entry.value(
                 QStringLiteral("payloadHash")).toString().toLatin1();
             if (entry.value(QStringLiteral("attempts")).toInt() > 0
+                && !RenditionValidation::rejectedExpenseCreate(entry)
                 && previousHash != payloadHash(payload)) {
                 setLastError(QStringLiteral(
                     "La creación del gasto ya fue enviada. Reintenta el mismo payload antes de editarlo."));
@@ -681,7 +685,8 @@ bool RenditionLocalStore::removeLocalExpense(const QString &renditionLocalId,
     // A lost CREATE response may already have committed remotely. Reconcile first.
     const int createAt = outboxIndex(QStringLiteral("expense_create"), renditionLocalId, expenseLocalId);
     if (expense.value(QStringLiteral("remoteId")).toString().isEmpty() && createAt >= 0
-        && m_outbox[createAt].toMap().value(QStringLiteral("attempts")).toInt() > 0) {
+        && m_outbox[createAt].toMap().value(QStringLiteral("attempts")).toInt() > 0
+        && !RenditionValidation::rejectedExpenseCreate(m_outbox[createAt].toMap())) {
         setLastError(QStringLiteral("Sincroniza el gasto pendiente antes de eliminarlo.")); return false;
     }
     const auto oldRows = m_renditions, oldOutbox = m_outbox;
@@ -2130,6 +2135,10 @@ void RenditionLocalStore::upsertOutbox(
 {
     int index = outboxIndex(operation, aggregateLocalId, childLocalId);
     QVariantMap entry = index >= 0 ? m_outbox.at(index).toMap() : QVariantMap{};
+    if (RenditionValidation::rejectedExpenseCreate(entry)) {
+        entry.insert(QStringLiteral("attempts"), 0);
+        entry.insert(QStringLiteral("id"), newUuid());
+    }
     if (index < 0) {
         entry.insert(QStringLiteral("id"), newUuid());
         entry.insert(QStringLiteral("sequence"), m_nextSequence++);

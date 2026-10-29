@@ -1,4 +1,5 @@
 #include "src/cpp/renditionlocalstore.h"
+#include "src/cpp/renditionvalidation.h"
 #include "src/cpp/renditionsnapshotexporter.h"
 #include "xlsxdocument.h"
 #include <QGuiApplication>
@@ -205,5 +206,30 @@ int main(int argc, char **argv) {
  QXlsx::Document xlsx("artifacts/rendition-v1.xlsx"); check(xlsx.load(),"XLSX readable");
  check(xlsx.selectSheet("Gastos")&&xlsx.read(2,1).toString()==model.code&&xlsx.read(2,13).toDouble()==20,"XLSX snapshot values");
  check(xlsx.selectSheet("Versión")&&xlsx.read(13,2).toString()=="500.00"&&xlsx.read(15,2).toString()=="3.437000","XLSX exact frozen financial text");
+ // A definitive validation rejection can be corrected; a lost reply cannot.
+ const auto repairScope = QUuid::createUuid().toString();
+ RenditionLocalStore repairStore(repairScope);
+ const auto repairId = repairStore.createDraft("2026-09-01","2026-09-30",{"p1"},"p1","folder","space",true);
+ check(repairStore.markRenditionSynced(repairId,{{"rendition_id",rid},{"row_version",1},{"can_edit_content",true}}), "repair fixture");
+ QVariantMap repairValues{{"projectId","p1"},{"expenseDate","2026-09-08"},{"categoryCode","FOOD"},{"currencyCode","PEN"},{"amount","10.00"},{"concept","Almuerzo de campo"},{"paymentMethodCode","CASH"},{"supportTypeCode","RECEIPT"}};
+ auto correction = repairValues;
+ correction.insert("categoryCode", "OTHER"); correction.remove("justification");
+ check(RenditionValidation::expense(repairStore.rendition(repairId), correction).contains("Justificación"), "OTHER requires justification before enqueue");
+ correction.insert("justification", "Gasto de prueba");
+ correction.insert("supportTypeCode", "OTHER"); correction.remove("supportDetail");
+ check(RenditionValidation::expense(repairStore.rendition(repairId), correction).contains("Detalle del comprobante"), "OTHER support requires detail");
+ auto recoverable = repairStore.addLocalExpense(repairId, repairValues, true);
+ check(!recoverable.isEmpty() && repairStore.markExpenseSyncing(repairId,recoverable), "attempt create for recovery test");
+ auto corrected = repairValues; corrected.insert("concept", "Concepto corregido");
+ check(repairStore.markExpenseState(repairId,recoverable,"ERROR","response lost"), "lost reply stored");
+ check(!repairStore.saveLocalExpense(repairId,recoverable,corrected,true), "ambiguous create remains immutable");
+ check(repairStore.markExpenseState(repairId,recoverable,"ERROR","RENDITION_EXPENSE_JUSTIFICATION_REQUIRED"), "definitive rejection stored");
+ const auto oldRequest = repairStore.expensesFor(repairId).last().toMap().value("requestId");
+ RenditionLocalStore recoveredStore(repairScope);
+ check(recoveredStore.saveLocalExpense(repairId,recoverable,corrected,true), "rejected create editable after restart");
+ check(recoveredStore.expensesFor(repairId).last().toMap().value("requestId") != oldRequest, "corrected intention has new request");
+ check(recoveredStore.markExpenseSyncing(repairId,recoverable), "retry corrected intention");
+ check(recoveredStore.markExpenseState(repairId,recoverable,"ERROR","RENDITION_EXPENSE_SUPPORT_DETAIL_REQUIRED"), "second definitive rejection");
+ check(recoveredStore.removeLocalExpense(repairId,recoverable), "rejected local creation can be removed");
  std::cout<<"PASS persistence, retry, same-ID presentation, immutability, PDF bytes, XLSX contents\n";
 }

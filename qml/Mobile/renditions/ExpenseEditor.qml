@@ -1169,7 +1169,7 @@ Item {
                         RField { id: supportNumberField; width: parent.width; ui: page.ui; formStyle: true; glyph: 0xE0EF
                                  label: "Número de comprobante"; placeholder: "Ingrese número…"; readOnly: !page.writable; onEdited: page.changed() }
                         RField { id: supportDetailField; width: parent.width; ui: page.ui; formStyle: true; glyph: 0xE0CC
-                                 label: "Detalle del comprobante (opcional)"; placeholder: "Serie, emisor u otro dato…"; readOnly: !page.writable; onEdited: page.changed() }
+                                 label: page.supportTypeCode === "OTHER" ? "Detalle del comprobante (obligatorio)" : "Detalle del comprobante (opcional)"; placeholder: "Serie, emisor u otro dato…"; readOnly: !page.writable; onEdited: page.changed() }
                         Notice { ui: page.ui; text: "El comprobante debe ser válido y corresponder al gasto realizado." }
                     }
                 }
@@ -1368,7 +1368,7 @@ Item {
                         }
                     }
                     SectionCard {
-                        ui: page.ui; heading: "Justificación"; subtitle: "Relación del gasto con el trabajo (opcional)."
+                        ui: page.ui; heading: "Justificación"; subtitle: page.categoryCode === "OTHER" || page.supportTypeCode === "DECLARATION_WITHOUT_SUPPORT" ? "Obligatoria: explica la relación del gasto con el trabajo." : "Relación del gasto con el trabajo (opcional)."
                         TextArea {
                             id: justificationField
                             width: parent.width

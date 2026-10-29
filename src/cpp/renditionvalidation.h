@@ -7,6 +7,16 @@
 #include "renditionmoney.h"
 
 namespace RenditionValidation {
+// These RPC exceptions abort CREATE's transaction. Transport failures and
+// idempotency conflicts are deliberately excluded: their payload stays frozen.
+inline bool rejectedExpenseCreate(const QVariantMap &entry) {
+    if (entry.value("operation").toString() != QLatin1String("expense_create")
+        || entry.value("state").toString() != QLatin1String("ERROR")) return false;
+    const auto error = entry.value("lastSafeError").toString().trimmed();
+    return error == QLatin1String("RENDITION_EXPENSE_JUSTIFICATION_REQUIRED")
+        || error == QLatin1String("RENDITION_EXPENSE_SUPPORT_DETAIL_REQUIRED")
+        || error == QLatin1String("RENDITION_EXPENSE_PAYMENT_DETAIL_REQUIRED");
+}
 inline bool meaningfulText(const QString &value) {
     static const QRegularExpression words(QStringLiteral("[\\p{L}]{2,}"));
     auto matches = words.globalMatch(value);
@@ -55,6 +65,17 @@ inline QString expense(const QVariantMap &draft, const QVariantMap &row) {
             return QStringLiteral("Falta completar: %1.").arg(QLatin1String(key));
     if (row.value(QStringLiteral("paymentMethodCode")).toString() == QLatin1String("UNKNOWN"))
         return QStringLiteral("Indica el medio real de pago; CONTADO no identifica cómo pagaste.");
+    const auto support = row.value(QStringLiteral("supportTypeCode")).toString();
+    if ((row.value(QStringLiteral("categoryCode")).toString() == QLatin1String("OTHER")
+         || support == QLatin1String("DECLARATION_WITHOUT_SUPPORT"))
+        && row.value(QStringLiteral("justification")).toString().trimmed().isEmpty())
+        return QStringLiteral("Justificación: explica el gasto para la categoría Otros o la declaración sin sustento.");
+    if (support == QLatin1String("OTHER")
+        && row.value(QStringLiteral("supportDetail")).toString().trimmed().isEmpty())
+        return QStringLiteral("Detalle del comprobante: describe el otro sustento.");
+    if (row.value(QStringLiteral("paymentMethodCode")).toString() == QLatin1String("OTHER")
+        && row.value(QStringLiteral("paymentMethodDetail")).toString().trimmed().isEmpty())
+        return QStringLiteral("Detalle de pago: describe el otro medio de pago.");
     return {};
 }
 inline void totals(QVariantMap &draft) {
