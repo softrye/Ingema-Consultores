@@ -17,3 +17,15 @@ git diff --cached --check
 ```
 
 No se compiló ni instaló. La comprobación visual del A12 queda pendiente del build del usuario. La prueba de bindings verifica el arranque lógico; la suite offscreen no demuestra el resultado de OpenGL/Mali.
+
+## Devolución a Borrador
+
+Se consultaron únicamente las definiciones desplegadas de `get_rendition_review_context_v03`, `transition_rendition_review_v03` y `request_rendition_state_v04` en el proyecto configurado por `appcontext.cpp`. No hubo cambios de esquema, datos ni permisos.
+
+La transición directa a BORRADOR exige estado inicial EN_REVISION y comentario vacío. La hoja del Dock y ReviewPanel exigían un motivo no vacío; además, el bridge rechazaba cualquier transición sin motivo antes de llamar al servidor. El texto mostrado en la captura activa exactamente la guarda `p_next_state='BORRADOR' AND (r.status<>'EN_REVISION' OR comment<>'')` del RPC.
+
+Ahora ambas interfaces ocultan el motivo en la devolución directa a Borrador y envían `reason=""`. El bridge acepta ese caso mediante `RenditionAdminRpc::requiresReviewReason`. OBSERVADO, las otras transiciones, las solicitudes del propietario y las decisiones conservan el motivo obligatorio. La hoja limita el texto a los 500 caracteres del servidor. No se cambia de estado automáticamente ni se sustituyen las decisiones del servidor.
+
+Fuentes: `RenditionsApp.qml`, `ReviewPanel.qml`, `renditionadminrpc.h` y `renditionflutterbridge.cpp`. Pruebas QML: se reprodujo el botón bloqueado y después pasan los dos flujos (Dock y panel), incluida la exigencia de motivo para Observado. Suite de estabilidad: 14/14, sin avisos. Se añadieron casos C++ a `tests/renditions/ui_controller.cpp`; su ejecución requiere que el usuario recompile los tests host.
+
+Comando: `qmltestrunner.exe -input tests/renditions/qml/tst_render_stability.qml -o artifacts/renditions-flicker-20261029/qml-review-green.txt,txt`. No se ejecutó una transición sobre datos reales; la regresión Android y el RPC como usuario autenticado quedan pendientes del build del usuario.

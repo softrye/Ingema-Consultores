@@ -38,8 +38,10 @@ TestCase {
         property var pendingKeys: []
         property int syncCalls: 0
         property int requests: 0
+        property var calls: []
         function newId() { return "test-client" }
         function send(operation, args, key) {
+            calls.push({operation: operation, args: args})
             if (operation === "sync") ++syncCalls
             return "test-request-" + (++requests)
         }
@@ -73,8 +75,10 @@ TestCase {
         property var createSheetEditor: null
         property var flow: null
         property string phase: "IDLE"
+        property var calls: []
         function busy(key) { return false }
         function syncState(row) { return String(row.syncState || "SYNCED") }
+        function call(operation, args, key, done) { calls.push({operation: operation, args: args}); return "request" }
     }
     readonly property var testUi: ui
     readonly property var testCtl: ctl
@@ -145,6 +149,10 @@ TestCase {
         id: documentsComponent
         Renditions.RenditionDocuments { detail: testExpenseDetail; width: 412; height: 915 }
     }
+    Component {
+        id: reviewPanelComponent
+        Renditions.ReviewPanel { app: testApp; remoteId: "remote-test"; active: false; width: 380 }
+    }
     function modeledCard(item, id) {
         if (item.modelData && item.modelData.localId === id) return item
         var children = item.children || []
@@ -205,6 +213,45 @@ TestCase {
             wait(5)
         }
         compare(volatileCreations - before, 0)
+    }
+    function test_draftReturnConfirmsWithoutReasonAndDoesNotSendOldObservation() {
+        var panel = createTemporaryObject(reviewPanelComponent, test)
+        verify(panel !== null)
+        panel.context = {status: "EN_REVISION", row_version: 7, next_states: ["BORRADOR", "OBSERVADO"]}
+        panel.nextState = "BORRADOR"
+        compare(findChild(panel, "reviewConfirm").visible, true)
+        compare(findChild(panel, "reviewReason").visible, false)
+        panel.reason = "Previous observation"
+        var count = app.calls.length
+        panel.transition()
+        compare(app.calls.length, count + 1)
+        compare(app.calls[count].args.nextState, "BORRADOR")
+        compare(app.calls[count].args.reason, "")
+        panel.nextState = "OBSERVADO"
+        panel.reason = ""
+        compare(findChild(panel, "reviewConfirm").visible, false)
+        compare(findChild(panel, "reviewReason").visible, true)
+    }
+    function test_dockDraftSheetSendsEmptyReasonAndObservationsStillNeedOne() {
+        var shell = createTemporaryObject(shellComponent, test)
+        var stack = findChild(shell, "renditionsHome").StackView.view
+        stack.push(fakeDetailComponent, {}, StackView.Immediate)
+        shell.reviewCtx = {row_version: 7, next_states: ["BORRADOR", "OBSERVADO"]}
+        var sheet = findChild(shell, "stateSheet")
+        sheet.openFor("transition", "BORRADOR")
+        compare(findChild(shell, "stateChangeReason").visible, false)
+        var count = ctl.calls.length
+        sheet.submit()
+        compare(ctl.calls.length, count + 1)
+        compare(ctl.calls[count].operation, "reviewTransition")
+        compare(ctl.calls[count].args.reason, "")
+        sheet.busy = false
+        sheet.openFor("transition", "OBSERVADO")
+        count = ctl.calls.length
+        sheet.submit()
+        compare(ctl.calls.length, count)
+        verify(sheet.errorText.length > 0)
+        sheet.close()
     }
     function test_diffPreservesIdentityAndUpdatesContent() {
         S.syncRows(rows, [{localId: "a", amount: 1}, {localId: "b", amount: 2}], ["localId"])

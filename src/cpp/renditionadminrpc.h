@@ -9,6 +9,16 @@
 // (RenditionReviewPanel, renditionDossierService). false = comando desconocido.
 namespace RenditionAdminRpc {
 
+// transition_rendition_review_v03 returns EN_REVISION to BORRADOR without
+// an observation. Requests, decisions and the other transitions need a reason.
+inline bool requiresReviewReason(const QString &operation, const QVariantMap &arguments)
+{
+    if (operation == QLatin1String("reviewTransition"))
+        return arguments.value(QStringLiteral("nextState")).toString() != QLatin1String("BORRADOR");
+    return operation == QLatin1String("reviewRequest") || operation == QLatin1String("reviewDecide");
+}
+
+
 inline QVariant nullable(const QString &value)
 {
     return value.trimmed().isEmpty() ? QVariant() : QVariant(value.trimmed());

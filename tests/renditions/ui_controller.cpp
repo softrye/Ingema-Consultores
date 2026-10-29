@@ -174,6 +174,10 @@ int main(int argc, char **argv)
 
     // ---- reviewer contracts (same RPCs and arguments as the Web)
     QString rpc; QVariantMap params;
+    check(!RenditionAdminRpc::requiresReviewReason("reviewTransition", {{"nextState", "BORRADOR"}}), "return to draft accepts the server's empty reason contract");
+    check(RenditionAdminRpc::requiresReviewReason("reviewTransition", {{"nextState", "OBSERVADO"}}), "observation still requires a reason");
+    check(RenditionAdminRpc::requiresReviewReason("reviewRequest", {{"requestedState", "BORRADOR"}}), "owner request still requires a reason");
+    check(RenditionAdminRpc::requiresReviewReason("reviewDecide", {}), "review decision still requires a reason");
     check(RenditionAdminRpc::call("reviewContext", {{"renditionId", "r"}}, &rpc, &params)
           && rpc == "get_rendition_review_context_v03" && params.value("p_rendition_id") == "r" && params.size() == 1, "review context contract");
     check(RenditionAdminRpc::call("reviewTransition", {{"renditionId", "r"}, {"expectedRowVersion", 7}, {"nextState", "OBSERVADO"}, {"reason", " Falta boleta "}}, &rpc, &params)

@@ -525,8 +525,7 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
                       QStringLiteral("Sincroniza la rendición antes de consultar su revisión."));
             return;
         }
-        if ((operation == QLatin1String("reviewTransition") || operation == QLatin1String("reviewRequest")
-             || operation == QLatin1String("reviewDecide"))
+        if (RenditionAdminRpc::requiresReviewReason(operation, arguments)
             && arguments.value(QStringLiteral("reason")).toString().trimmed().isEmpty()) {
             sendError(requestId, QStringLiteral("RENDITION_REVIEW_REASON_REQUIRED"),
                       QStringLiteral("Escribe el motivo de la operación."));
