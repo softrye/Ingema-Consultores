@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Shapes
 import InGe 1.0
+import InGe.CoreFlow 3.0 as CoreFlowModule
 import "lib/AccountText.js" as AccountText
 
 // InGe+ — Acceso (Login V1 + First-run Welcome, 2026-10-12).
@@ -26,6 +27,13 @@ Window {
     visible: true
     color: root.navy
     title: "InGe+"
+    // The real window owns the viewport; Android adjustResize is already
+    // reflected in this height before CoreFlow computes keyboard overlap.
+    Binding {
+        target: CoreFlowModule.InGeCoreFlow
+        property: "imeViewportHeight"
+        value: root.height
+    }
 
     // ------------------------------------------------------------ Paleta
     readonly property color navy: "#151A30"

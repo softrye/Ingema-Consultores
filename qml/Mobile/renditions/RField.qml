@@ -9,6 +9,22 @@ import "RStyle.js" as S
 Column {
     id: field
     property var ui
+    // Desplaza el Flickable contenedor para que el campo quede visible (teclado incluido).
+    function reveal() {
+        var f = field.parent
+        while (f && !(f.contentY !== undefined && f.flicking !== undefined)) f = f.parent
+        if (!f || !f.contentItem) return
+        if (typeof f.__queueEnsure === "function") { f.__queueEnsure(); return true }
+        if (typeof f.ensureActiveFocusVisible === "function") { f.ensureActiveFocusVisible(); return true }
+        var y = field.mapToItem(f.contentItem, 0, 0).y
+        var margin = 16 * field.ui.u
+        var target = f.contentY
+        if (y - margin < f.contentY) target = y - margin
+        else if (y + field.height + margin > f.contentY + f.height) target = y + field.height + margin - f.height
+        f.contentY = Math.max(0, Math.min(target, Math.max(0, f.contentHeight - f.height)))
+    }
+    Timer { id: revealLater; interval: 320; onTriggered: field.reveal() }   // tras ajustar el teclado
+    function focusField() { if (!field.readOnly) input.forceActiveFocus(); field.reveal() }
     property string label: ""
     property alias text: input.text
     property string placeholder: ""
@@ -42,14 +58,36 @@ Column {
         font.family: field.ui.fontFamily
         font.pixelSize: 16 * field.ui.u
         readOnly: field.readOnly
+        onActiveFocusChanged: {
+            if (activeFocus) Qt.callLater(function() { if (input.activeFocus && !field.reveal()) revealLater.restart() })
+            else revealLater.stop()
+        }
+        onTextChanged: if (!activeFocus) cursorPosition = 0
         maximumLength: field.maxLength
         inputMethodHints: field.numeric ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
         leftPadding: 14 * field.ui.u + field.leadSpace
         rightPadding: 14 * field.ui.u
         selectByMouse: true
+        EnterKey.type: Qt.EnterKeyNext
+        onAccepted: {
+            var next = input.nextItemInFocusChain(true)
+            for (var guard = 0; next && next !== input && guard < 40; ++guard) {
+                if (next.visible && next.enabled && next.cursorPosition !== undefined && !next.readOnly) {
+                    // Qt updates the input hints for the new focus. Hiding the
+                    // IME here resized the Android surface and restored scroll
+                    // to its old baseline before reopening it 220 ms later.
+                    next.forceActiveFocus()
+                    Qt.inputMethod.update(Qt.ImHints | Qt.ImQueryInput)
+                    return
+                }
+                next = next.nextItemInFocusChain(true)
+            }
+            Qt.inputMethod.hide()
+            input.focus = false
+        }
         background: Rectangle {
             radius: (field.formStyle ? 16 : 12) * field.ui.u
-            color: field.formStyle ? Qt.rgba(1, 1, 1, field.readOnly ? 0.45 : 0.78) : S.ink(field.readOnly ? 0.03 : 0.08)
+            color: field.formStyle ? S.glass(field.readOnly ? 0.45 : 0.78) : S.ink(field.readOnly ? 0.03 : 0.08)
             border.width: 1
             border.color: field.error.length > 0 ? S.danger
                         : (input.activeFocus ? S.accentSoft : (field.formStyle ? S.fieldBorder : S.border))

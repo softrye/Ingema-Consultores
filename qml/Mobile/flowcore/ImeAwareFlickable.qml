@@ -17,6 +17,7 @@ Flickable {
     readonly property bool imeVisible:
         flow && flow.imeVisible !== undefined
         ? flow.imeVisible : false
+    readonly property bool imeAnimating: flow && flow.imeAnimating === true
     readonly property real imeAvailableContentHeight:
         flow && flow.availableContentHeight !== undefined
         ? flow.availableContentHeight
@@ -89,6 +90,8 @@ Flickable {
 
     function __animateTo(value) {
         var targetValue = __clampContentY(value)
+        if (imeScrollAnimation.running && Math.abs(imeScrollAnimation.to - targetValue) < 0.5)
+            return
         if (Math.abs(contentY - targetValue) < 0.5) {
             imeScrollAnimation.stop()
             contentY = targetValue
@@ -107,7 +110,7 @@ Flickable {
     }
 
     function ensureActiveFocusVisible() {
-        if (!imeVisible || height <= 0.0)
+        if (!visible || !imeVisible || imeAnimating || dragging || flicking || height <= 0.0)
             return
 
         var editor = __focusedEditor()
@@ -127,6 +130,15 @@ Flickable {
         var visibleBottom = __visibleBottom() - imeBottomMargin
         if (visibleBottom <= visibleTop)
             return
+
+        // A tall editor cannot fit at both edges. Following its whole box
+        // alternates between top and bottom on each IME update/keystroke.
+        // Keep the insertion cursor visible instead, using this same scroll.
+        if (editor.height > visibleBottom - visibleTop && editor.cursorRectangle !== undefined) {
+            var caret = editor.cursorRectangle
+            editorTop = position.y + caret.y
+            editorBottom = editorTop + Math.min(Math.max(1.0, caret.height), visibleBottom - visibleTop)
+        }
 
         var delta = 0.0
         if (editorBottom > visibleBottom)
@@ -171,6 +183,13 @@ Flickable {
             __endImeSession()
     }
     onHeightChanged: __queueEnsure()
+    onContentHeightChanged: __queueEnsure()
+    onImeTopMarginChanged: __queueEnsure()
+    onImeBottomMarginChanged: __queueEnsure()
+    onImeAnimatingChanged: {
+        if (imeAnimating) imeScrollAnimation.stop()
+        else __queueEnsure()
+    }
 
     Component.onCompleted: {
         if (imeVisible)
@@ -192,6 +211,13 @@ Flickable {
         ignoreUnknownSignals: true
 
         function onActiveFocusItemChanged() { root.__queueEnsure() }
+    }
+
+    Connections {
+        target: root.imeWindow ? root.imeWindow.activeFocusItem : null
+        enabled: root.imeVisible && root.visible
+        ignoreUnknownSignals: true
+        function onCursorRectangleChanged() { root.__queueEnsure() }
     }
 
     Timer {
