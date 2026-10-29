@@ -97,4 +97,7 @@ private:
     QSet<QString> m_pendingPullOperations;
     bool m_presentAfterSync = false;
     QTimer m_publishTimer;
+    QTimer m_renderDiagnosticsTimer;
+    int m_publishRequests = 0;
+    int m_publishEmissions = 0;
 };

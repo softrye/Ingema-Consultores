@@ -1,4 +1,14 @@
 .pragma library
+// Opt-in: aggregate counters only, never row contents or account identifiers.
+var renderDiagnostics = Qt.application.arguments.indexOf("--renditions-render-diagnostics") >= 0
+var renderCounters = ({})
+function renderCount(kind) {
+    if (renderDiagnostics) renderCounters[kind] = (renderCounters[kind] || 0) + 1
+}
+function renderReport() {
+    console.info("INGE_REND_RENDER " + JSON.stringify(renderCounters))
+    renderCounters = ({})
+}
 // Paleta de la subapp Rendiciones: variante clara aprobada (2026-10-15) con
 // la paleta corporativa INGEMA. Blanco, grises y transparencias son superficie;
 // ámbar/rojo sólo como color semántico de estado. Sin reglas de negocio.

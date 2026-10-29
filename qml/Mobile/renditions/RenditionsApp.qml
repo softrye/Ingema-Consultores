@@ -278,6 +278,10 @@ Item {
 
     onActiveChanged: if (active && booted && ctl && ctl.ready) refresh()
     Component.onCompleted: bootstrap()
+    Timer {
+        interval: 1000; repeat: true; running: S.renderDiagnostics
+        onTriggered: S.renderReport()
+    }
 
     // ------------------------------------------------------------- Interfaz
     // Fondo blanco real de la app con las auras de sincronización detrás de todo.

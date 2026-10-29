@@ -1,4 +1,5 @@
 import QtQuick
+import "renditions/RStyle.js" as RenderStats
 
 // Superficie de cristal esmerilado del Home (2026-10-12). Se coloca como
 // primer hijo (debajo de textos e iconos, que quedan nítidos) y ocupa su
@@ -7,6 +8,7 @@ import QtQuick
 // fotografía (ui.backdrop); ui.glassTick avisa de cambios de posición.
 ShaderEffect {
     id: glass
+    Component.onCompleted: RenderStats.renderCount("glass_created")
 
     property var ui
     property real radius: 18

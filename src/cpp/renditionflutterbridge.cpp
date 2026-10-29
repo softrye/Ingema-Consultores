@@ -96,6 +96,15 @@ RenditionFlutterBridge::RenditionFlutterBridge(
     m_publishTimer.setInterval(24);
     connect(&m_publishTimer, &QTimer::timeout, this,
             &RenditionFlutterBridge::publishStateNow);
+    if (QCoreApplication::arguments().contains(QStringLiteral("--renditions-render-diagnostics"))) {
+        m_renderDiagnosticsTimer.setInterval(1000);
+        connect(&m_renderDiagnosticsTimer, &QTimer::timeout, this, [this]() {
+            qInfo().nospace() << "INGE_REND_RENDER publish_requests=" << m_publishRequests
+                              << " publish_emissions=" << m_publishEmissions;
+            m_publishRequests = m_publishEmissions = 0;
+        });
+        m_renderDiagnosticsTimer.start();
+    }
 
     // ---- Conectividad: una sola fuente para auras, cola y comandos.
     // (a) Cada respuesta real de Supabase (o su ausencia) es evidencia.
@@ -1228,12 +1237,14 @@ void RenditionFlutterBridge::reconnect()
 
 void RenditionFlutterBridge::publishState()
 {
+    if (m_renderDiagnosticsTimer.isActive()) ++m_publishRequests;
     if (!m_publishTimer.isActive())
         m_publishTimer.start();
 }
 
 void RenditionFlutterBridge::publishStateNow()
 {
+    if (m_renderDiagnosticsTimer.isActive()) ++m_publishEmissions;
     QVariantMap current;
     QVariantList expenses;
     QVariantList localAttachments;
