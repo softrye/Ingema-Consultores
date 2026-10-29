@@ -327,7 +327,8 @@ Item {
     QtObject {
         id: cardGlassUi
         readonly property Item backdrop: backdropLayer
-        readonly property bool glassReady: shell.cardGlassLive && backdropCapture.textureReady
+        // A valid producer must reach the shader before the first capture can finish.
+        readonly property bool glassReady: shell.cardGlassLive && backdropCapture.sourceItem !== null && backdropCapture.width > 0 && backdropCapture.height > 0
         readonly property var glassTexture: glassReady ? backdropCapture : null
         readonly property int glassTick: shell.glassTick
     }

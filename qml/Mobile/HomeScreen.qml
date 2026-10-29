@@ -1805,7 +1805,9 @@ Item {
                                              : page !== "calicatas" && page !== "earth" && page !== "rendiciones" && homeContent.visible
                                                ? homeContent
                                              : null
-    readonly property bool dockBackdropReady: dockBackdropSource !== null && dockBackdropCapture.textureReady
+    // Expose the producer before its first render: waiting for completion here
+    // hides every consumer that would cause Qt to render the captured texture.
+    readonly property bool dockBackdropReady: dockBackdropSource !== null && dockBackdropSource.width > 0 && dockBackdropSource.height > 0
     readonly property bool dockGlassFallback: (page === "calicatas" || page === "earth" || page === "rendiciones")
                                               && !dockBackdropReady
     readonly property color earthGlassTint: Qt.rgba(10 / 255, 14 / 255, 20 / 255, 0.20)   // controles laterales de Earth
@@ -1840,18 +1842,15 @@ Item {
         readonly property int glassTick: home.glassTick + Math.round(y + height)
         ShaderEffectSource {
             id: dockBackdropCapture
-            property bool textureReady: false
             readonly property bool captureAllowed: home.dockBackdropSource !== null && home.visible
                 && (dock.visible || iaButton.visible) && Qt.application.state === Qt.ApplicationActive
                 && !((home.page === "rendiciones" || home.renditionsProgress > 0.001)
                      && renditionsLoader.item && renditionsLoader.item.renderCaptureBlocked === true)
             onSourceItemChanged: {
-                textureReady = false
                 if (captureAllowed) Qt.callLater(captureIfAllowed)
             }
             onCaptureAllowedChanged: if (captureAllowed) Qt.callLater(captureIfAllowed)
             function captureIfAllowed() { if (captureAllowed && sourceItem) scheduleUpdate() }
-            onScheduledUpdateCompleted: textureReady = sourceItem !== null
             width: dockBackdrop.width
             height: dockBackdrop.height
             sourceItem: home.dockBackdropSource
