@@ -12,6 +12,7 @@ Item {
     readonly property var ctl: app.ctl
     readonly property bool ownHeader: true              // el shell no dibuja su barra
     readonly property bool isRenditionDetail: true      // contexto de Dock «rendición abierta»
+    readonly property bool renderInteractionBusy: expensesTabItem.renderInteractionBusy
     readonly property bool selected: String(app.st.selectedLocalId || "") === localId
     readonly property var current: {
         if (selected && app.st.current && app.st.current.localId === localId) return app.st.current
@@ -320,6 +321,18 @@ Item {
                 width: parent.width; visible: page.tab !== "expenses"
                 text: page.projectLine; color: S.muted; elide: Text.ElideRight
                 font.family: page.ui.fontFamily; font.pixelSize: 12 * page.ui.u
+            }
+            Rectangle {                               // comentario del revisor (último), como en la Web
+                readonly property var note: (page.app.reviewNotes || []).length ? page.app.reviewNotes[page.app.reviewNotes.length - 1] : null
+                visible: note !== null && String(page.current.status || "") === "OBSERVADO"
+                width: parent.width; height: visible ? noteText.implicitHeight + 16 * page.ui.u : 0
+                radius: 12 * page.ui.u; color: Qt.rgba(242 / 255, 178 / 255, 27 / 255, S.dark ? 0.18 : 0.14)
+                border.width: 1; border.color: Qt.rgba(242 / 255, 178 / 255, 27 / 255, 0.45)
+                Text { id: noteText; x: 10 * page.ui.u; width: parent.width - 20 * page.ui.u; anchors.verticalCenter: parent.verticalCenter
+                       wrapMode: Text.WordWrap; maximumLineCount: 3; elide: Text.ElideRight; color: S.text
+                       text: parent.note ? "Observación del revisor: " + String(parent.note.body || "") : ""
+                       font.family: page.ui.fontFamily; font.pixelSize: 12.5 * page.ui.u }
+                MouseArea { anchors.fill: parent; onClicked: page.app.dockCommand("renditions.review.notes") }
             }
             Row {                                     // en vivo: quién más tiene abierta la rendición
                 visible: (page.app.livePeers || []).length > 0

@@ -145,13 +145,14 @@ QtObject {
     readonly property int emphasizedDuration: duration(260)
 
     // V50: fuente global unica para la geometria del teclado Android/IME.
-    // imeViewportHeight lo publica el unico ApplicationWindow real. Cuando
+    // imeViewportHeight lo publica la unica Window real de Main.qml. Cuando
     // adjustResize ya redujo la ventana, keyboardRectangle queda fuera de ese
     // viewport y el solapamiento es cero, evitando un segundo reajuste.
     property real imeViewportHeight: 0.0
     // Acceso indexado: Qt 6.9 expone estas propiedades en runtime, aunque la
     // metadata estatica de QObject usada por qmllint no las enumera.
     readonly property bool imeVisible: Qt.inputMethod["visible"] === true
+    readonly property bool imeAnimating: Qt.inputMethod["animating"] === true
     readonly property rect imeKeyboardRectangle:
         Qt.inputMethod["keyboardRectangle"] || Qt.rect(0, 0, 0, 0)
     readonly property real imeHeight: {

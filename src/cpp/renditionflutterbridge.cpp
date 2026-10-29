@@ -41,6 +41,7 @@ RenditionFlutterBridge::RenditionFlutterBridge(
       m_exporter(exporter)
 {
     connect(m_repository, &RenditionRepository::receivedReset, this, [this]() {
+        m_lastPublishedState.clear();
         const auto picker = m_calicataPickerDocument;
         m_calicataPickerDocument.clear();
         if (!picker.isEmpty()) emit calicataProjectPicked(picker, {});
@@ -98,6 +99,15 @@ RenditionFlutterBridge::RenditionFlutterBridge(
     m_publishTimer.setInterval(24);
     connect(&m_publishTimer, &QTimer::timeout, this,
             &RenditionFlutterBridge::publishStateNow);
+    if (QCoreApplication::arguments().contains(QStringLiteral("--renditions-render-diagnostics"))) {
+        m_renderDiagnosticsTimer.setInterval(1000);
+        connect(&m_renderDiagnosticsTimer, &QTimer::timeout, this, [this]() {
+            qInfo().nospace() << "INGE_REND_RENDER publish_requests=" << m_publishRequests
+                              << " publish_emissions=" << m_publishEmissions;
+            m_publishRequests = m_publishEmissions = 0;
+        });
+        m_renderDiagnosticsTimer.start();
+    }
 
     // ---- Conectividad: una sola fuente para auras, cola y comandos.
     // (a) Cada respuesta real de Supabase (o su ausencia) es evidencia.
@@ -435,7 +445,8 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
     }
     if (operation == QLatin1String("saveEditorDraft")) {
         if (m_store->saveEditorDraft(arguments.value(QStringLiteral("key")).toString(),
-                                     arguments.value(QStringLiteral("draft")).toMap())) sendResult(requestId);
+                                     arguments.value(QStringLiteral("draft")).toMap(),
+                                     arguments.value(QStringLiteral("quiet")).toBool())) sendResult(requestId);
         else sendError(requestId, QStringLiteral("AUTOSAVE_FAILED"), m_store->lastError());
         return;
     }
@@ -512,7 +523,8 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
     // Revisión administrativa y recepción (contratos de la Web). El servidor
     // decide los permisos efectivos; Android solo envía la intención con CAS
     // y request_id estables y refresca la ficha tras la respuesta.
-    if (operation == QLatin1String("reviewContext") || operation == QLatin1String("reviewTransition")
+    if (operation == QLatin1String("reviewContext") || operation == QLatin1String("reviewObservations")
+        || operation == QLatin1String("reviewTransition")
         || operation == QLatin1String("reviewRequest") || operation == QLatin1String("reviewDecide")
         || operation == QLatin1String("receive")) {
         if (arguments.value(QStringLiteral("renditionId")).toString().isEmpty()) {
@@ -520,8 +532,7 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
                       QStringLiteral("Sincroniza la rendición antes de consultar su revisión."));
             return;
         }
-        if ((operation == QLatin1String("reviewTransition") || operation == QLatin1String("reviewRequest")
-             || operation == QLatin1String("reviewDecide"))
+        if (RenditionAdminRpc::requiresReviewReason(operation, arguments)
             && arguments.value(QStringLiteral("reason")).toString().trimmed().isEmpty()) {
             sendError(requestId, QStringLiteral("RENDITION_REVIEW_REASON_REQUIRED"),
                       QStringLiteral("Escribe el motivo de la operación."));
@@ -964,8 +975,12 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
             const auto header = row.value(QStringLiteral("snapshot_payload")).toMap().value(QStringLiteral("rendition")).toMap();
             row.insert(QStringLiteral("visible_code"), header.value(QStringLiteral("visible_code")));
             row.insert(QStringLiteral("owner_name"), header.value(QStringLiteral("owner_user_id")));
+            // El snapshot no guarda el nombre: el archivo se llama como la rendición («Fernando_rendicion v1»).
+            if (row.value(QStringLiteral("display_name")).toString().trimmed().isEmpty())
+                row.insert(QStringLiteral("display_name"), draft.value(QStringLiteral("displayName")).toString().trimmed());
             const QString output = m_exporter ? m_exporter->exportReceivedSnapshot(row,
-                arguments.value(QStringLiteral("format")).toString()) : QString();
+                arguments.value(QStringLiteral("format")).toString(),
+                arguments.value(QStringLiteral("destination"), QStringLiteral("inge")).toString()) : QString();
             if (output.isEmpty()) sendError(requestId, QStringLiteral("EXPORT_FAILED"),
                 m_exporter ? m_exporter->lastError() : QStringLiteral("Exportador no disponible."));
             else sendResult(requestId, {{QStringLiteral("output"), output}});
@@ -1264,6 +1279,7 @@ void RenditionFlutterBridge::reconnect()
 
 void RenditionFlutterBridge::publishState()
 {
+    if (m_renderDiagnosticsTimer.isActive()) ++m_publishRequests;
     if (!m_publishTimer.isActive())
         m_publishTimer.start();
 }
@@ -1305,7 +1321,7 @@ void RenditionFlutterBridge::publishStateNow()
         publishedRenditions.append(row);
     }
 
-    sendEvent({
+    const QVariantMap state{
         {QStringLiteral("type"), QStringLiteral("state")},
         {QStringLiteral("contractMode"), m_repository->contractMode()},
         {QStringLiteral("busy"), m_repository->busy()
@@ -1355,7 +1371,11 @@ void RenditionFlutterBridge::publishStateNow()
         {QStringLiteral("documentSpace"), m_repository->documentSpace()},
         {QStringLiteral("documentFolders"), m_repository->documentFolders()},
         {QStringLiteral("documentCapabilities"), m_repository->documentCapabilities()}
-    });
+    };
+    if (m_lastPublishedState == state) return;
+    m_lastPublishedState = state;
+    if (m_renderDiagnosticsTimer.isActive()) ++m_publishEmissions;
+    sendEvent(state);
 }
 
 void RenditionFlutterBridge::sendResult(const QString &requestId,

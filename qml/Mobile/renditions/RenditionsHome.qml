@@ -28,6 +28,14 @@ Item {
     readonly property var receivedVisible: receivedView
         ? received.filter(function(r) { return !projectFilter.length || S.text_(r, "primary_project_id") === projectFilter })
         : []
+    ListModel { id: ownModel }
+    ListModel { id: receivedModel }
+    onOwnChanged: S.syncRows(ownModel, own, ["localId"])
+    onReceivedVisibleChanged: S.syncRows(receivedModel, receivedVisible, ["rendition_id", "version_number"])
+    Component.onCompleted: {
+        S.syncRows(ownModel, own, ["localId"])
+        S.syncRows(receivedModel, receivedVisible, ["rendition_id", "version_number"])
+    }
     readonly property bool syncBusy: app.busy("sync") || app.phase !== "IDLE"
     readonly property var filterLabels: ({ "BORRADOR": "Borrador", "OBSERVADO": "Observadas",
                                            "EN_REVISION": "En revisión", "APROBADO": "Aprobadas",
@@ -41,6 +49,7 @@ Item {
     }
     function closeMenus() { filterMenu.close(); projectMenu.close() }
     readonly property bool listInteractive: flick.interactive
+    readonly property bool renderInteractionBusy: filterMenu.visible || projectMenu.visible || cardMenu.visible
     function selectStatus(value) {
         statusFilter = value
         if (value === "RECEIVED" && !receivedLoaded) loadReceived()
@@ -306,9 +315,10 @@ Item {
             }
 
             Repeater {                                              // propias
-                model: page.own
+                model: ownModel
                 delegate: RenditionCard {
-                    required property var modelData
+                    required property string rowJson
+                    readonly property var modelData: JSON.parse(rowJson)
                     width: column.width
                     ui: page.ui
                     ctl: page.ctl
@@ -318,9 +328,10 @@ Item {
                 }
             }
             Repeater {                                              // recibidas (vista «Recibidas»)
-                model: page.receivedVisible
+                model: receivedModel
                 delegate: RenditionCard {
-                    required property var modelData
+                    required property string rowJson
+                    readonly property var modelData: JSON.parse(rowJson)
                     width: column.width
                     ui: page.ui
                     ctl: page.ctl

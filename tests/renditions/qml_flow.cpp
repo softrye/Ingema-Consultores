@@ -353,8 +353,8 @@ int main(int argc, char **argv)
     check(js("stack.currentItem.tab === 'expenses' && stack.currentItem.expensesTab.visible").toBool(), "UI03 expense overview is the initial visible route");
     check(!js("modalOpen").toBool(), "SCROLL sheet closed releases the background");
     check(waitFor([&]() { return js("dockActions.map(function(a) { return a.id }).join(',')").toString()
-                                 == "renditions.search,renditions.info,renditions.new,renditions.activity"; }),
-          "IMG2 rendition dock: Buscar, Información, +, Actividad (no Atrás)");
+                                 == "renditions.search,renditions.info,renditions.new,renditions.review"; }),
+          "IMG2 rendition dock: Buscar, Información, +, Estado (3D Touch con Actividad; no Atrás)");
     check(js("dockActions[2].tapCommand === true && dockActions[2].children.length === 4").toBool(), "IMG2 + taps quick expense; Deep Press shows creation options");
     js("dockCommand('renditions.quickExpense')");
     check(waitFor([&]() { auto *p = root->findChild<QObject *>("expenseEditorPopup"); return p && p->property("visible").toBool(); }),

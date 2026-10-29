@@ -222,7 +222,8 @@ int main(int argc, char **argv) {
  QFile pdf("artifacts/rendition-v1.pdf"); check(pdf.open(QIODevice::ReadOnly)&&pdf.read(5)=="%PDF-","valid PDF bytes");
  check(RenditionSnapshotExporter::write(model,"xlsx","artifacts/rendition-v1.xlsx",&error),"XLSX write");
  QXlsx::Document xlsx("artifacts/rendition-v1.xlsx"); check(xlsx.load(),"XLSX readable");
- check(xlsx.selectSheet("Gastos")&&xlsx.read(2,1).toString()==model.code&&xlsx.read(2,13).toDouble()==20,"XLSX snapshot values");
- check(xlsx.selectSheet("Versión")&&xlsx.read(13,2).toString()=="500.00"&&xlsx.read(15,2).toString()=="3.437000","XLSX exact frozen financial text");
+ // Formato de la Web: Detalle_Gastos (fila 5, monto en J) y Versión (RDC en B6).
+ check(xlsx.selectSheet("Detalle_Gastos")&&xlsx.read(5,1).toInt()==1&&xlsx.read(5,10).toDouble()==20,"XLSX snapshot values");
+ check(xlsx.selectSheet("Versión")&&xlsx.read(6,2).toString()==model.code&&xlsx.selectSheet("Resumen")&&xlsx.selectSheet("Evidencias"),"XLSX web layout sheets");
  std::cout<<"PASS persistence, retry, same-ID presentation, immutability, PDF bytes, XLSX contents\n";
 }

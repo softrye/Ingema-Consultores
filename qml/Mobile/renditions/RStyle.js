@@ -1,4 +1,45 @@
 .pragma library
+// Opt-in: aggregate counters only, never row contents or account identifiers.
+var renderDiagnostics = Qt.application.arguments.indexOf("--renditions-render-diagnostics") >= 0
+var renderCounters = ({})
+function renderCount(kind) {
+    if (renderDiagnostics) renderCounters[kind] = (renderCounters[kind] || 0) + 1
+}
+function renderReport() {
+    console.info("INGE_REND_RENDER " + JSON.stringify(renderCounters))
+    renderCounters = ({})
+}
+// Reconcile by domain identity. Only changed payloads notify their delegate;
+// inserts/removes/moves preserve every surviving delegate and its focus/menu.
+// JSON is a string role so nested arrays/maps keep their original types.
+function syncRows(model, rows, keyFields) {
+    var keys = [], payloads = [], seen = ({})
+    for (var i = 0; i < rows.length; ++i) {
+        var parts = []
+        for (var k = 0; k < keyFields.length; ++k) {
+            var value = rows[i][keyFields[k]]
+            if (value === undefined || value === null || String(value).length === 0)
+                throw new Error("Renditions model: missing identity " + keyFields[k])
+            parts.push(String(value))
+        }
+        var key = JSON.stringify(parts)
+        if (seen[key]) throw new Error("Renditions model: duplicate identity")
+        seen[key] = true
+        keys.push(key)
+        payloads.push(JSON.stringify(rows[i]))
+    }
+    for (var r = model.count - 1; r >= 0; --r)
+        if (!seen[model.get(r).itemKey]) model.remove(r)
+    for (var j = 0; j < keys.length; ++j) {
+        var at = j
+        while (at < model.count && model.get(at).itemKey !== keys[j]) ++at
+        if (at === model.count) model.insert(j, { itemKey: keys[j], rowJson: payloads[j] })
+        else {
+            if (at !== j) model.move(at, j, 1)
+            if (model.get(j).rowJson !== payloads[j]) model.setProperty(j, "rowJson", payloads[j])
+        }
+    }
+}
 // Paleta de la subapp Rendiciones: variante clara aprobada (2026-10-15) con
 // la paleta corporativa INGEMA. Blanco, grises y transparencias son superficie;
 // ámbar/rojo sólo como color semántico de estado. Sin reglas de negocio.

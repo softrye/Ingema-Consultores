@@ -15,10 +15,18 @@ Item {
     readonly property var current: detail.current
     readonly property string remoteId: String(current.remoteId || "")
     readonly property var versions: detail.selected ? (app.st.versions || []) : []
+    ListModel { id: versionRows }
+    onVersionsChanged: S.syncRows(versionRows, versions, ["id"])
+    Component.onCompleted: {
+        S.syncRows(versionRows, versions, ["id"])
+        S.syncRows(observedRows, observed, ["localId"])
+    }
     readonly property var observed: (detail.selected ? (app.st.expenses || []) : []).filter(function(e) {
         return e.archived !== true && (S.text_(e, "reviewStatus", "review_status").toUpperCase() === "OBSERVADO"
                                        || S.text_(e, "reviewComment", "review_comment").length > 0)
     })
+    ListModel { id: observedRows }
+    onObservedChanged: S.syncRows(observedRows, observed, ["localId"])
     readonly property int expenseCount: (detail.selected ? (app.st.expenses || []) : []).filter(function(e) { return e.archived !== true }).length
     readonly property int pending: Number(current.pendingCount || 0)
     readonly property string presentBlocker: !detail.writable ? "La rendición no tiene permiso efectivo de edición."
@@ -163,9 +171,10 @@ Item {
                 font.family: tab.ui.fontFamily; font.pixelSize: 14 * tab.ui.u
             }
             Repeater {
-                model: tab.observed
+                model: observedRows
                 delegate: RCard {
-                    required property var modelData
+                    required property string rowJson
+                    readonly property var modelData: JSON.parse(rowJson)
                     width: column.width
                     ui: tab.ui
                     clickable: true
@@ -198,9 +207,10 @@ Item {
                 font.family: tab.ui.fontFamily; font.pixelSize: 14 * tab.ui.u
             }
             Repeater {
-                model: tab.versions
+                model: versionRows
                 delegate: RCard {
-                    required property var modelData
+                    required property string rowJson
+                    readonly property var modelData: JSON.parse(rowJson)
                     width: column.width
                     ui: tab.ui
                     Text {

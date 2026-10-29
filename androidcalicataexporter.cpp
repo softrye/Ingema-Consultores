@@ -2951,7 +2951,8 @@ QString AndroidCalicataExporter::exportGenericWorkbookToXlsx(const QVariantMap &
 #endif
 }
 
-QString AndroidCalicataExporter::exportReceivedSnapshot(const QVariantMap &received, const QString &format)
+QString AndroidCalicataExporter::exportReceivedSnapshot(const QVariantMap &received, const QString &format,
+                                                       const QString &destination)
 {
     setLastError({});
     SnapshotExportModel model;
@@ -2972,9 +2973,14 @@ QString AndroidCalicataExporter::exportReceivedSnapshot(const QVariantMap &recei
     const auto projects = snapshot.value("projects").toList();
     const auto project = header.value("primary_project_id",
         projects.isEmpty() ? QVariant{} : projects.first().toMap().value("id")).toString();
-    if (appContext() && appContext()->auth() && appContext()->supabase()) {
+    if (destination != QLatin1String("phone") && appContext() && appContext()->auth() && appContext()->supabase()) {
         auto *exports = RenditionExportService::shared(appContext()->supabase(), appContext()->auth());
-        if (!exports->enqueue(path, project, received.value("rendition_id", header.value("id")).toString(), model.versionId, format))
+        const QString renditionId = received.value("rendition_id", header.value("id")).toString();
+        const bool queued = destination == QLatin1String("google")
+            ? exports->enqueueDocument(path, project, "Export/Rendiciones/" + renditionId + "/" + model.versionId + "/" + QFileInfo(path).fileName(),
+                                       {}, {}, {}, QStringLiteral("GOOGLE_DRIVE"), true)
+            : exports->enqueue(path, project, renditionId, model.versionId, format);
+        if (!queued)
             setLastError(QStringLiteral("Archivo creado localmente; no se pudo registrar su subida. Conserva el archivo y reintenta."));
     }
     return path;

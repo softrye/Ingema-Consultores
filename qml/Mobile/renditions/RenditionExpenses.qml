@@ -17,6 +17,10 @@ Item {
         return rows.filter(function(e) { return e.archived !== true })
     }
     readonly property var totals: ctl.totals(expenses)
+    readonly property bool editorActive: editorPopup.visible || draftPopup.visible || expandedId.length > 0
+    readonly property bool renderInteractionBusy: editorActive || tileMenu.visible || sortMenu.visible
+    ListModel { id: expensesModel }
+    onVisibleExpensesChanged: S.syncRows(expensesModel, visibleExpenses, ["localId"])
 
     // ============ Edición de cajas (mismo sistema del Home, sin widgets) ============
     // Pulsación larga = modo edición; arrastrar reordena; ··· = tamaño y presentación.
@@ -152,7 +156,10 @@ Item {
         return null
     }
     onDraftsChanged: syncAll()
-    Component.onCompleted: loadLayout()
+    Component.onCompleted: {
+        loadLayout()
+        S.syncRows(expensesModel, visibleExpenses, ["localId"])
+    }
     // Buscar del Dock (imagen 2): texto y orden sobre los gastos REALES de la ficha.
     property string query: ""
     property string sortBy: "date"              // concept | date | category | beneficiary | project
@@ -218,6 +225,8 @@ Item {
         expandedId = "new"
         quickForm.section = 0
         editorPopup.open()
+        editorFlick.contentY = 0
+        quickForm.focusConcept()
     }
     readonly property var expandedRow: {
         if (!expandedId.length) return null
@@ -482,11 +491,26 @@ Item {
         // Vidrio: la subapp de fondo se desenfoca y la hoja translúcida deja verla.
         Overlay.modal: Item {
             opacity: editorPopup.opacity
+            // Freeze the same blurred backdrop while typing. Sampling the
+            // live subapp repainted its animated auras and RPC updates behind
+            // every keystroke even though the modal already blocks input.
+            ShaderEffectSource {
+                id: editorBackdrop
+                objectName: "expenseEditorBackdrop"
+                width: tab.app ? tab.app.width : 0
+                height: tab.app ? tab.app.height : 0
+                sourceItem: editorPopup.visible ? tab.app : null
+                live: false
+                hideSource: false
+                visible: false
+                smooth: true
+            }
             MultiEffect {
                 readonly property point origin: tab.app ? tab.app.mapToItem(null, 0, 0) : Qt.point(0, 0)
                 x: origin.x; y: origin.y
                 width: tab.app ? tab.app.width : 0; height: tab.app ? tab.app.height : 0
-                source: tab.app
+                visible: editorBackdrop.sourceItem !== null
+                source: visible ? editorBackdrop : null
                 autoPaddingEnabled: false
                 blurEnabled: true; blurMax: 48; blur: 0.8
                 saturation: -0.1
@@ -564,6 +588,8 @@ Item {
                 id: editorFlick
                 objectName: "expenseEditorScroll"
                 flow: tab.app.flow
+                restoreOnImeClose: false
+                imeTopMargin: stickyTabs.visible ? stickyTabs.height + 8 * tab.ui.u : 12
                 anchors.top: expenseHeader.bottom; anchors.topMargin: 6 * tab.ui.u
                 anchors.bottom: editorActions.top; anchors.bottomMargin: 10 * tab.ui.u
                 width: parent.width
@@ -632,6 +658,15 @@ Item {
                         }
                     }
                 }
+            }
+            Rectangle {                                   // aviso del dato que falta (antes no se veía)
+                visible: quickForm.error.length > 0
+                anchors.bottom: editorActions.top; anchors.bottomMargin: 8 * tab.ui.u
+                width: parent.width; height: editorError.implicitHeight + 16 * tab.ui.u; radius: 12 * tab.ui.u
+                color: S.dark ? "#3A1A1F" : "#FDECEE"; border.width: 1; border.color: Qt.rgba(198 / 255, 47 / 255, 62 / 255, 0.35)
+                Text { id: editorError; x: 12 * tab.ui.u; width: parent.width - 24 * tab.ui.u; anchors.verticalCenter: parent.verticalCenter
+                       text: quickForm.error; color: S.danger; wrapMode: Text.WordWrap
+                       font.family: tab.ui.fontFamily; font.pixelSize: 13.5 * tab.ui.u; font.weight: Font.DemiBold }
             }
             Row {
                 id: editorActions
@@ -1141,12 +1176,13 @@ Item {
                 }
                 RChip { id: clearFilter; ui: tab.ui; label: "Quitar filtro"; onActivated: { tab.query = ""; tab.sortBy = "date" } }
             }
-            Repeater { model: tab.visibleExpenses; delegate: expenseCardComponent }
+            Repeater { model: expensesModel; delegate: expenseCardComponent }
             Component {
                 id: expenseCardComponent
                 RCard {
                         id: expenseCard
-                        required property var modelData
+                        required property string rowJson
+                        readonly property var modelData: JSON.parse(rowJson)
                         objectName: "expense:" + modelData.localId
                         width: column.width
                         ui: tab.ui

@@ -1158,6 +1158,9 @@ Item {
                     ui: home
                     ctl: typeof RenditionsUi !== "undefined" ? RenditionsUi : null
                     active: home.page === "rendiciones"
+                    navigationTransitionActive: home.renditionsProgress > 0.001 && home.renditionsProgress < 0.999
+                                                || renditionsEnter.running || renditionsExit.running
+                    dockMenuVisible: dockMenuBox.visible
                     haptics: typeof FlowHaptics !== "undefined" ? FlowHaptics : null
                     dockAnchor: dock
                     touchLayer: touchMenuHost                  // menús 3D Touch sobre el desenfoque
@@ -2004,7 +2007,9 @@ Item {
                                              : page !== "calicatas" && page !== "earth" && page !== "rendiciones" && homeContent.visible
                                                ? homeContent
                                              : null
-    readonly property bool dockBackdropReady: dockBackdropSource !== null
+    // Expose the producer before its first render: waiting for completion here
+    // hides every consumer that would cause Qt to render the captured texture.
+    readonly property bool dockBackdropReady: dockBackdropSource !== null && dockBackdropSource.width > 0 && dockBackdropSource.height > 0
     readonly property bool dockGlassFallback: (page === "calicatas" || page === "earth" || page === "rendiciones")
                                               && !dockBackdropReady
     readonly property color earthGlassTint: Qt.rgba(10 / 255, 14 / 255, 20 / 255, 0.20)   // controles laterales de Earth
@@ -2028,7 +2033,7 @@ Item {
     readonly property color dockGlyphOutline: Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.80)
     readonly property color dockSeparatorColor: Qt.rgba(130 / 255, 140 / 255, 160 / 255, 0.55)
     readonly property real dockGlassFrost: 2.5 * u           // esmerilado homogéneo
-    readonly property var dockGlassUi: dockBackdropReady ? dockBackdrop : home
+    readonly property var dockGlassUi: dockBackdropSource !== null ? dockBackdrop : home
     // Material Liquid Glass de las tarjetas de una subapp (lo publica la subapp: su fondo vivo).
     property var cardGlassUi: null
     Item {
@@ -2039,18 +2044,27 @@ Item {
         width: home.width
         height: band
         readonly property Item backdrop: dockBackdrop
+        readonly property bool glassReady: home.dockBackdropReady
         readonly property var glassTexture: home.dockBackdropReady ? dockBackdropCapture : null
         readonly property int glassTick: home.glassTick + Math.round(y + height)
         ShaderEffectSource {
             id: dockBackdropCapture
+            readonly property bool captureAllowed: home.dockBackdropSource !== null && home.visible
+                && (dock.visible || iaButton.visible) && Qt.application.state === Qt.ApplicationActive
+                && !((home.page === "rendiciones" || home.renditionsProgress > 0.001)
+                     && renditionsLoader.item && renditionsLoader.item.renderCaptureBlocked === true)
+            onSourceItemChanged: {
+                if (captureAllowed) Qt.callLater(captureIfAllowed)
+            }
+            onCaptureAllowedChanged: if (captureAllowed) Qt.callLater(captureIfAllowed)
+            function captureIfAllowed() { if (captureAllowed && sourceItem) scheduleUpdate() }
             width: dockBackdrop.width
             height: dockBackdrop.height
             sourceItem: home.dockBackdropSource
             // Las fuentes ocupan toda la pantalla desde (0,0): la franja coincide
             // con la posición real de la cápsula, el botón IA y el Quick Bubble.
             sourceRect: Qt.rect(0, dockBackdrop.y, dockBackdrop.width, dockBackdrop.height)
-            live: home.dockBackdropReady && home.visible && (dock.visible || iaButton.visible)
-                  && Qt.application.state === Qt.ApplicationActive
+            live: captureAllowed
             hideSource: false
             visible: false
             smooth: true

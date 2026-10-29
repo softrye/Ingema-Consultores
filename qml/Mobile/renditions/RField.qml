@@ -14,7 +14,8 @@ Column {
         var f = field.parent
         while (f && !(f.contentY !== undefined && f.flicking !== undefined)) f = f.parent
         if (!f || !f.contentItem) return
-        if (typeof f.ensureActiveFocusVisible === "function") { f.ensureActiveFocusVisible(); return }   // contenedor IME-aware
+        if (typeof f.__queueEnsure === "function") { f.__queueEnsure(); return true }
+        if (typeof f.ensureActiveFocusVisible === "function") { f.ensureActiveFocusVisible(); return true }
         var y = field.mapToItem(f.contentItem, 0, 0).y
         var margin = 16 * field.ui.u
         var target = f.contentY
@@ -22,9 +23,8 @@ Column {
         else if (y + field.height + margin > f.contentY + f.height) target = y + field.height + margin - f.height
         f.contentY = Math.max(0, Math.min(target, Math.max(0, f.contentHeight - f.height)))
     }
-    Timer { id: reshowKeyboard; interval: 220; property var target: null
-            onTriggered: if (target) { target.forceActiveFocus(); Qt.inputMethod.show(); target = null } }
     Timer { id: revealLater; interval: 320; onTriggered: field.reveal() }   // tras ajustar el teclado
+    function focusField() { if (!field.readOnly) input.forceActiveFocus(); field.reveal() }
     property string label: ""
     property alias text: input.text
     property string placeholder: ""
@@ -58,7 +58,10 @@ Column {
         font.family: field.ui.fontFamily
         font.pixelSize: 16 * field.ui.u
         readOnly: field.readOnly
-        onActiveFocusChanged: if (activeFocus) { Qt.callLater(field.reveal); revealLater.restart() }
+        onActiveFocusChanged: {
+            if (activeFocus) Qt.callLater(function() { if (input.activeFocus && !field.reveal()) revealLater.restart() })
+            else revealLater.stop()
+        }
         onTextChanged: if (!activeFocus) cursorPosition = 0
         maximumLength: field.maxLength
         inputMethodHints: field.numeric ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
@@ -70,17 +73,11 @@ Column {
             var next = input.nextItemInFocusChain(true)
             for (var guard = 0; next && next !== input && guard < 40; ++guard) {
                 if (next.visible && next.enabled && next.cursorPosition !== undefined && !next.readOnly) {
-                    // Si cambia el tipo de teclado (texto ⇄ numérico), Android sólo lo
-                    // reconfigura al reabrirlo: se cierra y se abre en el mismo instante.
-                    var retype = next.inputMethodHints !== input.inputMethodHints
-                    if (retype) {
-                        // Como un toque: se cierra el teclado y el campo recibe el foco
-                        // ya cerrado; al abrirse, Android usa el tipo del nuevo campo.
-                        input.focus = false
-                        Qt.inputMethod.hide()
-                        reshowKeyboard.target = next
-                        reshowKeyboard.restart()
-                    } else next.forceActiveFocus()
+                    // Qt updates the input hints for the new focus. Hiding the
+                    // IME here resized the Android surface and restored scroll
+                    // to its old baseline before reopening it 220 ms later.
+                    next.forceActiveFocus()
+                    Qt.inputMethod.update(Qt.ImHints | Qt.ImQueryInput)
                     return
                 }
                 next = next.nextItemInFocusChain(true)

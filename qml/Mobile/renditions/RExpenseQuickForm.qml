@@ -139,7 +139,7 @@ Column {
         error = ""
         autosave.restart()
     }
-    function persistLocal(done) {
+    function persistLocal(done, quiet) {
         autosave.stop()
         if (!ready || completedSave || !renditionLocalId.length) { if (done) done(true); return }
         if (!dirty && !saving && !savedId.length) { if (done) done(true); return }
@@ -147,7 +147,7 @@ Column {
         draft.intentId = intentId; draft.savedId = savedId; draft.baseRowVersion = baseRowVersion
         draft.pendingAttachments = pending.slice(); draft.renditionLocalId = renditionLocalId
         var key = draftKey
-        var requestId = app.call("saveEditorDraft", { key: key, draft: draft }, "", function(ok, result, code, message) {
+        var requestId = app.call("saveEditorDraft", { key: key, draft: draft, quiet: quiet === true }, "", function(ok, result, code, message) {
             if (!form.life.alive || form.draftKey !== key) return
             if (!ok) form.error = form.app.errorText(code, message) || "No se pudo conservar la copia local. Mantén abierto el formulario y reintenta."
             if (done) done(ok)
@@ -160,6 +160,7 @@ Column {
     function requestClose() {
         if (imagePreview.opened) { imagePreview.close(); return }
         if (saving) return
+        if (form.app && form.app.ctl) form.app.ctl.resolveIssue("expenseForm")   // al cerrar se retira el aviso
         if (!modalEditor) { persistLocal(); finished(false); return }
         if (!dirty && (completedSave || !savedId.length)) { finished(false); return }
         // Puede existir un ID ya guardado con adjuntos sin confirmar; no cerrar
@@ -226,7 +227,11 @@ Column {
         Qt.inputMethod.hide()
         section = index
     }
-    Timer { id: autosave; interval: 500; onTriggered: form.persistLocal() }
+    // Copia local silenciosa mientras se escribe: no republica el estado (sin parpadeo ni saltos).
+    // Gasto nuevo: el cursor empieza en «Concepto» (arriba de la tarjeta).
+    Timer { id: focusConceptLater; interval: 320; onTriggered: conceptField.focusField() }
+    function focusConcept() { if (writable) focusConceptLater.restart() }
+    Timer { id: autosave; interval: 900; onTriggered: form.persistLocal(null, true) }
     onExpenseDateChanged: changed()
     onCurrencyCodeChanged: changed()
     onProjectIdChanged: changed()
@@ -284,10 +289,17 @@ Column {
             var m = /Falta completar: (\w+)\./.exec(problem)
             if (m && tabs[m[1]] !== undefined) section = tabs[m[1]]
             else if (m) section = 0
-            if (form.app && form.app.toast) form.app.toast(error, "error")
+            // El dato faltante del encabezado recibe el foco: se ve y se escribe al instante.
+            if (m && m[1] === "concept") conceptField.focusField()
+            else if (!m && ctl.amountError(values.amount).length) amountField.focusField()
+            // Aura ámbar (atención): incidencia localizada y corregible.
+            if (form.app && form.app.ctl)
+                form.app.ctl.reportIssue("expenseForm", { what: error, area: "Gastos", title: "Gasto incompleto",
+                                                          severity: "attention", renditionLocalId: renditionLocalId })
             return
         }
         saving = true; error = ""
+        if (form.app && form.app.ctl) form.app.ctl.resolveIssue("expenseForm")
         autosave.stop()
         persistLocal()
         var revision = editRevision

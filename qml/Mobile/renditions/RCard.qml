@@ -5,6 +5,7 @@ import ".." as Mobile
 // Tarjeta de vidrio con columna de contenido; tocable si [clickable].
 Rectangle {
     id: card
+    Component.onCompleted: S.renderCount(objectName.indexOf("expense:") === 0 ? "expense_delegate_created" : "section_card_created")
     property var ui
     property bool clickable: false
     default property alias content: body.data
@@ -17,7 +18,8 @@ Rectangle {
     Behavior on implicitHeight { enabled: card.settled && card.ui && card.ui.reducedMotion !== true
                                  NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
     radius: 18 * ui.u
-    readonly property bool glassOn: S.dark && !!ui && !!ui.cardGlassUi
+    readonly property bool glassOn: !!ui && !!ui.cardGlassUi && !!ui.cardGlassUi.glassTexture
+                                    && ui.cardGlassUi.glassReady !== false
     // Fuera de pantalla no se dibuja el vidrio (ahorra pasadas de GPU al desplazar).
     readonly property bool onScreen: {
         if (!glassOn) return false
@@ -28,19 +30,19 @@ Rectangle {
     color: glassOn ? (tap.pressed ? Qt.rgba(1, 1, 1, 0.06) : "transparent") : (tap.pressed ? S.surfaceStrong : S.surface)
     border.width: glassOn ? 0 : 1
     border.color: S.border
-    Mobile.GlassSurface {                             // Liquid Glass real (material del Dock) en oscuro
+    Mobile.GlassSurface {                             // Liquid Glass real (material del Dock), claro y oscuro
         ui: card.glassOn ? card.ui.cardGlassUi : null
         visible: card.onScreen
         radius: card.radius
         margin: 10 * card.ui.u
-        tint: card.ui.dockGlassTint
-        refraction: card.ui.dockGlassRefraction
-        specular: card.ui.dockGlassSpecular
+        tint: S.dark ? Qt.rgba(10 / 255, 14 / 255, 24 / 255, 0.42) : Qt.rgba(1, 1, 1, 0.78)
+        refraction: S.dark ? card.ui.dockGlassRefraction : 0          // claro: sin lente oscura
+        specular: S.dark ? 0.75 : 0.45                                   // oscuro: filo claro como iOS
         bevel: card.ui.dockGlassBevel
         contrast: card.ui.dockGlassContrast
-        frost: card.ui.dockGlassFrost
-        edge: card.ui.dockGlassEdge
-        shadowAlpha: card.ui.dockGlassShadowAlpha
+        frost: S.dark ? card.ui.dockGlassFrost : 7 * card.ui.u           // esmerilado blanco intenso
+        edge: S.dark ? Qt.rgba(1, 1, 1, 0.38) : Qt.rgba(1, 1, 1, 0.95)
+        shadowAlpha: S.dark ? card.ui.dockGlassShadowAlpha : 0.10
     }
     Rectangle {                                       // brillo superior del vidrio oscuro
         visible: S.dark && !card.glassOn

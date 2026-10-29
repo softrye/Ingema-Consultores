@@ -15,6 +15,9 @@ Item {
     readonly property var current: detail.current
     readonly property var expenses: detail.selected ? (app.st.expenses || []).filter(function(e) { return e.archived !== true }) : []
     readonly property var remote: detail.selected ? (app.st.attachments || []) : []
+    ListModel { id: expenseRows }
+    onExpensesChanged: S.syncRows(expenseRows, expenses, ["localId"])
+    Component.onCompleted: S.syncRows(expenseRows, expenses, ["localId"])
     readonly property bool exportable: String(current.remoteId || "").length > 0 && String(current.currentVersionId || "").length > 0
                                        && ["BORRADOR", "OBSERVADO"].indexOf(String(current.status || "BORRADOR")) < 0
     readonly property var life: ({ alive: true })
@@ -45,13 +48,8 @@ Item {
         })
     }
     function exportVersion(format) {
-        app.call("ownerExport", { format: format }, "export:" + format, function(ok, result, code, message) {
-            if (!ok) { tab.app.toast(tab.app.errorText(code, message), "error"); return }
-            var path = String(result.output || "")
-            tab.app.toast("Archivo generado: " + path, "success")
-            if (typeof excelExporter !== "undefined" && excelExporter && path.length)
-                excelExporter.openExportedFile(path, true)
-        })
+        // Exportación híbrida: el destino se elige en el menú 3D Touch.
+        tab.app.askExportDestination(format, function(destination) { tab.app.runExport(format, destination) })
     }
 
     // ---- Rediseño aprobado: avance neutro, una tarjeta por gasto con
@@ -124,12 +122,21 @@ Item {
                             Behavior on width { NumberAnimation { duration: 240 } } }
             }
             Repeater {
-                model: tab.expenses
+                model: expenseRows
                 delegate: RCard {
                     id: expenseCard
-                    required property var modelData
+                    required property string rowJson
+                    readonly property var modelData: JSON.parse(rowJson)
                     readonly property var remoteRows: tab.remoteFor(modelData)
                     readonly property var localRows: tab.localFor(modelData)
+                    ListModel { id: remoteFiles }
+                    ListModel { id: localFiles }
+                    onRemoteRowsChanged: S.syncRows(remoteFiles, remoteRows, ["id"])
+                    onLocalRowsChanged: S.syncRows(localFiles, localRows, ["localId"])
+                    Component.onCompleted: {
+                        S.syncRows(remoteFiles, remoteRows, ["id"])
+                        S.syncRows(localFiles, localRows, ["localId"])
+                    }
                     width: column.width
                     ui: tab.ui
                     color: S.glass(0.80); border.color: S.edge(1); radius: 22 * tab.ui.u
@@ -153,10 +160,10 @@ Item {
                     }
                     Flow {
                         width: parent.width; spacing: 8 * tab.ui.u
-                        Repeater { model: expenseCard.remoteRows
-                                   delegate: FileTile { required property var modelData; row: modelData; remoteFile: true } }
-                        Repeater { model: expenseCard.localRows
-                                   delegate: FileTile { required property var modelData; row: modelData; remoteFile: false } }
+                        Repeater { model: remoteFiles
+                                   delegate: FileTile { required property string rowJson; row: JSON.parse(rowJson); remoteFile: true } }
+                        Repeater { model: localFiles
+                                   delegate: FileTile { required property string rowJson; row: JSON.parse(rowJson); remoteFile: false } }
                         Rectangle {
                             visible: tab.detail.writable
                             width: 72 * tab.ui.u; height: 84 * tab.ui.u; radius: 14 * tab.ui.u

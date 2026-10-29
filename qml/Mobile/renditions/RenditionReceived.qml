@@ -109,7 +109,7 @@ Item {
                  "receivedExport:" + format, function(ok, result, code, message) {
             if (!ok) { page.app.toast(page.app.errorText(code, message), "error"); return }
             var path = String(result.output || "")
-            page.app.toast("Archivo generado: " + path, "success")
+            // Sin aviso con la ruta interna: la hoja de compartir ya confirma el archivo.
             if (typeof excelExporter !== "undefined" && excelExporter && path.length)
                 excelExporter.openExportedFile(path, true)
         })

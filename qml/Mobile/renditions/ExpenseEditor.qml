@@ -19,6 +19,7 @@ import "../flowcore" as FlowCore
 // (outbox, CAS) o saveWorking/promoteWorking (Working Document). Sin IA.
 Item {
     id: page
+    readonly property bool editingInProgress: true
     property var app
     property string renditionLocalId: ""
     property string expenseLocalId: ""

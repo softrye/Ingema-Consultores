@@ -32,7 +32,8 @@ RCard {
                                            ? (context.requests || []).filter(function(r) { return r.status === "PENDING" }) : []
     readonly property string picked: asAdmin ? nextState : asOwner ? requestedState : ""
     readonly property var stateKeys: asAdmin ? adminStates.map(function(k) { return String(k) }) : asOwner ? ["EN_REVISION", "OBSERVADO", "APROBADO"] : []
-    readonly property bool needsReason: picked.length > 0 || pendingRequests.length > 0
+    readonly property bool returnToDraft: asAdmin && nextState === "BORRADOR"
+    readonly property bool needsReason: (picked.length > 0 && !returnToDraft) || pendingRequests.length > 0
     // Rediseño aprobado: la tarjeta sólo aparece cuando hay algo que hacer o ver.
     visible: remoteId.length > 0 && (contextError.length > 0 || hasActions || (context !== null && (context.requests || []).length > 0))
     color: S.glass(0.80)
@@ -73,7 +74,7 @@ RCard {
     }
     function transition() {
         actionError = ""
-        app.call("reviewTransition", { renditionId: remoteId, expectedRowVersion: Number(context.row_version), nextState: nextState, reason: reason.trim() },
+        app.call("reviewTransition", { renditionId: remoteId, expectedRowVersion: Number(context.row_version), nextState: nextState, reason: returnToDraft ? "" : reason.trim() },
                  "reviewAction:" + remoteId, function(ok, result, code, message) {
             panel.afterAction(ok, result, code, message, "Estado de la rendición actualizado.")
         })
@@ -193,7 +194,7 @@ RCard {
         width: parent.width; height: 50 * panel.ui.u; radius: 16 * panel.ui.u
         ui: panel.ui
         primary: true
-        visible: panel.picked.length > 0 && panel.reason.trim().length > 0
+        visible: panel.picked.length > 0 && (panel.returnToDraft || panel.reason.trim().length > 0)
         label: panel.asAdmin ? "Confirmar: " + panel.ctl.statusLabel(panel.picked)
                              : panel.picked === "OBSERVADO" ? "Solicitar corrección" : "Solicitar cambio de estado"
         busy: panel.app.busy("reviewAction:" + panel.remoteId)

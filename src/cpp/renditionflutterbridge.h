@@ -98,4 +98,8 @@ private:
     QTimer m_pullWatchdog;               // un pull sin todas sus respuestas no queda colgado
     bool m_presentAfterSync = false;
     QTimer m_publishTimer;
+    QVariantMap m_lastPublishedState;
+    QTimer m_renderDiagnosticsTimer;
+    int m_publishRequests = 0;
+    int m_publishEmissions = 0;
 };

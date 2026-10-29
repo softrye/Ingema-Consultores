@@ -108,6 +108,7 @@ void RenditionUiController::handleEvent(const QString &eventJson)
     const QVariantMap event = QJsonDocument::fromJson(eventJson.toUtf8()).toVariant().toMap();
     const QString type = event.value(QStringLiteral("type")).toString();
     if (type == QLatin1String("state")) {
+        if (m_ready && m_state == event) return;
         m_state = event;
         m_ready = true;
         emit stateChanged();
@@ -463,6 +464,9 @@ QString RenditionUiController::statusLabel(const QString &status) const
         {QStringLiteral("OBSERVADO"), QStringLiteral("Observada")},
         {QStringLiteral("EN_REVISION"), QStringLiteral("En revisión")},
         {QStringLiteral("APROBADO"), QStringLiteral("Aprobada")},
+        {QStringLiteral("REVISADO"), QStringLiteral("Revisada")},
+        {QStringLiteral("ARCHIVADO"), QStringLiteral("Archivada")},
+        {QStringLiteral("EXPORTADO"), QStringLiteral("Exportada")},
         {QStringLiteral("PRESENTADA"), QStringLiteral("Presentada")}};
     return labels.value(status.toUpper(), status);
 }

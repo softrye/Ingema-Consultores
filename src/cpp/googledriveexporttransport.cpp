@@ -91,6 +91,8 @@ void GoogleDriveExportTransport::authorize(bool picker) {
                 qInfo().noquote() << "INGE_GOOGLE_OAUTH_APK package=" << parts[0] << "sha1=" << parts[1];
         }
     }
+    // La pantalla de Google no debe contar como abandono de la app (bloqueo de sesión).
+    QCoreApplication::instance()->setProperty("ingeExternalActivity", true);
     auto id = QJniObject::fromString(m_request), account = QJniObject::fromString(m_account), target = QJniObject::fromString(folderId);
     QJniObject::callStaticMethod<void>("com/ingema/ingeplus/GoogleDriveAuthorization", "authorize",
         "(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZZ)V",
@@ -102,6 +104,7 @@ void GoogleDriveExportTransport::authorize(bool picker) {
     const auto requestId = m_request;
     QTimer::singleShot(180000, this, [this, epoch, requestId] {
         if (epoch == m_epoch && m_request == requestId) {
+            QCoreApplication::instance()->setProperty("ingeExternalActivity", false);
             auto done = std::move(m_done); cancel();
             if (done) done({}, "La autorización Google no terminó. Reintenta al cerrar su pantalla.", false);
         }
@@ -113,6 +116,7 @@ void GoogleDriveExportTransport::authorize(bool picker) {
 void GoogleDriveExportTransport::authorized(const QString &id, const QString &token, const QString &picked, const QString &error) {
     if (id != m_request || !m_done) return;
     m_request.clear();
+    QCoreApplication::instance()->setProperty("ingeExternalActivity", false);
     const auto status = QRegularExpression("código (-?[0-9]+)").match(error);
     qInfo().noquote() << "INGE_GOOGLE_AUTH_RESULT state=" << (error.isEmpty()?"received":"error")
                      << "status=" << (status.hasMatch()?status.captured(1):"unspecified");
@@ -189,7 +193,7 @@ bool GoogleDriveExportTransport::verify(const QJsonObject &file) const {
     return file.value("id").toString() == m_row.value("googleFileId").toString()
         && file.value("parents").toArray().contains(folderId) && !file.value("trashed").toBool()
         && file.value("name").toString() == m_row.value("fileName").toString()
-        && file.value("mimeType").toString() == xlsxMime
+        && file.value("mimeType").toString() == m_row.value("mimeType", xlsxMime).toString()
         && file.value("size").toString().toLongLong() == m_bytes.size()
         && file.value("md5Checksum").toString() == QString::fromLatin1(QCryptographicHash::hash(m_bytes, QCryptographicHash::Md5).toHex())
         && file.value("appProperties").toObject().value("ingeSha256").toString() == m_row.value("sha256").toString();
@@ -205,12 +209,12 @@ void GoogleDriveExportTransport::probe() {
 }
 void GoogleDriveExportTransport::sendFile() {
     const QJsonObject metadata{{"id",m_row.value("googleFileId").toString()}, {"name",m_row.value("fileName").toString()},
-        {"mimeType",xlsxMime}, {"parents",QJsonArray{folderId}},
+        {"mimeType",m_row.value("mimeType", xlsxMime).toString()}, {"parents",QJsonArray{folderId}},
         {"appProperties",QJsonObject{{"ingeSha256",m_row.value("sha256").toString()}}}};
     const QByteArray boundary = "inge-" + QUuid::createUuid().toByteArray(QUuid::WithoutBraces);
     QByteArray body = "--" + boundary + "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n"
         + QJsonDocument(metadata).toJson(QJsonDocument::Compact) + "\r\n--" + boundary
-        + "\r\nContent-Type: " + xlsxMime.toUtf8() + "\r\n\r\n" + m_bytes + "\r\n--" + boundary + "--\r\n";
+        + "\r\nContent-Type: " + m_row.value("mimeType", xlsxMime).toString().toUtf8() + "\r\n\r\n" + m_bytes + "\r\n--" + boundary + "--\r\n";
     request("POST", "upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id", body,
         "multipart/related; boundary=" + boundary, [this](int status, QJsonObject obj) {
             if (status == 200 || status == 201 || status == 409) { m_afterUpload = true; probe(); return; }

@@ -17,6 +17,7 @@
 #include <QList>
 #include <QPair>
 #include <QSaveFile>
+#include <QSignalBlocker>
 #include <QSet>
 #include <QStandardPaths>
 #include <QUuid>
@@ -2409,12 +2410,13 @@ void RenditionLocalStore::setLastError(const QString &message)
         emit persistenceFailed(message);
 }
 
-bool RenditionLocalStore::saveEditorDraft(const QString &key, const QVariantMap &draft)
+bool RenditionLocalStore::saveEditorDraft(const QString &key, const QVariantMap &draft, bool quiet)
 {
     if (key.isEmpty()) return false;
     const QString localId = draft.value(QStringLiteral("renditionLocalId")).toString();
     if (!draft.isEmpty() && !localId.isEmpty() && !assertDraftStatus(rendition(localId))) return false;
     if (draft.isEmpty()) m_editorDrafts.remove(key); else m_editorDrafts.insert(key, draft);
+    if (quiet) { const QSignalBlocker blocker(this); return persist(); }
     return persist();
 }
 

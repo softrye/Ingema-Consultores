@@ -35,7 +35,8 @@ public:
     int pendingCount() const;
     QString lastError() const { return m_lastError; }
     QVariantMap editorDrafts() const { return m_editorDrafts; }
-    bool saveEditorDraft(const QString &key, const QVariantMap &draft);
+    // quiet: autoguardado mientras se escribe; no republica el estado (evita reconstruir la UI).
+    bool saveEditorDraft(const QString &key, const QVariantMap &draft, bool quiet = false);
 
     Q_INVOKABLE void reload();
     bool saveFinancial(const QString &localId, const QString &kind,
