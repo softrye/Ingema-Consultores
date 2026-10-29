@@ -41,6 +41,7 @@ RenditionFlutterBridge::RenditionFlutterBridge(
       m_exporter(exporter)
 {
     connect(m_repository, &RenditionRepository::receivedReset, this, [this]() {
+        m_lastPublishedState.clear();
         const auto picker = m_calicataPickerDocument;
         m_calicataPickerDocument.clear();
         if (!picker.isEmpty()) emit calicataProjectPicked(picker, {});
@@ -1280,7 +1281,7 @@ void RenditionFlutterBridge::publishStateNow()
         publishedRenditions.append(row);
     }
 
-    sendEvent({
+    const QVariantMap state{
         {QStringLiteral("type"), QStringLiteral("state")},
         {QStringLiteral("contractMode"), m_repository->contractMode()},
         {QStringLiteral("busy"), m_repository->busy()
@@ -1330,7 +1331,11 @@ void RenditionFlutterBridge::publishStateNow()
         {QStringLiteral("documentSpace"), m_repository->documentSpace()},
         {QStringLiteral("documentFolders"), m_repository->documentFolders()},
         {QStringLiteral("documentCapabilities"), m_repository->documentCapabilities()}
-    });
+    };
+    if (m_lastPublishedState == state) return;
+    m_lastPublishedState = state;
+    if (m_renderDiagnosticsTimer.isActive()) ++m_publishEmissions;
+    sendEvent(state);
 }
 
 void RenditionFlutterBridge::sendResult(const QString &requestId,

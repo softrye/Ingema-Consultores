@@ -74,6 +74,13 @@ int main(int argc, char **argv)
             QVariantMap{{"localId", "l2"}, {"status", "OBSERVADO"}, {"projectIds", QVariantList{"p2"}}}}}};
     bridge.emitJson(state);
     check(ui.ready() && ui.state().value("connectionState") == "ONLINE", "state published");
+    QSignalSpy stateChanges(&ui, &RenditionUiController::stateChanged);
+    bridge.emitJson(state);
+    check(stateChanges.isEmpty(), "identical state does not invalidate QML bindings");
+    auto changedState = state;
+    changedState.insert("busy", true);
+    bridge.emitJson(changedState);
+    check(stateChanges.size() == 1, "effective state change still reaches QML");
     check(ui.catalog("category").size() == 1 && ui.catalog("PAYMENT").size() == 1, "catalog by type");
     check(ui.projectLabel("p1") == "P-01 · Presa" && ui.projectLabel("zz") == "Proyecto no disponible", "project label");
     check(ui.filterRenditions("rdc-2026", "", "").size() == 1, "search by code");
@@ -81,6 +88,9 @@ int main(int argc, char **argv)
     check(ui.filterRenditions("", "", "p1").size() == 1, "filter by project");
     bridge.emitJson({{"type", "receivedReset"}});
     check(!ui.ready() && ui.state().isEmpty(), "account change clears state");
+    stateChanges.clear();
+    bridge.emitJson(state);
+    check(ui.ready() && stateChanges.size() == 1, "same content publishes again after account reset");
 
     // ---- domain rules exposed to QML (no duplicated JavaScript)
     check(ui.canEdit({{"localId", "l"}, {"status", "BORRADOR"}}), "local draft editable");

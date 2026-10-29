@@ -15,6 +15,9 @@ Item {
         return rows.filter(function(e) { return e.archived !== true })
     }
     readonly property var totals: ctl.totals(expenses)
+    ListModel { id: expensesModel }
+    onExpensesChanged: S.syncRows(expensesModel, expenses, ["localId"])
+    Component.onCompleted: S.syncRows(expensesModel, expenses, ["localId"])
     // Borradores en la nube (Working Document): filas sin terminar, propias o de
     // otra sesión/dispositivo. No son gastos contables hasta registrarse.
     readonly property var drafts: detail.selected ? (app.st.workingRows || []) : []
@@ -312,9 +315,10 @@ Item {
             }
 
             Repeater {
-                model: tab.expenses
+                model: expensesModel
                 delegate: RCard {
-                    required property var modelData
+                    required property string rowJson
+                    readonly property var modelData: JSON.parse(rowJson)
                     width: column.width
                     ui: tab.ui
                     clickable: true

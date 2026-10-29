@@ -108,6 +108,7 @@ void RenditionUiController::handleEvent(const QString &eventJson)
     const QVariantMap event = QJsonDocument::fromJson(eventJson.toUtf8()).toVariant().toMap();
     const QString type = event.value(QStringLiteral("type")).toString();
     if (type == QLatin1String("state")) {
+        if (m_ready && m_state == event) return;
         m_state = event;
         m_ready = true;
         emit stateChanged();

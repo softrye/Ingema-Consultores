@@ -15,6 +15,9 @@ Item {
     readonly property var current: detail.current
     readonly property var expenses: detail.selected ? (app.st.expenses || []).filter(function(e) { return e.archived !== true }) : []
     readonly property var remote: detail.selected ? (app.st.attachments || []) : []
+    ListModel { id: expensesModel }
+    onExpensesChanged: S.syncRows(expensesModel, expenses, ["localId"])
+    Component.onCompleted: S.syncRows(expensesModel, expenses, ["localId"])
     readonly property bool exportable: String(current.remoteId || "").length > 0 && String(current.currentVersionId || "").length > 0
                                        && ["BORRADOR", "OBSERVADO"].indexOf(String(current.status || "BORRADOR")) < 0
     readonly property var life: ({ alive: true })
@@ -110,12 +113,21 @@ Item {
                 font.family: tab.ui.fontFamily; font.pixelSize: 14 * tab.ui.u
             }
             Repeater {
-                model: tab.expenses
+                model: expensesModel
                 delegate: RCard {
                     id: expenseCard
-                    required property var modelData
+                    required property string rowJson
+                    readonly property var modelData: JSON.parse(rowJson)
                     readonly property var remoteRows: tab.remoteFor(modelData)
                     readonly property var localRows: tab.localFor(modelData)
+                    ListModel { id: remoteFiles }
+                    ListModel { id: localFiles }
+                    onRemoteRowsChanged: S.syncRows(remoteFiles, remoteRows, ["id"])
+                    onLocalRowsChanged: S.syncRows(localFiles, localRows, ["localId"])
+                    Component.onCompleted: {
+                        S.syncRows(remoteFiles, remoteRows, ["id"])
+                        S.syncRows(localFiles, localRows, ["localId"])
+                    }
                     width: column.width
                     ui: tab.ui
                     Text {
@@ -132,9 +144,10 @@ Item {
                         font.family: tab.ui.fontFamily; font.pixelSize: 13 * tab.ui.u
                     }
                     Repeater {
-                        model: expenseCard.localRows
+                        model: localFiles
                         delegate: Text {
-                            required property var modelData
+                            required property string rowJson
+                            readonly property var modelData: JSON.parse(rowJson)
                             width: column.width - 32 * tab.ui.u
                             text: "• " + S.text_(modelData, "fileName") + " · " + tab.ctl.syncLabel(tab.app.syncState(modelData))
                                   + (tab.ctl.visibleSyncError(S.text_(modelData, "syncError")).length ? " · " + tab.ctl.visibleSyncError(S.text_(modelData, "syncError")) : "")
@@ -143,9 +156,10 @@ Item {
                         }
                     }
                     Repeater {
-                        model: expenseCard.remoteRows
+                        model: remoteFiles
                         delegate: Row {
-                            required property var modelData
+                            required property string rowJson
+                            readonly property var modelData: JSON.parse(rowJson)
                             width: column.width - 32 * tab.ui.u
                             spacing: 6 * tab.ui.u
                             Text {
