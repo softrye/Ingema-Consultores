@@ -78,6 +78,10 @@ Column {
                     // to its old baseline before reopening it 220 ms later.
                     next.forceActiveFocus()
                     Qt.inputMethod.update(Qt.ImHints | Qt.ImQueryInput)
+                    // Android Qt 6.9.3 update() only queries hints. show() sends
+                    // the new keyboard type without hiding/resizing the IME.
+                    if (next.inputMethodHints !== input.inputMethodHints)
+                        Qt.callLater(function() { if (next && next.activeFocus) Qt.inputMethod.show() })
                     return
                 }
                 next = next.nextItemInFocusChain(true)

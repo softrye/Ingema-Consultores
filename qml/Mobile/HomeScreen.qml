@@ -1844,6 +1844,8 @@ Item {
             id: dockBackdropCapture
             readonly property bool captureAllowed: home.dockBackdropSource !== null && home.visible
                 && (dock.visible || iaButton.visible) && Qt.application.state === Qt.ApplicationActive
+                && !dockMenuBox.visible && !Qt.inputMethod.visible && !Qt.inputMethod.animating
+                && !(home.renditionsProgress > 0.001 && home.renditionsProgress < 0.999)
                 && !((home.page === "rendiciones" || home.renditionsProgress > 0.001)
                      && renditionsLoader.item && renditionsLoader.item.renderCaptureBlocked === true)
             onSourceItemChanged: {
@@ -1925,7 +1927,9 @@ Item {
             ui: home.dockGlassUi
             radius: dockMenuBox.radius
             margin: 10 * home.u
-            tint: home.dockGlassTint
+            // The menu needs its own text contrast over the captured page.
+            // The capsule and IA button retain the shared Dock material.
+            tint: Qt.rgba(21 / 255, 26 / 255, 48 / 255, home.darkTheme ? 0.86 : 0.62)
             refraction: home.dockGlassRefraction
             specular: home.dockGlassSpecular
             bevel: home.dockGlassBevel

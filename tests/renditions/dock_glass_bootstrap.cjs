@@ -35,7 +35,7 @@ test('Dock rejects a missing or empty backdrop', () => {
   }
 })
 test('Rendiciones exposes a valid producer without waiting for its own consumer', () => {
-  const scope = { shell: {cardGlassLive: true}, backdropCapture: {
+  const scope = { shell: {cardGlassLive: false, visible: false, ui: {liquidGlass:true}}, backdropCapture: {
     sourceItem: {}, width: 720, height: 1524, textureReady: false
   }}
   assert.equal(binding(renditions, 'readonly property bool glassReady:', scope), true)

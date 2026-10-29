@@ -319,6 +319,19 @@ TestCase {
         wait(30)
         compare(modeledCard(documents, "a"), before)
     }
+    function test_hiddenShellRetainsTextureProducer() {
+        var shell = createTemporaryObject(shellComponent, test)
+        verify(shell !== null)
+        var capture = findChild(shell, "renditionBackdropCapture")
+        verify(capture !== null)
+        var producer = capture.sourceItem
+        verify(producer !== null)
+        shell.visible = false
+        wait(0)
+        compare(capture.sourceItem, producer)
+        compare(shell.cardCaptureAllowed, false)
+    }
+
     function test_forcingGlassVisibleCannotDrawWithoutTexture() {
         var glass = createTemporaryObject(glassComponent, test)
         verify(glass !== null)

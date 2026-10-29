@@ -20,16 +20,17 @@ function body(source, marker) {
   return source.slice(start + 1, end - 1)
 }
 test('Next changes editor/hints without hiding and reopening the IME', () => {
-  let focused = 0, hidden = 0, queued = 0, updated = 0
+  let focused = 0, hidden = 0, queued = 0, updated = 0, shown = 0
   const next = {visible:true, enabled:true, readOnly:false, cursorPosition:0, inputMethodHints:0,
-    forceActiveFocus() {++focused}}
+    forceActiveFocus() {++focused; this.activeFocus = true}}
   const input = {focus:true, inputMethodHints:1, nextItemInFocusChain() {return next}}
-  const scope = {input, reshowKeyboard:{restart(){++queued}}, Qt:{ImQueryInput:1, ImHints:2,
-    inputMethod:{hide(){++hidden}, update(queries){updated = queries}}}}
+  const scope = {input, reshowKeyboard:{restart(){++queued}}, Qt:{ImQueryInput:1, ImHints:2, callLater(fn){fn()},
+    inputMethod:{hide(){++hidden}, show(){++shown}, update(queries){updated = queries}}}}
   vm.runInNewContext('(function(){' + body(field, 'onAccepted:') + '})()', scope)
   assert.equal(focused, 1)
   assert.equal(hidden, 0)
   assert.equal(queued, 0)
+  assert.equal(shown, 1, 'changed hints refresh the Android keyboard without hide')
   assert.equal(updated & scope.Qt.ImHints, scope.Qt.ImHints)
 })
 test('field reveal enters the existing CoreFlow queue instead of starting competing scrolls', () => {

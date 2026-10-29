@@ -328,14 +328,17 @@ Item {
         id: cardGlassUi
         readonly property Item backdrop: backdropLayer
         // A valid producer must reach the shader before the first capture can finish.
-        readonly property bool glassReady: shell.cardGlassLive && backdropCapture.sourceItem !== null && backdropCapture.width > 0 && backdropCapture.height > 0
+        readonly property bool glassReady: shell.ui.liquidGlass !== false && backdropCapture.sourceItem !== null && backdropCapture.width > 0 && backdropCapture.height > 0
         readonly property var glassTexture: glassReady ? backdropCapture : null
         readonly property int glassTick: shell.glassTick
     }
     ShaderEffectSource {
         id: backdropCapture
+        objectName: "renditionBackdropCapture"
         width: backdropLayer.width; height: backdropLayer.height
-        sourceItem: shell.visible && (textureReady || updatePending || shell.cardCaptureAllowed) ? backdropLayer : null
+        // The retained page owns this producer for its entire lifetime. Hiding
+        // it freezes captures; it must not invalidate samplers during exit.
+        sourceItem: backdropLayer
         property bool textureReady: false
         property bool updatePending: false
         property size captureSize: Qt.size(1, 1)
@@ -372,7 +375,7 @@ Item {
     }
     // La posición de cada tarjeta (desplazamiento) sí se sigue en cada cuadro: es barato.
     FrameAnimation { running: shell.cardCaptureAllowed; onTriggered: shell.glassTick++ }
-    Binding { target: shell.ui; property: "cardGlassUi"; value: shell.cardGlassLive ? cardGlassUi : null; when: shell.visible || shell.active }
+    Binding { target: shell.ui; property: "cardGlassUi"; value: shell.ui.liquidGlass !== false ? cardGlassUi : null }
 
     // El Liquid Glass del Dock global NO se configura aquí: HomeScreen captura
     // esta subapp (renditionsLoader) como fondo del Dock con su motor único.
