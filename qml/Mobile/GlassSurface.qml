@@ -6,7 +6,7 @@ import "renditions/RStyle.js" as RenderStats
 // padre más un margen para la sombra. Muestrea la textura desenfocada
 // COMPARTIDA del Home (ui.glassTexture) en la región que coincide con la
 // fotografía (ui.backdrop); ui.glassTick avisa de cambios de posición.
-ShaderEffect {
+Item {
     id: glass
     Component.onCompleted: RenderStats.renderCount("glass_created")
 
@@ -31,6 +31,12 @@ ShaderEffect {
     z: -1
 
     property var source: ui ? ui.glassTexture : null
+    // Callers may override this item's visibility. The shader owns its own
+    // texture guard so that an inherited visible:true cannot draw a null sampler.
+    readonly property bool textureReady: !!source && !!ui
+                                         && ui.glassReady !== false
+                                         && (source.sourceItem === undefined || !!source.sourceItem)
+                                         && width > 0 && height > 0
     property vector2d itemSize: Qt.vector2d(width, height)
     property vector4d region: {
         var tick = ui ? ui.glassTick : 0      // dependencia de reposicionamiento
@@ -43,6 +49,27 @@ ShaderEffect {
                            (height - 2 * margin) / backdrop.height)
     }
 
-    visible: source !== null
-    fragmentShader: "qrc:/InGe/Mobile/shaders/glass.frag.qsb"
+    visible: textureReady
+    ShaderEffect {
+        objectName: "glassShader"
+        anchors.fill: parent
+        visible: glass.textureReady
+        enabled: visible
+        property var source: glass.source
+        property vector2d itemSize: glass.itemSize
+        property vector4d region: glass.region
+        property real radius: glass.radius
+        property real margin: glass.margin
+        property color tint: glass.tint
+        property color edge: glass.edge
+        property real edgeWidth: glass.edgeWidth
+        property real shadowAlpha: glass.shadowAlpha
+        property color shadowColor: glass.shadowColor
+        property real refraction: glass.refraction
+        property real specular: glass.specular
+        property real bevel: glass.bevel
+        property real contrast: glass.contrast
+        property real frost: glass.frost
+        fragmentShader: "qrc:/InGe/Mobile/shaders/glass.frag.qsb"
+    }
 }

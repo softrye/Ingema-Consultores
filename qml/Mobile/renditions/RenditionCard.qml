@@ -8,6 +8,8 @@ import "RStyle.js" as S
 //   sin fuente verificable la barra queda vacía y no se muestra porcentaje.
 Rectangle {
     id: card
+    readonly property bool glassOn: !!ui && !!ui.cardGlassUi && !!ui.cardGlassUi.glassTexture
+                                    && ui.cardGlassUi.glassReady !== false
     Component.onCompleted: S.renderCount("rendition_delegate_created")
     property var ui
     property var ctl

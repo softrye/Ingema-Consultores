@@ -4,6 +4,8 @@ import "RStyle.js" as S
 // Tarjeta de vidrio con columna de contenido; tocable si [clickable].
 Rectangle {
     id: card
+    readonly property bool glassOn: !!ui && !!ui.cardGlassUi && !!ui.cardGlassUi.glassTexture
+                                    && ui.cardGlassUi.glassReady !== false
     Component.onCompleted: S.renderCount(objectName.indexOf("expense:") === 0 ? "expense_delegate_created" : "section_card_created")
     property var ui
     property bool clickable: false

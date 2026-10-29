@@ -48,6 +48,8 @@ Item {
         return false
     }
     function closeMenus() { filterMenu.close(); projectMenu.close() }
+    readonly property bool listInteractive: flick.interactive
+    readonly property bool renderInteractionBusy: filterMenu.visible || projectMenu.visible
     function selectStatus(value) {
         statusFilter = value
         if (value === "RECEIVED" && !receivedLoaded) loadReceived()

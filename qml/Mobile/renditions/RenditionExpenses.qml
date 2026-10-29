@@ -6,6 +6,8 @@ import "RStyle.js" as S
 // revisión y de sincronización, alta, edición y eliminación autorizada.
 Item {
     id: tab
+    readonly property bool editorActive: false
+    readonly property bool renderInteractionBusy: false
     property var detail
     readonly property var app: detail.app
     readonly property var ui: detail.ui

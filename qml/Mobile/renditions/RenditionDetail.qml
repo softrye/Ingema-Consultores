@@ -12,6 +12,7 @@ import "RStyle.js" as S
 // La fuente es el estado publicado por el bridge para la selección (`select`).
 Item {
     id: page
+    readonly property bool renderInteractionBusy: false
     property var app
     property string localId: ""
     property int selectionToken: 0                    // apertura (select) que muestra esta página

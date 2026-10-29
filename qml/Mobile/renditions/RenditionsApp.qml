@@ -13,6 +13,8 @@ Item {
     property var ui
     property var ctl: null
     property bool active: false
+    property bool navigationTransitionActive: false
+    property bool dockMenuVisible: false
     readonly property var st: ctl ? ctl.state : ({})
     readonly property string connection: String(st.connectionState || "UNKNOWN")
     readonly property string phase: String(st.syncPhase || "IDLE")
@@ -158,6 +160,12 @@ Item {
             stack.replace(detailComponent, { localId: localId })
         }
     }
+    readonly property bool modalOpen: createSheet.open || balanceMenu.open || folderMenu.open || statusPanel.open
+    readonly property bool pageInteractionBusy: !!stack.currentItem && stack.currentItem.renderInteractionBusy === true
+    readonly property bool editorActive: createSheet.visible
+        || (!!stack.currentItem && stack.currentItem.editingInProgress === true)
+    readonly property bool overlaysVisible: createSheet.visible || balanceMenu.visible || folderMenu.visible
+        || statusPanel.visible || confirmDialog.visible || dockMenuVisible || pageInteractionBusy
     function closeMenus() {
         balanceMenu.close()
         folderMenu.close()
@@ -280,7 +288,13 @@ Item {
     Component.onCompleted: bootstrap()
     Timer {
         interval: 1000; repeat: true; running: S.renderDiagnostics
-        onTriggered: S.renderReport()
+        onTriggered: {
+            S.renderReport()
+            console.info("INGE_REND_RENDER viewport=" + Math.round(shell.width) + "x" + Math.round(shell.height)
+                         + " ime=" + (shell.flow && shell.flow.imeVisible === true ? 1 : 0)
+                         + " ime_height=" + Math.round(shell.flow ? shell.flow.imeHeight || 0 : 0)
+                         + " available=" + Math.round(shell.flow ? shell.flow.availableContentHeight || 0 : shell.height))
+        }
     }
 
     // ------------------------------------------------------------- Interfaz
@@ -298,6 +312,66 @@ Item {
             lowCost: shell.ui.dockLowCostGlass === true
         }
     }
+
+    // Liquid Glass de las tarjetas: el mismo material del Dock
+    // (GlassSurface) muestreando sólo el fondo vivo, nunca el contenido.
+    // Claro y oscuro (vidrio esmerilado de la versión anterior de la app).
+    readonly property bool cardGlassLive: shell.ui.liquidGlass !== false && shell.visible
+    readonly property bool renderCaptureBlocked: !shell.active || !shell.visible
+        || navigationTransitionActive || stack.busy || overlaysVisible || editorActive
+        || (!!stack.currentItem && stack.currentItem.sectionAnimating === true)
+        || (flow ? flow.imeVisible === true : Qt.inputMethod.visible) || Qt.inputMethod.animating
+        || Qt.application.state !== Qt.ApplicationActive
+    readonly property bool cardCaptureAllowed: cardGlassLive && !renderCaptureBlocked
+    property int glassTick: 0
+    QtObject {
+        id: cardGlassUi
+        readonly property Item backdrop: backdropLayer
+        readonly property bool glassReady: shell.cardGlassLive && backdropCapture.textureReady
+        readonly property var glassTexture: glassReady ? backdropCapture : null
+        readonly property int glassTick: shell.glassTick
+    }
+    ShaderEffectSource {
+        id: backdropCapture
+        width: backdropLayer.width; height: backdropLayer.height
+        sourceItem: shell.visible && (textureReady || updatePending || shell.cardCaptureAllowed) ? backdropLayer : null
+        property bool textureReady: false
+        property bool updatePending: false
+        property size captureSize: Qt.size(1, 1)
+        onSourceItemChanged: {
+            textureReady = false
+            updatePending = false
+            if (shell.cardCaptureAllowed) Qt.callLater(shell.captureBackdrop)
+        }
+        onScheduledUpdateCompleted: {
+            updatePending = false
+            textureReady = sourceItem !== null
+        }
+        // Fluidez: el fondo (aurora/universo) se mueve lento; se recaptura a ~20 fps
+        // y a baja resolución (el vidrio lo esmerila igual), no en cada cuadro.
+        live: false
+        hideSource: false; visible: false; smooth: true
+        readonly property int divisor: shell.ui.dockLowCostGlass === true ? 8 : 6
+        textureSize: captureSize
+    }
+    function captureBackdrop() {
+        if (!cardCaptureAllowed || backdropCapture.updatePending || !backdropCapture.sourceItem
+                || backdropCapture.width <= 0 || backdropCapture.height <= 0) return
+        backdropCapture.captureSize = Qt.size(Math.max(1, Math.round(backdropCapture.width / backdropCapture.divisor)),
+                                             Math.max(1, Math.round(backdropCapture.height / backdropCapture.divisor)))
+        backdropCapture.updatePending = true
+        S.renderCount("backdrop_capture")
+        backdropCapture.scheduleUpdate()
+    }
+    onCardCaptureAllowedChanged: if (cardCaptureAllowed) Qt.callLater(shell.captureBackdrop)
+    Timer {
+        interval: 50; repeat: true
+        running: shell.cardCaptureAllowed && shell.ui.reducedMotion !== true
+        onTriggered: shell.captureBackdrop()
+    }
+    // La posición de cada tarjeta (desplazamiento) sí se sigue en cada cuadro: es barato.
+    FrameAnimation { running: shell.cardCaptureAllowed; onTriggered: shell.glassTick++ }
+    Binding { target: shell.ui; property: "cardGlassUi"; value: shell.cardGlassLive ? cardGlassUi : null; when: shell.visible || shell.active }
 
     // El Liquid Glass del Dock global NO se configura aquí: HomeScreen captura
     // esta subapp (renditionsLoader) como fondo del Dock con su motor único.
@@ -525,6 +599,62 @@ Item {
     }
     readonly property var pageDock: stack.currentItem && stack.currentItem.dockActions !== undefined ? stack.currentItem : null
     readonly property var detailPage: stack.currentItem && stack.currentItem.isRenditionDetail === true ? stack.currentItem : null
+    readonly property string liveRenditionId: detailPage ? String(detailPage.remoteId || "") : ""
+    onLiveRenditionIdChanged: { liveReload.stop(); liveReloadPending = false }
+    property var liveChannel: null
+    readonly property var livePeers: liveChannel ? liveChannel.members : []
+    readonly property bool liveJoined: !!liveChannel && liveChannel.state === "JOINED"
+    property string livePrevPhase: "IDLE"
+    readonly property string liveOrigin: ctl ? ctl.newId() : ""
+    property bool liveReloadPending: false
+    readonly property bool liveReloadBlocked: !shell.active || !shell.visible || stack.busy
+        || navigationTransitionActive || editorActive || overlaysVisible || phase !== "IDLE"
+        || busy("sync") || busy("refresh") || busy("bootstrap")
+        || (flow ? flow.imeVisible === true : Qt.inputMethod.visible)
+        || Qt.application.state !== Qt.ApplicationActive
+    function requestLiveReload() {
+        if (!liveRenditionId.length) return
+        liveReloadPending = true
+        if (!liveReloadBlocked) liveReload.restart()
+    }
+    onLiveReloadBlockedChanged: {
+        if (liveReloadBlocked) liveReload.stop()
+        else if (liveReloadPending) liveReload.restart()
+    }
+    onPhaseChanged: {
+        // Guardado propio terminado: avisa a los demás que recarguen.
+        if (livePrevPhase === "PUSHING" && phase !== "PUSHING" && liveJoined)
+            liveChannel.broadcast("invalidate", { origin: liveOrigin })
+        livePrevPhase = phase
+    }
+    Item {
+        Component.onCompleted: {
+            try { shell.liveChannel = Qt.createQmlObject("import InGe.Mobile; SupabaseRealtimeChannel {}", shell, "renditionLive") }
+            catch (e) { shell.liveChannel = null }
+        }
+    }
+    Binding { target: shell.liveChannel; property: "topic"; when: shell.liveChannel !== null
+              value: shell.liveRenditionId.length ? "rendition:" + shell.liveRenditionId : "" }
+    Binding { target: shell.liveChannel; property: "active"; when: shell.liveChannel !== null
+              value: shell.active && Qt.application.state === Qt.ApplicationActive }
+    Binding { target: shell.liveChannel; property: "trackMeta"; when: shell.liveChannel !== null
+              value: ({ routeIds: shell.liveRenditionId.length ? [shell.liveRenditionId] : [] }) }
+    Connections {
+        target: shell.liveChannel
+        ignoreUnknownSignals: true
+        function onBroadcastReceived(event, payload) {
+            if (event === "invalidate" && (!payload || payload.origin !== shell.liveOrigin)) shell.requestLiveReload()
+        }
+        function onRejoined() { shell.requestLiveReload() }
+    }
+    Timer {
+        id: liveReload
+        interval: 200
+        onTriggered: {
+            if (!shell.liveReloadPending || shell.liveReloadBlocked) return
+            if (shell.synchronize(true).length) shell.liveReloadPending = false
+        }
+    }
     readonly property string dockContextId: stack.depth <= 1 ? "rendiciones/home"
                                           : detailPage ? "rendiciones/detail"
                                           : pageDock ? String(pageDock.dockContextKey || "rendiciones/page") : "rendiciones/page"

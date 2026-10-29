@@ -15,9 +15,9 @@
 
 ## Fases
 
-- [ ] Instrumentación con flag --renditions-render-diagnostics, build/instalación y medición base de publicaciones/s, delegados, vidrio, capturas y geometría IME.
-- [ ] Publicación efectiva y modelos con identidad por localId; pruebas que detecten republicación y recreaciones, build e instalación.
-- [ ] Corregir textura ausente y suspender capturas durante navegación/IME/menús, verificar Loaders/Behaviors y diferir Realtime al editar. Evaluar IME con geometría real antes de cambiar estrategia.
+- [x] Instrumentación con flag --renditions-render-diagnostics. Build inicial correcto; instalación rechazada por firma. Logcat anterior: 26 avisos y resize IME confirmado. Tasas A12 pendientes; el usuario compila.
+- [x] Publicación efectiva y modelos con identidad por localId. Pruebas QML ejecutadas; nuevos tests C++ y build/instalación finales pendientes del usuario.
+- [x] Protección de textura, pausa de capturas y cola Realtime implementadas y probadas en QML. Loaders/Behaviors revisados. adjustResize conservado; la alternativa global exige validar los formularios reales.
 - [ ] Host C:\InGeBuild\RenditionHost_20261016b, regresión Android completa, medición posterior, logcat, documentación y commit.
 
 ## Revisión

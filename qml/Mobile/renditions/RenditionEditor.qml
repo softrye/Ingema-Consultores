@@ -8,6 +8,7 @@ import "RStyle.js" as S
 // escrito con saveEditorDraft mientras el usuario navega.
 Item {
     id: page
+    readonly property bool editingInProgress: true
     property var app
     property var original: null
     property bool embedded: false              // dentro de la hoja «Nueva rendición»
