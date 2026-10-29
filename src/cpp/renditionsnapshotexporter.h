@@ -7,9 +7,12 @@
 // Constructed exclusively from get_received_rendition_v02, never local drafts.
 struct SnapshotExportModel {
     QString code, owner, project, projects, period, status, submittedAt, versionId, hash;
+    QString displayName, periodStart, periodEnd;
     int version = 0;
     double totalPen = 0, totalUsd = 0;
     QVariantList expenses, attachments;
+    QVariantMap funding, exchangeRate;
+    bool financialSupplements = false;
     static bool fromReceived(const QVariantMap &received, SnapshotExportModel *model, QString *error);
     QString fileBaseName() const;
 };

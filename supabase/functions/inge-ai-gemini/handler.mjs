@@ -4,7 +4,7 @@ const SYSTEM = 'Eres InGe+ IA, asistente de INGEMA. Responde en español con cla
 // has no external effect, so both may be repeated; 400/401/403/404 never are.
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
 const TRANSIENT = new Set([500, 502, 503, 504]);
-const PRIMARY_CHAT_MODEL = 'gemini-3.8-flash';
+const PRIMARY_CHAT_MODEL = 'gemini-3.5-flash-lite';
 // Stable Flash used only after the primary keeps failing with a retryable status.
 // Override with GEMINI_CHAT_FALLBACK_MODEL (empty value disables the fallback).
 const DEFAULT_FALLBACK_CHAT_MODEL = 'gemini-3.6-flash';
@@ -35,7 +35,8 @@ export async function providerFailure(response) {
   return failure;
 }
 function userMessage(status) {
-  if (RETRYABLE.has(status)) return 'El servicio de IA está temporalmente ocupado. Intenta nuevamente.';
+  if (status === 429) return 'Gemini ha limitado temporalmente las solicitudes. Espera antes de reintentar.';
+  if (RETRYABLE.has(status)) return 'Gemini no está disponible temporalmente. Intenta nuevamente.';
   return `Gemini rechazó la consulta (HTTP ${status}).`;
 }
 function providerCode(status) {
@@ -48,6 +49,9 @@ export function createHandler({ env, fetcher = fetch, issueToken, now = Date.now
   const json = (body, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
   // ~350-600 ms after the 1st failure, ~800-1300 ms after the 2nd (jitter avoids bursts).
   const backoff = attempt => attempt === 1 ? 350 + random() * 250 : 800 + random() * 500;
+  // Por isolate: evita volver a consultar un modelo limitado por Google.
+  // Nunca se almacenan tokens, usuarios ni mensajes; reiniciar el isolate solo borra la espera.
+  const model429Until = new Map();
   return async (req) => {
     if (req.method !== 'POST') return json({ error: 'Usa POST.' }, 405);
     const authorization = req.headers.get('authorization') ?? '';
@@ -74,11 +78,22 @@ export function createHandler({ env, fetcher = fetch, issueToken, now = Date.now
       if (body.operation === 'chat' && (!Array.isArray(body.messages) || !body.messages.length || body.messages.length > 16 ||
           body.messages.some(m => !m || !['user', 'assistant'].includes(m.role) || typeof m.text !== 'string' || !m.text.trim() || m.text.length > 4000) ||
           body.messages.at(-1).role !== 'user')) return json({ error: 'La consulta o el historial no son válidos.' }, 400);
+      const fallbackEnv = env('GEMINI_CHAT_FALLBACK_MODEL');
+      const fallback = fallbackEnv === undefined || fallbackEnv === null ? DEFAULT_FALLBACK_CHAT_MODEL : String(fallbackEnv).trim();
+      const primary = String(env('GEMINI_CHAT_MODEL') || PRIMARY_CHAT_MODEL).trim();
+      const plan = body.operation === 'chat' ? [{ model: primary, attempts: PRIMARY_ATTEMPTS }] : [];
+      if (fallback && fallback !== primary && body.operation === 'chat') plan.push({ model: fallback, attempts: FALLBACK_ATTEMPTS });
+      // Si Google limitó ambos modelos, responder antes de consumir cuota Supabase.
+      if (plan.length && plan.every(step => (model429Until.get(step.model) || 0) > now())) {
+        const wait = Math.ceil(Math.min(...plan.map(step => model429Until.get(step.model) - now())) / 1000);
+        return json({ error: 'Gemini ha limitado temporalmente las solicitudes. Espera antes de reintentar.',
+          code: 'GEMINI_RATE_LIMIT', retry_after_seconds: Math.max(1, wait), retryable: true }, 429);
+      }
       const quota = await fetcher(`${url}/rest/v1/rpc/consume_inge_gemini_quota`, {
         method: 'POST', headers, body: JSON.stringify({ p_operation: body.operation }), signal: AbortSignal.timeout(10000),
       });
       if (!quota.ok) return json({ error: 'No se pudo validar el límite de consultas.', code: 'QUOTA_UNAVAILABLE' }, 503);
-      if (await quota.json() !== true) return json({ error: 'Llegaste al límite de consultas. Espera un minuto.', code: 'RATE_LIMIT' }, 429);
+      if (await quota.json() !== true) return json({ error: 'Llegaste al límite de consultas de InGe IA. Espera un minuto.', code: 'RATE_LIMIT', retry_after_seconds: 60, retryable: true }, 429);
       const live = body.operation === 'live-token';
       const config = { responseModalities: ['AUDIO'], inputAudioTranscription: {}, outputAudioTranscription: {},
         systemInstruction: { parts: [{ text: SYSTEM }] } };
@@ -104,7 +119,9 @@ export function createHandler({ env, fetcher = fetch, issueToken, now = Date.now
         for (let attempt = 1; ; attempt++) {
           ++attempts;
           google = await call(attempt);
-          if (google.ok || !RETRYABLE.has(google.status) || attempt >= maxAttempts) return;
+          // Google 429 indica cuota/capacidad: no insistir sobre el mismo modelo.
+          // Un solo intento por modelo evita multiplicar una cuota agotada.
+          if (google.ok || google.status === 429 || !RETRYABLE.has(google.status) || attempt >= maxAttempts) return;
           const wait = backoff(attempt);
           // Not enough budget for a useful new attempt: report the failure now.
           if (budget() < wait + 5000) return;
@@ -117,15 +134,17 @@ export function createHandler({ env, fetcher = fetch, issueToken, now = Date.now
         log(`INGE_AI_LIVE_TOKEN_START model=${LIVE_MODEL}`);
         await run('INGE_AI_LIVE_TOKEN', TOKEN_ATTEMPTS, () => issueToken(payload, apiKey));
       } else {
-        const fallbackEnv = env('GEMINI_CHAT_FALLBACK_MODEL');
-        const fallback = fallbackEnv === undefined || fallbackEnv === null ? DEFAULT_FALLBACK_CHAT_MODEL : String(fallbackEnv).trim();
-        const plan = [{ model: PRIMARY_CHAT_MODEL, attempts: PRIMARY_ATTEMPTS }];
-        if (fallback && fallback !== PRIMARY_CHAT_MODEL) plan.push({ model: fallback, attempts: FALLBACK_ATTEMPTS });
         for (const [index, step] of plan.entries()) {
           if (index > 0) {
             if (!RETRYABLE.has(google.status) || budget() < 5000) break;
             log(`INGE_AI_CHAT_FALLBACK from=${plan[index - 1].model} to=${step.model} status=${google.status}`);
             try { await google.body?.cancel(); } catch { /* already consumed */ }
+          }
+          if ((model429Until.get(step.model) || 0) > now()) {
+            log(`INGE_AI_CHAT_COOLDOWN_SKIP model=${step.model}`);
+            // El modelo anterior está limitado; permitir que se pruebe el respaldo.
+            google = Response.json({ error: { status: 'RESOURCE_EXHAUSTED', message: 'provider cooldown' } }, { status: 429 });
+            continue;
           }
           await run('INGE_AI_CHAT', step.attempts, attempt => {
             log(`INGE_AI_CHAT_ATTEMPT model=${step.model} attempt=${attempt}`);
@@ -135,15 +154,25 @@ export function createHandler({ env, fetcher = fetch, issueToken, now = Date.now
               signal: AbortSignal.timeout(Math.max(1000, Math.min(30000, budget()))),
             });
           });
-          if (google.ok) { usedModel = step.model; break; }
+          if (google.ok) { usedModel = step.model; model429Until.delete(step.model); break; }
+          if (google.status === 429) {
+            const detail = await providerFailure(google.clone());
+            const delay = Number.parseFloat(detail.retry_after || '');
+            const seconds = Number.isFinite(delay) && delay > 0 ? Math.max(30, Math.min(300, Math.ceil(delay))) : 60;
+            model429Until.set(step.model, now() + seconds * 1000);
+          }
         }
       }
       if (!google.ok) {
         // gateway status (HTTP of this function) and provider status stay separate.
         const failure = await providerFailure(google);
         const gatewayStatus = google.status === 429 ? 429 : 502;
+        const providerWait = String(failure.retry_after || '').trim();
+        const parsedWait = Number.parseFloat(providerWait);
+        const waitSeconds = google.status === 429 ? Math.max(30, Math.min(300, Number.isFinite(parsedWait) && parsedWait > 0 ? Math.ceil(parsedWait) : 60)) : 0;
         const detail = { code: providerCode(google.status), provider: 'gemini', ...failure, google_status: google.status,
           gateway_status: gatewayStatus, retryable: RETRYABLE.has(google.status),
+          ...(waitSeconds ? { retry_after_seconds: waitSeconds } : {}),
           attempts, duration_ms: Math.round(now() - started), operation: body.operation };
         log(live
           ? `INGE_AI_LIVE_TOKEN_FAIL status=${google.status} code=${failure.provider_reason ?? '-'} message=${failure.provider_message ?? '-'} attempts=${attempts}`

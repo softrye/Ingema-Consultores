@@ -38,7 +38,8 @@ public:
     Q_INVOKABLE QString exportGenericWorkbookToXlsx(const QVariantMap &state, const QString &fileBaseName = QString());
     QString exportRenditionToXlsx(const QVariantMap &state, const QString &fileBaseName = QString());
     QString exportRenditionToPdf(const QVariantMap &state, const QString &fileBaseName = QString());
-    QString exportReceivedSnapshot(const QVariantMap &received, const QString &format);
+    QString exportReceivedSnapshot(const QVariantMap &received, const QString &format,
+                                   const QString &destination = QStringLiteral("inge"));   // phone | inge | google
 
 signals:
     void calicataPublished(const QString &documentId);

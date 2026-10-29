@@ -10,15 +10,14 @@
         <item name="android:windowActionBar">false</item>
         <item name="android:fontFamily">sans</item>
 
-        <!-- Barras Android en claro, no negras -->
+        <!-- Acceso InGe+ (Login V1): barras oscuras #151A30 con iconos claros -->
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
-        <item name="android:statusBarColor">#F8FAFD</item>
-        <item name="android:navigationBarColor">#FFFFFF</item>
-        <item name="android:navigationBarDividerColor">#FFFFFF</item>
+        <item name="android:statusBarColor">#151A30</item>
+        <item name="android:navigationBarColor">#151A30</item>
+        <item name="android:navigationBarDividerColor">#151A30</item>
 
-        <!-- Iconos oscuros para barra clara -->
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
 
         <!-- Evita que Android/MIUI fuerce contraste oscuro -->
         <item name="android:enforceStatusBarContrast">false</item>
@@ -28,7 +27,7 @@
         <item name="android:windowTranslucentStatus">false</item>
         <item name="android:windowTranslucentNavigation">false</item>
 
-        <item name="android:windowBackground">#F8FAFD</item>
+        <item name="android:windowBackground">#151A30</item>
         <item name="android:colorAccent">#005AA7</item>
     </style>
 

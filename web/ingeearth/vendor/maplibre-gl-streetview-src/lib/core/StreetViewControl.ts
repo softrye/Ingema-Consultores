@@ -1,0 +1,903 @@
+import type { IControl, Map as MapLibreMap, MapMouseEvent, LngLat } from 'maplibre-gl';
+import type {
+  StreetViewControlOptions,
+  StreetViewState,
+  StreetViewEvent,
+  StreetViewEventHandler,
+  StreetViewEventData,
+  ProviderType,
+  ControlPosition,
+  IStreetViewProvider,
+  ViewOptions,
+  ViewState,
+} from './types';
+import { DEFAULT_OPTIONS, CSS_CLASSES } from './constants';
+import { StreetViewAuthError } from './errors';
+import { Panel, ProviderTabs, Viewer, StreetViewMarker, NoDataMessage, ApiKeyInputs } from '../components';
+import { GoogleStreetViewProvider, MapillaryProvider } from '../providers';
+import { createElement, generateId, normalizeHeading, clamp } from '../utils/helpers';
+import { toLngLat } from '../utils/geo';
+
+/**
+ * Street View control for MapLibre GL JS.
+ * Provides a collapsible panel for viewing Google Street View and Mapillary imagery.
+ */
+export class StreetViewControl implements IControl {
+  private _map: MapLibreMap | null = null;
+  private _container: HTMLElement | null = null;
+  private _button: HTMLButtonElement | null = null;
+  private _options: Required<StreetViewControlOptions>;
+  private _id: string;
+
+  // UI Components
+  private _panel: Panel | null = null;
+  private _apiKeyInputs: ApiKeyInputs | null = null;
+  private _tabs: ProviderTabs | null = null;
+  private _viewer: Viewer | null = null;
+  private _noDataMessage: NoDataMessage | null = null;
+  private _marker: StreetViewMarker | null = null;
+
+  // Providers
+  private _googleProvider: GoogleStreetViewProvider | null = null;
+  private _mapillaryProvider: MapillaryProvider | null = null;
+
+  // State - always start collapsed, expand() will be called in onAdd if needed
+  private _state: StreetViewState = {
+    collapsed: true,
+    activeProvider: 'google',
+    location: null,
+    imagery: null,
+    heading: 0,
+    pitch: 0,
+    loading: false,
+    error: null,
+  };
+
+  // Track if initial expansion should happen
+  private _shouldExpandOnAdd = false;
+  private _apiKeyPanelVisible = false;
+
+  // Event handlers
+  private _eventHandlers: Map<StreetViewEvent, Set<StreetViewEventHandler>> = new Map();
+
+  // Bound handlers for cleanup
+  private _onMapClick: (e: MapMouseEvent) => void;
+
+  /**
+   * Creates a new StreetViewControl.
+   *
+   * @param options - Control configuration options
+   */
+  constructor(options: StreetViewControlOptions = {}) {
+    this._options = { ...DEFAULT_OPTIONS, ...options } as Required<StreetViewControlOptions>;
+    this._id = generateId();
+
+    // Initialize state from options
+    this._state.activeProvider = this._options.defaultProvider;
+    // Track if we should expand on add (state stays collapsed until expand() is called)
+    this._shouldExpandOnAdd = !this._options.collapsed;
+
+    // Initialize providers
+    this.configureProviders();
+
+    // Bind handlers
+    this._onMapClick = this.handleMapClick.bind(this);
+  }
+
+  /**
+   * Called when the control is added to the map.
+   *
+   * @param map - The MapLibre map instance
+   * @returns The control container element
+   */
+  onAdd(map: MapLibreMap): HTMLElement {
+    this._map = map;
+
+    // Create container
+    this._container = createElement('div', {
+      className: `maplibregl-ctrl maplibregl-ctrl-group ${CSS_CLASSES.CONTROL}`,
+    });
+
+    if (this._options.className) {
+      this._container.classList.add(this._options.className);
+    }
+
+    // Create toggle button
+    this._button = this.createToggleButton();
+    this._container.appendChild(this._button);
+
+    // Create panel
+    this._panel = new Panel({
+      title: this._options.title,
+      width: this._options.panelWidth,
+      height: this._options.panelHeight,
+      minWidth: this._options.minPanelWidth,
+      minHeight: this._options.minPanelHeight,
+      position: this._options.position,
+      onClose: () => this.collapse(),
+      onResize: (width, height) => {
+        this._options.panelWidth = width;
+        this._options.panelHeight = height;
+      },
+    });
+
+    // Create provider tabs
+    const availableProviders = this.getAvailableProviders();
+    this._tabs = new ProviderTabs({
+      providers: availableProviders,
+      activeProvider: this._state.activeProvider,
+      showApiKeyTab: this._options.showApiKeyInputs,
+      onSelect: (provider) => this.setProvider(provider),
+      onApiKeySelect: () => this.showApiKeyPanel(),
+    });
+
+    // Create viewer
+    this._viewer = new Viewer({
+      onHeadingChange: (heading) => this.handleHeadingChange(heading),
+      onLocationChange: (location) => this.handleProviderLocationChange(location),
+    });
+
+    // Apply maxHeight
+    if (this._options.maxHeight) {
+      this._panel.getElement().style.maxHeight = `${this._options.maxHeight}px`;
+    }
+
+    // Assemble panel content
+    const panelContent = this._panel.getContent();
+    panelContent.appendChild(this._tabs.getElement());
+    if (this._options.showApiKeyInputs) {
+      this._apiKeyInputs = new ApiKeyInputs({
+        googleApiKey: this._options.googleApiKey,
+        mapillaryAccessToken: this._options.mapillaryAccessToken,
+        onApply: (values) => this.setApiKeys(values),
+      });
+      this._apiKeyInputs.getElement().hidden = true;
+      panelContent.appendChild(this._apiKeyInputs.getElement());
+    }
+    panelContent.appendChild(this._viewer.getElement());
+
+    // Add panel to map container
+    const mapContainer = map.getContainer();
+    mapContainer.appendChild(this._panel.getElement());
+
+    // Set initial panel state based on options
+    // Use requestAnimationFrame to ensure DOM is fully rendered before positioning
+    if (this._shouldExpandOnAdd) {
+      requestAnimationFrame(() => {
+        this.expand();
+      });
+    }
+
+    // Setup map click handler
+    if (this._options.clickToView) {
+      map.on('click', this._onMapClick);
+    }
+
+    // Create marker if enabled
+    if (this._options.showMarker) {
+      this._marker = new StreetViewMarker(this._options.markerOptions, this._options.createMarker);
+    }
+
+    // Replace the viewer's default click prompt with a setup card when no
+    // provider is configured yet, so the panel never invites a click that is
+    // guaranteed to fail (issue #562).
+    if (!this.hasConfiguredProvider()) {
+      this.showSetupRequired();
+    }
+
+    return this._container;
+  }
+
+  /**
+   * Called when the control is removed from the map.
+   */
+  onRemove(): void {
+    // Remove map event listeners
+    if (this._map && this._options.clickToView) {
+      this._map.off('click', this._onMapClick);
+    }
+
+    // Destroy components
+    this._panel?.destroy();
+    this._apiKeyInputs?.destroy();
+    this._tabs?.destroy();
+    this._viewer?.destroy();
+    this._noDataMessage?.destroy();
+    this._marker?.remove();
+
+    // Destroy providers
+    this._googleProvider?.destroy();
+    this._mapillaryProvider?.destroy();
+
+    // Remove container
+    this._container?.remove();
+
+    // Clear references
+    this._map = null;
+    this._container = null;
+    this._button = null;
+    this._panel = null;
+    this._apiKeyInputs = null;
+    this._tabs = null;
+    this._viewer = null;
+    this._noDataMessage = null;
+    this._marker = null;
+
+    // Clear event handlers
+    this._eventHandlers.clear();
+  }
+
+  /**
+   * Creates the toggle button element.
+   */
+  private createToggleButton(): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.className = CSS_CLASSES.TOGGLE;
+    button.type = 'button';
+    button.setAttribute('aria-label', 'Toggle Street View');
+    button.setAttribute('title', 'Street View');
+
+    const icon = createElement('span', { className: CSS_CLASSES.ICON });
+    icon.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+        <circle cx="12" cy="9" r="1.5"/>
+      </svg>
+    `;
+    button.appendChild(icon);
+
+    button.addEventListener('click', () => this.toggle());
+
+    return button;
+  }
+
+  /**
+   * Gets the list of available (configured) providers.
+   */
+  private getAvailableProviders(): ProviderType[] {
+    const providers: ProviderType[] = [];
+    if (this._googleProvider?.isConfigured()) {
+      providers.push('google');
+    }
+    if (this._mapillaryProvider?.isConfigured()) {
+      providers.push('mapillary');
+    }
+    return providers;
+  }
+
+  /**
+   * Initializes providers from the current API key options.
+   */
+  private configureProviders(): void {
+    this._googleProvider = this._options.googleApiKey
+      ? new GoogleStreetViewProvider(this._options.googleApiKey)
+      : null;
+    this._mapillaryProvider = this._options.mapillaryAccessToken
+      ? new MapillaryProvider(this._options.mapillaryAccessToken)
+      : null;
+  }
+
+  /**
+   * Updates provider tabs and active provider after API key changes.
+   */
+  private refreshProviderAvailability(): boolean {
+    const availableProviders = this.getAvailableProviders();
+    this._tabs?.setProviders(availableProviders);
+
+    if (availableProviders.includes(this._state.activeProvider)) {
+      this._tabs?.setActive(this._state.activeProvider);
+      return false;
+    }
+
+    const nextProvider = availableProviders[0];
+    if (!nextProvider) {
+      return false;
+    }
+
+    this._state.activeProvider = nextProvider;
+    this._tabs?.setActive(nextProvider);
+    return true;
+  }
+
+  /**
+   * Gets the current provider instance.
+   */
+  private getCurrentProvider(): IStreetViewProvider | null {
+    if (this._state.activeProvider === 'google') {
+      return this._googleProvider;
+    }
+    return this._mapillaryProvider;
+  }
+
+  /**
+   * Shows the API key entry form in the panel content area.
+   */
+  private showApiKeyPanel(): void {
+    if (!this._apiKeyInputs || !this._viewer) return;
+
+    this._apiKeyPanelVisible = true;
+    this._apiKeyInputs.getElement().hidden = false;
+    this._viewer.getElement().hidden = true;
+  }
+
+  /**
+   * Restores the imagery viewer after showing the API key form.
+   */
+  private showViewerPanel(): void {
+    if (!this._apiKeyInputs || !this._viewer) return;
+
+    this._apiKeyPanelVisible = false;
+    this._apiKeyInputs.getElement().hidden = true;
+    this._viewer.getElement().hidden = false;
+    this._tabs?.setActive(this._state.activeProvider);
+  }
+
+  /**
+   * Whether at least one provider has usable credentials.
+   */
+  private hasConfiguredProvider(): boolean {
+    return this.getAvailableProviders().length > 0;
+  }
+
+  /**
+   * Shows the idle viewer state: the click-to-view prompt when a provider is
+   * configured, otherwise a setup card guiding the user to add credentials.
+   */
+  private renderIdleState(): void {
+    if (this.hasConfiguredProvider()) {
+      this._noDataMessage?.destroy();
+      this._noDataMessage = null;
+      this._viewer?.showInitialState();
+    } else {
+      this.showSetupRequired();
+    }
+  }
+
+  /**
+   * Shows a setup-required card prompting the user to add an API key/token
+   * before clicking the map. Blocks the premature call-to-action that would
+   * otherwise lead to a dead-end error (issue #562).
+   */
+  private showSetupRequired(): void {
+    if (!this._viewer) return;
+
+    this._viewer.clearContent();
+    this._noDataMessage?.destroy();
+    this._noDataMessage = new NoDataMessage({
+      provider: this._state.activeProvider,
+      showSearchButton: false,
+    });
+
+    const canEditKeys = this._options.showApiKeyInputs;
+    this._noDataMessage.showSetupRequired(
+      'A Google Maps API key or Mapillary access token is required to load street-level imagery.',
+      canEditKeys
+        ? { label: 'Add API key', onAction: () => this.openApiKeyPanel() }
+        : undefined,
+    );
+
+    this._viewer.getElement().appendChild(this._noDataMessage.getElement());
+  }
+
+  /**
+   * Shows an authentication-failure card when a provider rejects the configured
+   * credentials, with a shortcut to the Keys panel (issues #562 and #563).
+   */
+  private showAuthError(error: StreetViewAuthError): void {
+    if (!this._viewer) return;
+
+    this._viewer.clearContent();
+    this._noDataMessage?.destroy();
+    this._noDataMessage = new NoDataMessage({
+      provider: error.provider,
+      showSearchButton: false,
+    });
+
+    const providerName = error.provider === 'mapillary' ? 'Mapillary' : 'Google';
+    const credential = error.provider === 'mapillary' ? 'access token' : 'API key';
+    const statusText = error.status ? ` (HTTP ${error.status})` : '';
+    const canEditKeys = this._options.showApiKeyInputs;
+    const message = canEditKeys
+      ? `Your ${providerName} ${credential} was rejected${statusText}. Open the Keys tab to update it.`
+      : `Your ${providerName} ${credential} was rejected${statusText}. Check your credentials and try again.`;
+
+    this._noDataMessage.showAuthError(
+      message,
+      canEditKeys
+        ? { label: 'Open Keys', onAction: () => this.openApiKeyPanel() }
+        : undefined,
+    );
+
+    this._viewer.getElement().appendChild(this._noDataMessage.getElement());
+  }
+
+  /**
+   * Opens the API key entry panel and marks the Keys tab active.
+   */
+  private openApiKeyPanel(): void {
+    if (!this._options.showApiKeyInputs) return;
+    this._tabs?.setApiKeysActive();
+    this.showApiKeyPanel();
+  }
+
+  /**
+   * Handles map click events.
+   */
+  private handleMapClick(e: MapMouseEvent): void {
+    if (this._state.collapsed) return;
+    // Don't react while the user is editing API keys.
+    if (this._apiKeyPanelVisible) return;
+    // Guard the premature call-to-action: when no provider is configured, guide
+    // the user to add credentials instead of running a request that will fail
+    // (issue #562).
+    if (!this.hasConfiguredProvider()) {
+      this.showSetupRequired();
+      return;
+    }
+    this.showStreetView(e.lngLat);
+  }
+
+  /**
+   * Handles heading changes from the viewer.
+   */
+  private handleHeadingChange(heading: number): void {
+    if (this._state.heading === heading) return;
+    this._state.heading = heading;
+    this._marker?.setHeading(heading);
+    this.emit('headingchange');
+  }
+
+  /**
+   * Handles location changes from the provider (when user navigates in viewer).
+   */
+  private handleProviderLocationChange(location: LngLat): void {
+    this._state.location = location;
+    if (this._marker && this._map) {
+      this._marker.setLngLat(location);
+    }
+    this.emit('locationchange');
+  }
+
+  /**
+   * Updates the panel position relative to the button.
+   */
+  private updatePanelPosition(): void {
+    if (!this._panel || !this._button || !this._map) return;
+    this._panel.positionRelativeTo(this._button, this._map.getContainer());
+  }
+
+  /**
+   * Normalizes and clamps user-supplied view options.
+   * Non-finite values are dropped.
+   */
+  private sanitizeViewOptions(viewOptions?: ViewOptions): Partial<ViewState> | undefined {
+    if (!viewOptions) return undefined;
+
+    const view: Partial<ViewState> = {};
+    if (viewOptions.heading !== undefined && Number.isFinite(viewOptions.heading)) {
+      view.heading = normalizeHeading(viewOptions.heading);
+    }
+    if (viewOptions.pitch !== undefined && Number.isFinite(viewOptions.pitch)) {
+      view.pitch = clamp(viewOptions.pitch, -90, 90);
+    }
+
+    return view.heading === undefined && view.pitch === undefined ? undefined : view;
+  }
+
+  /**
+   * Shows street view imagery at a location.
+   *
+   * @param lngLat - The location to show
+   * @param viewOptions - Optional initial heading/pitch. Falls back to the
+   *   provider's default view when omitted. For Mapillary, heading is
+   *   best-effort (360 panoramas only) and pitch is ignored.
+   */
+  async showStreetView(lngLat: LngLat | [number, number], viewOptions?: ViewOptions): Promise<void> {
+    const view = this.sanitizeViewOptions(viewOptions);
+    const location = toLngLat(lngLat);
+    const provider = this.getCurrentProvider();
+
+    if (!provider) {
+      this.showSetupRequired();
+      return;
+    }
+
+    // Update state
+    this._state.location = location;
+    this._state.loading = true;
+    this._state.error = null;
+    this.emit('locationchange');
+
+    // Show loading state
+    this._viewer?.showLoading('Loading street view...');
+
+    // Update marker position
+    if (this._marker && this._map) {
+      this._marker.setLngLat(location).addTo(this._map, location);
+    }
+
+    try {
+      // Query for imagery
+      let imagery = await provider.queryImagery(location);
+
+      // If no imagery, search nearby
+      if (!imagery) {
+        this._viewer?.showLoading('Searching nearby...');
+        imagery = await provider.findNearestImagery(location, this._options.maxSearchRadius);
+      }
+
+      if (imagery) {
+        this._state.imagery = imagery;
+        this._state.loading = false;
+
+        // Seed state with the requested view, or reset to the provider's
+        // default starting view; providers that emit heading changes
+        // (Mapillary) will update state as the viewer loads
+        this._state.heading = view?.heading ?? 0;
+        this._state.pitch = view?.pitch ?? 0;
+
+        // Update marker to actual imagery location; requested heading wins
+        // over the image's own compass heading
+        if (this._marker && this._map) {
+          this._marker.setLngLat(imagery.location);
+          const markerHeading = view?.heading ?? imagery.heading;
+          if (markerHeading !== undefined) {
+            this._marker.setHeading(markerHeading);
+          }
+        }
+
+        // Display imagery
+        this._viewer?.displayImagery(provider, imagery, view);
+        this.emit('load');
+      } else {
+        this._state.loading = false;
+        this.showNoData();
+      }
+    } catch (error) {
+      this._state.loading = false;
+      if (error instanceof StreetViewAuthError) {
+        // A rejected credential is not a lack of coverage; show a dedicated
+        // authentication error with a path to fix the key (issues #562, #563).
+        this._state.error = error.message;
+        this.showAuthError(error);
+      } else {
+        this._state.error = error instanceof Error ? error.message : 'Unknown error';
+        this.showNoData(this._state.error);
+      }
+      this.emit('error', error instanceof Error ? error : new Error(String(error)));
+    }
+
+    this.emit('statechange');
+  }
+
+  /**
+   * Updates Google Maps and Mapillary credentials at runtime.
+   *
+   * @param keys - New API key/token values. Omitted fields keep their current value.
+   */
+  setApiKeys(keys: { googleApiKey?: string | null; mapillaryAccessToken?: string | null }): void {
+    const googleApiKey = keys.googleApiKey === undefined
+      ? this._options.googleApiKey
+      : (keys.googleApiKey ?? '').trim();
+    const mapillaryAccessToken = keys.mapillaryAccessToken === undefined
+      ? this._options.mapillaryAccessToken
+      : (keys.mapillaryAccessToken ?? '').trim();
+
+    const googleChanged = googleApiKey !== this._options.googleApiKey;
+    const mapillaryChanged = mapillaryAccessToken !== this._options.mapillaryAccessToken;
+
+    if (!googleChanged && !mapillaryChanged) {
+      this.showViewerPanel();
+      return;
+    }
+
+    if (googleChanged) {
+      this._googleProvider?.destroy();
+      this._options.googleApiKey = googleApiKey;
+      this._googleProvider = googleApiKey ? new GoogleStreetViewProvider(googleApiKey) : null;
+    }
+
+    if (mapillaryChanged) {
+      this._mapillaryProvider?.destroy();
+      this._options.mapillaryAccessToken = mapillaryAccessToken;
+      this._mapillaryProvider = mapillaryAccessToken ? new MapillaryProvider(mapillaryAccessToken) : null;
+    }
+
+    this._apiKeyInputs?.setValues({ googleApiKey, mapillaryAccessToken });
+
+    const providerChanged = this.refreshProviderAvailability();
+    const provider = this.getCurrentProvider();
+
+    this.showViewerPanel();
+
+    if (this._state.location && provider?.isConfigured()) {
+      void this.showStreetView(this._state.location);
+    } else if (!this.hasConfiguredProvider()) {
+      this.showSetupRequired();
+    } else {
+      this.renderIdleState();
+    }
+
+    if (providerChanged) {
+      this.emit('providerchange');
+    }
+    this.emit('statechange');
+  }
+
+  /**
+   * Shows the no data message.
+   */
+  private showNoData(errorMessage?: string): void {
+    if (!this._viewer) return;
+
+    this._viewer.clearContent();
+
+    this._noDataMessage = new NoDataMessage({
+      provider: this._state.activeProvider,
+      showSearchButton: true,
+      onSearchNearest: () => this.searchNearest(),
+    });
+
+    if (errorMessage) {
+      this._noDataMessage.showError(errorMessage);
+    }
+
+    this._viewer.getElement().appendChild(this._noDataMessage.getElement());
+  }
+
+  /**
+   * Searches for the nearest imagery with larger radius.
+   */
+  private async searchNearest(): Promise<void> {
+    if (!this._state.location) return;
+
+    const provider = this.getCurrentProvider();
+    if (!provider) return;
+
+    this._noDataMessage?.showSearching();
+
+    try {
+      const imagery = await provider.findNearestImagery(this._state.location, 500);
+
+      if (imagery) {
+        this._state.imagery = imagery;
+
+        // Update marker
+        if (this._marker && this._map) {
+          this._marker.setLngLat(imagery.location);
+          if (imagery.heading !== undefined) {
+            this._marker.setHeading(imagery.heading);
+          }
+        }
+
+        // Remove no data message and show imagery
+        this._noDataMessage?.destroy();
+        this._noDataMessage = null;
+        this._viewer?.displayImagery(provider, imagery);
+        this.emit('load');
+      } else {
+        this._noDataMessage?.showNotFound();
+      }
+    } catch (error) {
+      if (error instanceof StreetViewAuthError) {
+        this.showAuthError(error);
+        this.emit('error', error);
+      } else {
+        this._noDataMessage?.showError(error instanceof Error ? error.message : 'Search failed');
+      }
+    }
+
+    this.emit('statechange');
+  }
+
+  /**
+   * Clears the current street view display.
+   */
+  clearStreetView(): void {
+    this._state.location = null;
+    this._state.imagery = null;
+    this._state.heading = 0;
+    this._state.pitch = 0;
+    this._state.error = null;
+
+    this._marker?.remove();
+    this._noDataMessage?.destroy();
+    this._noDataMessage = null;
+    this.renderIdleState();
+
+    this.emit('statechange');
+  }
+
+  /**
+   * Sets the heading of the currently displayed street view.
+   * Best-effort: no-op when no imagery is displayed or the active
+   * provider does not support it.
+   *
+   * @param heading - The heading in degrees (0-360, normalized)
+   */
+  setHeading(heading: number): void {
+    const provider = this._viewer?.getCurrentProvider();
+    if (!provider?.setHeading || !Number.isFinite(heading)) return;
+
+    const normalized = normalizeHeading(heading);
+    void provider.setHeading(normalized);
+
+    if (this._state.heading !== normalized) {
+      this._state.heading = normalized;
+      this._marker?.setHeading(normalized);
+      this.emit('headingchange');
+    }
+    this.emit('statechange');
+  }
+
+  /**
+   * Sets the pitch of the currently displayed street view.
+   * Best-effort: no-op when no imagery is displayed or the active
+   * provider does not support it.
+   *
+   * @param pitch - The pitch in degrees (-90 to 90, clamped)
+   */
+  setPitch(pitch: number): void {
+    const provider = this._viewer?.getCurrentProvider();
+    if (!provider?.setPitch || !Number.isFinite(pitch)) return;
+
+    const clamped = clamp(pitch, -90, 90);
+    void provider.setPitch(clamped);
+
+    if (this._state.pitch !== clamped) {
+      this._state.pitch = clamped;
+      this.emit('pitchchange');
+    }
+    this.emit('statechange');
+  }
+
+  /**
+   * Sets the active provider.
+   *
+   * @param provider - The provider to activate
+   */
+  setProvider(provider: ProviderType): void {
+    if (this._state.activeProvider === provider) {
+      if (this._apiKeyPanelVisible) {
+        this.showViewerPanel();
+        this._tabs?.setActive(provider);
+      }
+      return;
+    }
+
+    this.showViewerPanel();
+    this._state.activeProvider = provider;
+    this._tabs?.setActive(provider);
+
+    // Re-query if we have a location
+    if (this._state.location) {
+      this.showStreetView(this._state.location);
+    } else {
+      this.renderIdleState();
+    }
+
+    this.emit('providerchange');
+    this.emit('statechange');
+  }
+
+  /**
+   * Expands the panel.
+   */
+  expand(): void {
+    if (!this._state.collapsed) return;
+
+    this._state.collapsed = false;
+    this._panel?.show();
+    this._container?.classList.add('active');
+    this.updatePanelPosition();
+
+    // Re-add marker if there's a current location
+    if (this._marker && this._map && this._state.location) {
+      this._marker.addTo(this._map, this._state.location);
+    }
+
+    this.emit('expand');
+    this.emit('statechange');
+  }
+
+  /**
+   * Collapses the panel.
+   */
+  collapse(): void {
+    if (this._state.collapsed) return;
+
+    this._state.collapsed = true;
+    this._panel?.hide();
+    this._container?.classList.remove('active');
+    this._marker?.remove();
+
+    this.emit('collapse');
+    this.emit('statechange');
+  }
+
+  /**
+   * Toggles the panel visibility.
+   */
+  toggle(): void {
+    if (this._state.collapsed) {
+      this.expand();
+    } else {
+      this.collapse();
+    }
+  }
+
+  /**
+   * Gets the current control state.
+   */
+  getState(): StreetViewState {
+    return { ...this._state };
+  }
+
+  /**
+   * Subscribes to control events.
+   *
+   * @param event - The event type
+   * @param handler - The event handler
+   */
+  on(event: StreetViewEvent, handler: StreetViewEventHandler): this {
+    if (!this._eventHandlers.has(event)) {
+      this._eventHandlers.set(event, new Set());
+    }
+    this._eventHandlers.get(event)!.add(handler);
+    return this;
+  }
+
+  /**
+   * Unsubscribes from control events.
+   *
+   * @param event - The event type
+   * @param handler - The event handler to remove
+   */
+  off(event: StreetViewEvent, handler: StreetViewEventHandler): this {
+    this._eventHandlers.get(event)?.delete(handler);
+    return this;
+  }
+
+  /**
+   * Emits an event to all subscribers.
+   */
+  private emit(event: StreetViewEvent, error?: Error): void {
+    const handlers = this._eventHandlers.get(event);
+    if (!handlers) return;
+
+    const eventData: StreetViewEventData = {
+      type: event,
+      state: this.getState(),
+      error,
+    };
+
+    for (const handler of handlers) {
+      handler(eventData);
+    }
+  }
+
+  /**
+   * Gets the control ID.
+   */
+  getId(): string {
+    return this._id;
+  }
+
+  /**
+   * Gets the map instance.
+   */
+  getMap(): MapLibreMap | null {
+    return this._map;
+  }
+
+  /**
+   * Gets the default position for the control.
+   */
+  getDefaultPosition(): ControlPosition {
+    return this._options.position;
+  }
+
+  getPanelElement(): HTMLElement | null {
+    return this._panel?.getElement() ?? null;
+  }
+}

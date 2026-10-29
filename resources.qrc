@@ -88,9 +88,11 @@
         <file alias="Mobile/components/FlowIconButton.qml">qml/Mobile/components/FlowIconButton.qml</file>
         <file alias="Mobile/lib/IconCatalog.js">qml/Mobile/lib/IconCatalog.js</file>
         <file alias="Mobile/pages/CalicatasEditorPage.qml">qml/Mobile/pages/CalicatasEditorPage.qml</file>
+        <file alias="Mobile/pages/CalicatasHome.qml">qml/Mobile/pages/CalicatasHome.qml</file>
+        <file alias="Mobile/pages/CalicatasTopoMap.qml">qml/Mobile/pages/CalicatasTopoMap.qml</file>
         <file alias="Mobile/pages/CalicataFormPage.qml">qml/Mobile/pages/CalicataFormPage.qml</file>
     <file alias="Mobile/pages/CalicataReview.qml">qml/Mobile/pages/CalicataReview.qml</file>
-    <file alias="Mobile/pages/CalicataLiquidGlass.qml">qml/Mobile/pages/CalicataLiquidGlass.qml</file>
+    <file alias="Mobile/pages/CalicataSurface.qml">qml/Mobile/pages/CalicataSurface.qml</file>
     <file alias="Mobile/pages/CalicataProfile.qml">qml/Mobile/pages/CalicataProfile.qml</file>
     <file alias="Mobile/pages/CalicataPointPicker.qml">qml/Mobile/pages/CalicataPointPicker.qml</file>
         <file alias="Mobile/CalicataSaveOpenDialog.qml">qml/Mobile/CalicataSaveOpenDialog.qml</file>

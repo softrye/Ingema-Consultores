@@ -169,7 +169,7 @@ Item {
         transform: Translate { id: cardLift; y: 0 }
 
         // Tarjeta de estado = material Liquid Glass de Calicatas (velo casi opaco).
-        CalicataLiquidGlass {
+        CalicataSurface {
             anchors.fill: parent
             dark: overlay.dark
             accent: overlay.accentColor
@@ -207,7 +207,7 @@ Item {
                 color: "transparent"
                 border.width: 0
                 border.color: overlay.displayed && overlay.displayed.result === "ERROR" ? overlay.errorColor : overlay.accentColor
-                CalicataLiquidGlass {
+                CalicataSurface {
                     anchors.fill: parent
                     dark: overlay.dark
                     accent: overlay.accentColor
@@ -259,7 +259,7 @@ Item {
                         rightPadding: 16
                         scale: down ? 0.97 : 1
                         Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
-                        background: CalicataLiquidGlass {
+                        background: CalicataSurface {
                             dark: overlay.dark
                             accent: overlay.accentColor
                             danger: overlay.errorColor

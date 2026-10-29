@@ -244,30 +244,27 @@ check("hydration never builds nested ListModel roles (observations is null)", ()
     const n = body(form, "_normalizeCorte");
     assert.ok(n.includes('typeof o[key] !== "object"') && n.includes("r._extraJson = JSON.stringify(o)"));
 });
-check("Fotos action bars are Liquid Glass (shared surface), vector icons, light press feedback", () => {
-    const bar = form.slice(form.indexOf("component PhotoGlassBar: Item {"), form.indexOf("component PhotoActionTile: Item {"));
-    assert.ok(bar.includes("FlowCore.LiquidGlassSurface {") && bar.includes("tokens: glassBarTokens") && bar.includes("readonly property Item glassBackdrop: glassBar.backdrop"));
+check("Fotos action bars: flat surfaces, vector icons, same actions", () => {
+    const bar = form.slice(form.indexOf("component PhotoBar: Item {"), form.indexOf("component PhotoAmbient:"));
+    assert.ok(bar.includes("default property alias content: photoBarContent.data") && bar.includes("enabled: photoBar.absorbTaps"), "bar keeps content slot and tap absorption");
+    assert.ok(!bar.includes("LiquidGlassSurface") && !bar.includes("backdrop"), "no glass in the bar");
     const tile = form.slice(form.indexOf("component PhotoActionTile: Item {"), form.indexOf("component LabActionPill"));
-    assert.ok(!tile.includes("root.cSurfaceAlt") && !/^\s*color: tileTap\.pressed/m.test(tile), "no solid grey tile background");
-    assert.ok(tile.includes("scale: tileTap.pressed ? 0.975 : 1") && tile.includes("gesturePolicy: TapHandler.ReleaseWithinBounds"));
-    assert.ok(tile.includes("PhotoGlassBadge {") && tile.includes("property bool divider: false") && tile.includes("visible: tile.divider"), "glass icon badges + subtle divider");
-    const badge = form.slice(form.indexOf("component PhotoGlassBadge: Rectangle {"), form.indexOf("component PhotoActionTile: Item {"));
-    assert.ok(badge.includes("Components.FlowIcon"), "vector icons");
+    assert.ok(!tile.includes("root.cSurfaceAlt") && tile.includes("gesturePolicy: TapHandler.ReleaseWithinBounds"));
+    assert.ok(tile.includes("PhotoBadge {") && tile.includes("property bool divider: false") && tile.includes("visible: tile.divider"), "icon badges + divider");
+    const badge = form.slice(form.indexOf("component PhotoBadge: Rectangle {"), form.indexOf("component PhotoActionTile: Item {"));
+    assert.ok(badge.includes("Components.FlowIcon") && !badge.includes("Behavior on"), "vector icons, no press animation");
     const cards = form.slice(form.indexOf("model: root.photoSlotTitles"), form.indexOf("MobileStageBody {", form.indexOf("model: root.photoSlotTitles")));
-    assert.ok(cards.includes("backdrop: photoCard.info.has ? photoHeroBackdrop : photoCardAmbient"), "bar refracts the photo or the card ambient");
-    // Las tres categorías comparten la misma tarjeta de vidrio (un solo delegate).
-    assert.ok(cards.includes("PhotoGlassAmbient {") && cards.includes('surfaceName: "calicata-photo-card"') && cards.includes('color: "transparent"'), "card is Liquid Glass");
-    assert.ok(cards.includes("id: photoEmptyPanel") && cards.includes('surfaceName: "calicata-photo-empty"') && cards.includes('text: "Sin fotografía"'), "empty state is a glass panel");
-    assert.ok(cards.includes("maskSource: photoHeroMask"), "photo with real rounded corners (no card-colored frame)");
-    assert.ok(!cards.includes("cSurfaceAlt") && !/color: root\.cSurface\s*$/m.test(cards), "no grey/solid fills left");
+    assert.ok(cards.includes("PhotoAmbient {") && cards.includes("id: photoEmptyPanel") && cards.includes('text: "Sin fotografía"'), "card + empty state");
+    assert.ok(cards.includes("root._photoPreviewReady(photoCard.slot, source)"), "photo preview readiness callback kept");
+    assert.ok(!cards.includes("maskSource") && !cards.includes("MultiEffect"), "no mask effect");
     for (const a of ['["view", "Ver", "action.search"]', '["edit", "Editar", "action.edit"]', '["capture", "Tomar foto", "action.camera"]', '["pick", "Importar", "documents.upload"]'])
         assert.ok(cards.includes(a), a);
-    assert.ok(cards.includes("onClicked: root.runPhotoAction(modelData[0], photoCard.slot)"), "same actions as sheet and Dock");
+    assert.ok(cards.includes("onClicked: root.runPhotoAction(modelData[0], photoCard.slot)"), "same actions as sheet and action bar");
     assert.ok(!cards.includes('"⋮"') && !cards.includes('"✓ "'), "no font glyphs on cards");
     const viewer = form.slice(form.indexOf("id: photoViewer"), form.indexOf("id: photoActionsSheet"));
-    assert.ok(viewer.includes("PhotoGlassBar {") && viewer.includes("onDark: true") && viewer.includes("backdrop: viewerStage") && !viewer.includes('text: "‹"'));
+    assert.ok(viewer.includes("PhotoBar {") && viewer.includes("onDark: true") && !viewer.includes('text: "‹"'));
     const sheet = form.slice(form.indexOf("id: photoActionsSheet"), form.indexOf("id: stratumSheet"));
-    assert.ok(sheet.includes("background: PhotoGlassBar {") && sheet.includes("backdrop: photoActionsSheet.visible ? (photoActionsSheet.glassBackdropItem ? photoActionsSheet.glassBackdropItem : root._genGlassBackdrop) : null") && sheet.includes("Overlay.modal: GenGlassScrim { popupItem: photoActionsSheet }"), "action sheet is Liquid Glass");
-    assert.ok(sheet.includes("model: photoActionsSheet.actions") && sheet.includes("PhotoGlassBadge {") && !sheet.includes("cSurfaceAlt") && !sheet.includes("color: root.cSurface;"), "same actions, glass rows");
+    assert.ok(sheet.includes("background: PhotoBar {") && sheet.includes("Overlay.modal: GenScrim { popupItem: photoActionsSheet }"));
+    assert.ok(sheet.includes("model: photoActionsSheet.actions") && sheet.includes("PhotoBadge {"), "same actions");
 });
 console.log(`OK ${passed} checks`);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <functional>
 #include <QString>
 #include <QDateTime>
 #include <QUrl>
@@ -12,6 +13,7 @@
 
 class SupabaseClient;
 class QNetworkReply;
+class QTimer;
 
 class AuthSession : public QObject
 {
@@ -28,6 +30,11 @@ class AuthSession : public QObject
     Q_PROPERTY(QString avatarUrl READ avatarUrl NOTIFY userInfoChanged)
     Q_PROPERTY(QString avatarPath READ avatarPath NOTIFY userInfoChanged)
     Q_PROPERTY(QString position READ position NOTIFY backendProfileChanged)
+    Q_PROPERTY(QString area READ area NOTIFY backendProfileChanged)
+    Q_PROPERTY(QVariantList activeSessions READ activeSessions NOTIFY activeSessionsChanged)
+    Q_PROPERTY(bool sessionsBusy READ sessionsBusy NOTIFY activeSessionsChanged)
+    Q_PROPERTY(bool mfaEnabled READ mfaEnabled NOTIFY mfaChanged)
+    Q_PROPERTY(bool mfaLoginPending READ mfaLoginPending NOTIFY mfaChanged)
     Q_PROPERTY(QString profileRole READ profileRole NOTIFY backendProfileChanged)
     Q_PROPERTY(QString globalRole READ globalRole NOTIFY backendProfileChanged)
     Q_PROPERTY(QString role READ role NOTIFY backendProfileChanged)
@@ -41,6 +48,12 @@ class AuthSession : public QObject
     Q_PROPERTY(QVariantList savedAccounts READ savedAccounts NOTIFY savedAccountsChanged)
     Q_PROPERTY(QString currentAccountId READ currentAccountId NOTIFY currentAccountChanged)
     Q_PROPERTY(bool autoLoginInProgress READ autoLoginInProgress NOTIFY autoLoginInProgressChanged)
+    // Causa estructurada del último loginFail (vacía tras un intento nuevo o un
+    // login correcto): INVALID_CREDENTIALS, EMAIL_NOT_CONFIRMED, ACCOUNT_DISABLED,
+    // NETWORK_ERROR, SERVICE_TIMEOUT, INVALID_INPUT, INVALID_RESPONSE,
+    // MALFORMED_REQUEST, BACKEND_ERROR o CONFIG_ERROR. Se fija antes de emitir
+    // loginFail; el mensaje de la señal no cambia.
+    Q_PROPERTY(QString lastLoginFailure READ lastLoginFailure NOTIFY lastLoginFailureChanged)
 
 public:
     explicit AuthSession(SupabaseClient* api, QObject* parent = nullptr);
@@ -61,6 +74,11 @@ public:
     QString avatarUrl() const { return m_avatarUrl; }
     QString avatarPath() const { return m_avatarPath; }
     QString position() const { return m_position; }
+    QString area() const { return m_area; }
+    QVariantList activeSessions() const { return m_activeSessions; }
+    bool sessionsBusy() const { return m_sessionsBusy; }
+    bool mfaEnabled() const { return !m_mfaFactorId.isEmpty(); }
+    bool mfaLoginPending() const { return !m_mfaPendingSession.isEmpty(); }
     QString profileRole() const { return m_profileRole; }
     QString globalRole() const { return m_globalRole; }
     QString role() const { return m_globalRole.isEmpty() ? m_profileRole : m_globalRole; }
@@ -74,6 +92,7 @@ public:
     QVariantList savedAccounts() const;
     QString currentAccountId() const { return m_currentAccountId; }
     bool autoLoginInProgress() const { return m_autoLoginInProgress; }
+    QString lastLoginFailure() const { return m_lastLoginFailure; }
 
     Q_INVOKABLE void signInWithPassword(const QString& email, const QString& password);
     Q_INVOKABLE void signInWithGoogle();
@@ -97,6 +116,16 @@ public:
                                        const QString& phone);
     Q_INVOKABLE void updateUserAvatar(const QUrl& fileUrl);
     Q_INVOKABLE void clearUserAvatar();
+    // Sesiones de la cuenta (Android y web) vía RPC propias; sin service_role.
+    Q_INVOKABLE void refreshActiveSessions();
+    Q_INVOKABLE void revokeSession(const QString& sessionId);
+    Q_INVOKABLE void signOutOtherSessions();
+    // Verificación en dos pasos (TOTP de Supabase Auth, app autenticadora).
+    Q_INVOKABLE void enrollTotp();
+    Q_INVOKABLE void confirmTotpEnrollment(const QString& factorId, const QString& code);
+    Q_INVOKABLE void disableTotp();
+    Q_INVOKABLE void verifyLoginTotp(const QString& code);
+    Q_INVOKABLE void cancelMfaLogin();
     Q_INVOKABLE void setRememberFor30Days(bool enabled);
 
     // Gestión segura de varias sesiones recordadas. Nunca guarda contraseñas;
@@ -117,6 +146,7 @@ public:
 signals:
     void loginOk();
     void loginFail(const QString& message);
+    void lastLoginFailureChanged();
     void signUpOk();
     void signUpFail(const QString& message);
     void signUpConfirmationRequired(const QString& email);
@@ -147,6 +177,14 @@ signals:
     void confirmationResentFail(const QString& message);
     void passwordResetRequestedOk(const QString& email);
     void passwordResetRequestedFail(const QString& message);
+    void activeSessionsChanged();
+    void sessionsActionOk(const QString& message);
+    void sessionsActionFail(const QString& message);
+    void mfaChanged();
+    void mfaRequired();
+    void mfaEnrollReady(const QString& factorId, const QString& qrImage, const QString& secret, const QString& uri);
+    void mfaOk(const QString& message);
+    void mfaFail(const QString& message);
     void oauthStarted(const QString& provider, const QString& url);
 
 private:
@@ -198,7 +236,11 @@ private:
     // generación nueva; las respuestas de red de generaciones previas se
     // descartan y nunca pueden resucitar ni sustituir la sesión actual.
     quint64 beginAuthOperation(const char* kind, bool cancelPasswordLogin);
+    void setLastLoginFailure(const QString& failure);
     bool authOperationCurrent(quint64 generation, const char* callback) const;
+    void finishAvatarUpdate(const QString& userId, quint64 avatarGeneration, const QByteArray& jpegBytes,
+                            const QString& error);
+    void refreshPrivateAvatarUrl();
 
 private:
     static AuthSession* s_instance;
@@ -208,6 +250,7 @@ private:
     QString m_accessToken;
     QString m_refreshToken;
     QString m_userId;
+    QString m_lastLoginFailure;
     QDateTime m_expiresAtUtc;
     bool m_devOffline = false;
 
@@ -219,6 +262,14 @@ private:
     QString m_phone;
 
     QString m_position;
+    QString m_area;
+    QVariantList m_activeSessions;
+    bool m_sessionsBusy = false;
+    QString m_mfaFactorId;                 // factor TOTP verificado de la cuenta
+    QJsonObject m_mfaPendingSession;       // sesión aal1 esperando el código (no se persiste)
+    QString m_mfaPendingFactor;
+    void mfaChallengeVerify(const QString& factorId, const QString& code, const QString& token,
+                            std::function<void(bool, const QJsonObject&, const QString&)> done);
     QString m_profileRole;
     QString m_globalRole;
     QString m_profileStatus;
@@ -230,6 +281,11 @@ private:
     QString m_avatarUrl;
     QString m_avatarLocalFile;
     QString m_avatarPath;
+    bool m_avatarJobRunning = false;
+    quint64 m_avatarGeneration = 0;
+    quint64 m_avatarFetchGeneration = 0;
+    quint64 m_avatarReferenceRevision = 0;
+    QTimer *m_avatarUrlTimer = nullptr;
 
     bool m_rememberFor30Days = false;
     QDateTime m_rememberUntilUtc;
@@ -242,4 +298,5 @@ private:
     quint64 m_loginAttempt = 0;
     quint64 m_backendGeneration = 0;
     quint64 m_authGeneration = 0;
+    quint64 m_accountGeneration = 0;
 };

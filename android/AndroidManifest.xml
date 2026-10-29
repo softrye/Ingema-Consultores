@@ -31,6 +31,8 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
+    <!-- Home V1: recordatorios de actividades pendientes (Android 13+). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
@@ -117,6 +119,9 @@
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:excludeFromRecents="true"
+            android:exported="false"/>
+        <receiver
+            android:name="com.ingema.ingeplus.InGeReminderScheduler$Receiver"
             android:exported="false"/>
     </application>
 </manifest>

@@ -327,7 +327,8 @@ dependencies {
 
 
 
-    // Módulo Flutter compartido por Home, Auth y Rendiciones.
+    // Módulo Flutter sin interfaz: lógica de Rendiciones, diagnósticos y
+    // verificación biométrica (InGeBiometricActivity). Visual Zero 2026-10-10.
 
 
 
@@ -422,7 +423,9 @@ android {
 
 
 
-    compileSdkVersion androidCompileSdkVersion
+    // Flutter release AAR and plugins require API 37. Qt may generate androidCompileSdkVersion=android-34 in Release.
+    // Keep targetSdkVersion unchanged; this only fixes the compilation API.
+    compileSdkVersion 37
 
 
 
@@ -663,7 +666,13 @@ android {
 
 
 
-    lintOptions { abortOnError = false }
+    // Lint vital de release (AGP 8.10.1) incluye un lector Kotlin 2.1 que no puede leer
+    // los AAR de plugins Flutter compilados con Kotlin 2.3 (p. ej. local_auth_android):
+    // "Module was compiled with an incompatible version of Kotlin". No afecta al APK.
+    lintOptions {
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
 
 
 

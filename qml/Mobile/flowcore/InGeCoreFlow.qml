@@ -27,7 +27,11 @@ QtObject {
     readonly property FlowSpring springTokens: FlowSpring {}
     readonly property FlowVariant variant: FlowVariant {}
     readonly property FlowState states: FlowState {}
-    readonly property FlowAccessibility accessibility: FlowAccessibility {}
+    // Android "Remove animations" (animator scale 0) is honored as reduced
+    // motion; the app's own reduce-motion switch is core.reduceMotion.
+    readonly property FlowAccessibility accessibility: FlowAccessibility {
+        reducedMotion: !core.systemAnimationsEnabled
+    }
     readonly property FlowPerformance performance: FlowPerformance {}
     readonly property FlowTheme theme: FlowTheme {
         colors: core.colors
@@ -40,17 +44,56 @@ QtObject {
     }
     readonly property var haptics: FlowHaptics
     // Published by the shell: secondary surfaces reuse the actual Dock material.
-    property Item glassMaterial: null
     readonly property var graphicsCore: GraphicsCore
     readonly property string graphicsBackend: graphicsCore.graphicsBackend
     readonly property bool vulkanAvailable: graphicsCore.vulkanAvailable
-    readonly property bool earthAvailable: graphicsCore.earthAvailable
-    readonly property bool earthActive: graphicsCore.earthActive
-    readonly property string earthState: graphicsCore.earthState
-    readonly property string renderProfile: graphicsCore.renderProfile
+    // InGeGraphicsCore actual (Visual Zero) ya no publica el renderer de Earth
+    // ni renderProfile: InGe Earth está en "Próximamente". Sin esas
+    // propiedades el estado real es "no disponible / inactivo / sin perfil".
+    readonly property bool earthAvailable: graphicsCore.earthAvailable === true
+    readonly property bool earthActive: graphicsCore.earthActive === true
+    readonly property string earthState: typeof graphicsCore.earthState === "string" ? graphicsCore.earthState : ""
+    readonly property string renderProfile: typeof graphicsCore.renderProfile === "string" ? graphicsCore.renderProfile : ""
+
+    // Device performance, computed once on Android by InGePerformanceRuntime
+    // (RAM, cores, pixels, performance class + live battery saver/thermal)
+    // and published through GraphicsCore. This engine only maps it; it never
+    // measures on its own.
+    readonly property string deviceTier: graphicsCore.deviceTier
+    readonly property string baseDeviceTier: graphicsCore.baseDeviceTier
+    readonly property bool powerSaveMode: graphicsCore.powerSaveMode
+    readonly property int thermalStatus: graphicsCore.thermalStatus
+    readonly property bool systemAnimationsEnabled: graphicsCore.systemAnimationsEnabled
+    readonly property real systemFontScale: graphicsCore.systemFontScale
+    readonly property int memoryTrimLevel: graphicsCore.memoryTrimLevel
+    // Level used while the user has not picked one (0 ahorro, 1 equilibrado,
+    // 2 alto). Desktop kits report UNKNOWN and stay balanced.
+    readonly property int automaticPerformanceLevel: {
+        switch (deviceTier) {
+        case "ULTRA_LOW":
+        case "LOW":
+            return 0
+        case "MEDIUM_HIGH":
+        case "HIGH":
+            return 2
+        default:
+            return 1
+        }
+    }
+    // Hard cap from the device itself, applied to any chosen level: severe
+    // thermal throttling (PowerManager.THERMAL_STATUS_SEVERE = 3) or worse.
+    readonly property int systemPerformanceCap: thermalStatus >= 3 ? 0 : 2
     readonly property int themeMode: theme.mode
     readonly property bool darkMode: theme.isDark
-    readonly property bool liquidGlass: theme.isGlass
+    // INGE_PERFORMANCE_BARE_UI (operación Bare Metal UI): en TODO Android sin
+    // movimiento, Liquid Glass, Dock flotante ni Home Flutter; Home y barra
+    // de acciones funcionales mínimas. Solo presentación: datos, controladores
+    // y navegación intactos. Interruptor único: InGeQtActivity.BARE_UI (Java).
+    readonly property bool bareUiSwitch: graphicsCore.bareUiEnabled === true
+    readonly property bool bareUi: bareUiSwitch && Qt.platform.os === "android"
+    onBareUiChanged: console.info("INGE_PERFORMANCE_BARE_UI=" + (bareUi ? "ON" : "OFF")
+                                  + " tier=" + deviceTier)
+    readonly property bool liquidGlass: theme.isGlass && !bareUi
     readonly property string themeName: theme.displayName
 
     // Interruptores globales.
@@ -69,8 +112,16 @@ QtObject {
         return graphicsCore.setRenderProfile(profile)
     }
 
-    readonly property bool motionAllowed:
+    // Movimiento sin el modo ultraligero (Auth conserva su identidad).
+    readonly property bool motionAllowedBase:
         enabled
+        && !reduceMotion
+        && !accessibility.reducedMotion
+        && !performance.isReducedMotion
+        && motionLevel > 0
+    readonly property bool motionAllowed:
+        !bareUi
+        && enabled
         && !reduceMotion
         && !accessibility.reducedMotion
         && !performance.isReducedMotion
@@ -94,13 +145,14 @@ QtObject {
     readonly property int emphasizedDuration: duration(260)
 
     // V50: fuente global unica para la geometria del teclado Android/IME.
-    // imeViewportHeight lo publica el unico ApplicationWindow real. Cuando
+    // imeViewportHeight lo publica la unica Window real de Main.qml. Cuando
     // adjustResize ya redujo la ventana, keyboardRectangle queda fuera de ese
     // viewport y el solapamiento es cero, evitando un segundo reajuste.
     property real imeViewportHeight: 0.0
     // Acceso indexado: Qt 6.9 expone estas propiedades en runtime, aunque la
     // metadata estatica de QObject usada por qmllint no las enumera.
     readonly property bool imeVisible: Qt.inputMethod["visible"] === true
+    readonly property bool imeAnimating: Qt.inputMethod["animating"] === true
     readonly property rect imeKeyboardRectangle:
         Qt.inputMethod["keyboardRectangle"] || Qt.rect(0, 0, 0, 0)
     readonly property real imeHeight: {
@@ -156,7 +208,10 @@ QtObject {
     property bool gestureNavigationEnabled: true
     property bool adaptiveMotionEnabled: true
     property bool translucentSurfacesEnabled: true
-    property bool lowMemoryMode: false
+    // ULTRA_LOW / Android low-RAM devices always run the low-memory physics
+    // and skip refined motion.
+    property bool lowMemoryMode: graphicsCore.lowRamDevice
+                                 || graphicsCore.baseDeviceTier === "ULTRA_LOW"
 
     // 0 = sobrio, 1 = equilibrado, 2 = fluido.
     property int motionPersonality: 2

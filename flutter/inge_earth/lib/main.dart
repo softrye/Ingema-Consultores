@@ -1,38 +1,14 @@
-import 'dart:async';
-
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart' show WidgetsFlutterBinding;
 
 import 'biometric_gate.dart';
 import 'beta_diagnostics.dart';
-import 'home.dart';
 
+// Módulo Flutter sin interfaz (Visual Zero, 2026-10-10). Conserva la lógica
+// de Rendiciones (lib/renditions), los diagnósticos beta y la verificación
+// biométrica del sistema. No se ejecuta ningún runApp.
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   BetaDiagnostics.initialize();
-  runApp(const SizedBox.shrink());
-}
-
-@pragma('vm:entry-point')
-void homeMain() {
-  WidgetsFlutterBinding.ensureInitialized();
-  BetaDiagnostics.initialize();
-  unawaited(
-    BetaDiagnostics.record(
-      category: 'STARTUP',
-      severity: 'INFO',
-      code: 'FLUTTER_ROOT_STARTED',
-    ),
-  );
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    unawaited(
-      BetaDiagnostics.record(
-        category: 'PERFORMANCE',
-        severity: 'INFO',
-        code: 'FLUTTER_FIRST_FRAME',
-      ),
-    );
-  });
-  runInGeHome();
 }
 
 @pragma('vm:entry-point')

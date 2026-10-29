@@ -7,9 +7,9 @@
         <item name="android:fontFamily">sans</item>
 
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
-        <item name="android:statusBarColor">#202A36</item>
-        <item name="android:navigationBarColor">#202A36</item>
-        <item name="android:navigationBarDividerColor">#202A36</item>
+        <item name="android:statusBarColor">#151A30</item>
+        <item name="android:navigationBarColor">#151A30</item>
+        <item name="android:navigationBarDividerColor">#151A30</item>
 
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
@@ -19,7 +19,7 @@
         <item name="android:windowTranslucentStatus">false</item>
         <item name="android:windowTranslucentNavigation">false</item>
 
-        <item name="android:windowBackground">#202A36</item>
+        <item name="android:windowBackground">#151A30</item>
         <item name="android:colorAccent">#2EC4B6</item>
     </style>
 

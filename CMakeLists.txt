@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
-project(AppCalicatasDemo VERSION 1.1.9 LANGUAGES CXX)
+project(AppCalicatasDemo VERSION 1.1.10 LANGUAGES CXX)
 
 # ---------------------------------------------------------
-# INGE+ ANDROID RELEASE â€” Qt 6.9.3 / arm64-v8a
+# INGE+ ANDROID RELEASE â€” Qt 6.9.3 / ABI del kit: arm64-v8a (telefono) o x86_64 (emulador)
 # ---------------------------------------------------------
 if(ANDROID)
     set(INGE_ANDROID_PACKAGE_NAME "com.ingema.ingeplus" CACHE STRING
@@ -13,23 +13,59 @@ if(ANDROID)
             "Tipo de compilacion Android" FORCE)
     endif()
 
-    set(ANDROID_ABI "arm64-v8a" CACHE STRING
-        "ABI Android de InGe+" FORCE)
-    set(QT_ANDROID_ABIS "arm64-v8a" CACHE STRING
+    # Qt Creator define ANDROID_ABI segun el kit seleccionado. No forzar
+    # arm64-v8a: el emulador utiliza x86_64 y el movil utiliza arm64-v8a.
+    if(NOT ANDROID_ABI)
+        set(ANDROID_ABI "arm64-v8a" CACHE STRING
+            "ABI Android de InGe+")
+    endif()
+    set(QT_ANDROID_ABIS "${ANDROID_ABI}" CACHE STRING
         "ABI Android empaquetada por Qt" FORCE)
     set(QT_ANDROID_BUILD_ALL_ABIS OFF CACHE BOOL
-        "Compilar solamente arm64-v8a" FORCE)
+        "Compilar solamente la ABI del kit" FORCE)
 
     # El codigo nativo mantiene compatibilidad desde Android 9 / API 28.
-    set(ANDROID_PLATFORM "android-28" CACHE STRING
-        "API nativa minima Android" FORCE)
+    # La toolchain del NDK ya consumio estos valores en project(): solo se
+    # fija un valor por defecto, nunca se sobrescribe lo que define el kit.
+    if(NOT ANDROID_PLATFORM)
+        set(ANDROID_PLATFORM "android-28" CACHE STRING
+            "API nativa minima Android")
+    endif()
+    if(NOT ANDROID_STL)
+        set(ANDROID_STL "c++_shared" CACHE STRING "STL Android")
+    endif()
+    if(NOT ANDROID_STL STREQUAL "c++_shared")
+        message(FATAL_ERROR "InGe+ requiere ANDROID_STL=c++_shared (Qt 6.9); "
+            "el kit define '${ANDROID_STL}'.")
+    endif()
 
-    set(ANDROID_STL "c++_shared" CACHE STRING
-        "STL Android" FORCE)
-    set(CMAKE_ANDROID_STL_TYPE "c++_shared" CACHE STRING
-        "STL usada por CMake" FORCE)
-
-    set(QT_ANDROID_DEPLOYMENT_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING
+    # Qt 6.9 solo reconoce Debug o Release aqui: con RelWithDebInfo o
+    # MinSizeRel no pasa --release a androiddeployqt y el APK sale
+    # debuggable, con Flutter en JIT aunque el C++ este optimizado. Afecta
+    # al target apk/aab de CMake; el paso "Build Android APK" de Qt Creator
+    # decide por su cuenta (Profile/RelWithDebInfo sigue siendo debug alli).
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" _INGE_BUILD_TYPE_UPPER)
+    if(_INGE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
+        set(_INGE_ANDROID_DEPLOYMENT_TYPE "Debug")
+        message(NOTICE "InGe+ Android Debug: APK debuggable, C++ sin optimizar "
+            "y Flutter en JIT. No usar este build para medir rendimiento.")
+    else()
+        set(_INGE_ANDROID_DEPLOYMENT_TYPE "Release")
+        # Release ya generaba un APK release; RelWithDebInfo/MinSizeRel lo
+        # hacen desde este cambio y antes salian firmados con la clave debug.
+        if(NOT QT_ANDROID_SIGN_APK AND NOT _INGE_BUILD_TYPE_UPPER STREQUAL "RELEASE")
+            message(WARNING "InGe+ Android ${CMAKE_BUILD_TYPE}: el APK del target "
+                "apk de CMake sale release SIN firmar y adb install lo rechaza. "
+                "Activar QT_ANDROID_SIGN_APK con QT_ANDROID_KEYSTORE_* en el "
+                "entorno o firmar desde Qt Creator (configuracion Release).")
+        endif()
+        if(_INGE_BUILD_TYPE_UPPER STREQUAL "RELWITHDEBINFO")
+            message(NOTICE "InGe+ Android RelWithDebInfo: en Qt Creator la "
+                "configuracion Profile instala un APK debug (Flutter en JIT). "
+                "Para medir rendimiento usar Release.")
+        endif()
+    endif()
+    set(QT_ANDROID_DEPLOYMENT_TYPE "${_INGE_ANDROID_DEPLOYMENT_TYPE}" CACHE STRING
         "Tipo de despliegue Android" FORCE)
 endif()
 
@@ -59,19 +95,14 @@ endif()
 # Qt base
 # ----------------------------
 find_package(QT NAMES Qt6 Qt5 REQUIRED
-    COMPONENTS Core Network Positioning Location Quick Qml Xml Concurrent
+    COMPONENTS Core Network Positioning Quick Qml Xml Concurrent
 )
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED
-    COMPONENTS Core Network Positioning Location Quick Qml Xml Concurrent
+    COMPONENTS Core Network Positioning Quick Qml Xml Concurrent
 )
 
-# Si vamos a compilar Mobile, necesitamos QuickControls2
+# Mobile: aplicacion Qt Quick sin interfaz (Visual Zero)
 if(INGE_BUILD_MOBILE)
-    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS QuickControls2 QuickDialogs2)
-    if(QT_VERSION_MAJOR GREATER_EQUAL 6)
-        find_package(Qt6 REQUIRED COMPONENTS QuickEffects)
-        find_package(Qt6 REQUIRED COMPONENTS ShaderTools)
-    endif()
 endif()
 
 # Qt 6.9 Android/QML policy defaults: evita warnings de desarrollo en build Android.
@@ -84,7 +115,7 @@ endif()
 
 # Desktop usa Widgets/QuickWidgets/Pdf (solo si NO es Android/iOS)
 if(NOT ANDROID AND NOT IOS AND NOT INGE_BUILD_MOBILE)
-    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets QuickWidgets Pdf PdfWidgets)
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets QuickWidgets Pdf PdfWidgets Location)
 endif()
 
 # ----------------------------
@@ -123,7 +154,7 @@ if(NOT ANDROID AND NOT IOS AND NOT INGE_BUILD_MOBILE)
         excelpdfpreviewdialog.h excelpdfpreviewdialog.cpp
         appcontext.h appcontext.cpp
         supabaseclient.h supabaseclient.cpp
-        authsession.h authsession.cpp
+        authsession.h authsession.cpp biometricgate.h
         clouddocs.h clouddocs.cpp
         supabasestorageclient.h supabasestorageclient.cpp
         settingshelper.h
@@ -215,6 +246,22 @@ if(INGE_BUILD_MOBILE)
 
     # Cartography is provided by InGe Earth/Cesium; no native map provider dependency.
 
+    # Visual Zero: el target Mobile (Android y Windows de diagnostico) solo
+    # empaqueta marcas de exportacion. resources.qrc conserva el Desktop legado
+    # exclusivamente para AppCalicatasDemo, nunca para AppCalicatasMobile.
+    set(INGE_MOBILE_BRAND_QRC "${INGE_PROJECT_ROOT}/resources_mobile_brand.qrc")
+
+    # Calicatas: editor original restaurado (Qt Quick Controls, estilo Basic)
+    # y sus recursos con las rutas qrc originales.
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS QuickControls2)
+    # Mapa topográfico del Home de Calicatas: Qt Location (Map + plugin geoservices "osm").
+    # Enlazarlo hace que androiddeployqt empaquete el módulo QML QtLocation y el plugin.
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Location)
+    if(QT_VERSION_MAJOR GREATER_EQUAL 6)
+        find_package(Qt6 REQUIRED COMPONENTS QuickDialogs2)
+    endif()
+    set(INGE_MOBILE_CALICATAS_QRC "${INGE_PROJECT_ROOT}/resources_mobile_calicatas.qrc")
+
     set(MOBILE_SOURCES
         "${INGE_PROJECT_ROOT}/main_mobile.cpp"
         "${INGE_PROJECT_ROOT}/src/core/InGeCore.h"
@@ -222,11 +269,14 @@ if(INGE_BUILD_MOBILE)
         "${INGE_PROJECT_ROOT}/src/core/RemoteExecutor.cpp"
         "${INGE_PROJECT_ROOT}/src/core/RemoteExecutor.h"
         "${INGE_PROJECT_ROOT}/src/core/GeminiAssistant.cpp"
+        "${INGE_PROJECT_ROOT}/src/core/OnboardingState.h"
+        "${INGE_PROJECT_ROOT}/src/core/OnboardingState.cpp"
         "${INGE_PROJECT_ROOT}/src/core/GeminiAssistant.h"
         "${INGE_PROJECT_ROOT}/src/core/InGeCoreContext.h"
         "${INGE_PROJECT_ROOT}/src/core/InGeCoreTypes.h"
         "${INGE_PROJECT_ROOT}/src/core/InGeCoreSkill.h"
-        "${INGE_PROJECT_ROOT}/resources.qrc"
+        ${INGE_MOBILE_BRAND_QRC}
+        ${INGE_MOBILE_CALICATAS_QRC}
 
         # AUTH compartido con Desktop
         "${INGE_PROJECT_ROOT}/appcontext.h"
@@ -235,11 +285,14 @@ if(INGE_BUILD_MOBILE)
         "${INGE_PROJECT_ROOT}/supabaseclient.h"
         "${INGE_PROJECT_ROOT}/supabaseclient.cpp"
         "${INGE_PROJECT_ROOT}/authsession.h"
+        "${INGE_PROJECT_ROOT}/biometricgate.h"
         "${INGE_PROJECT_ROOT}/authsession.cpp"
         "${INGE_PROJECT_ROOT}/clouddocs.h"
         "${INGE_PROJECT_ROOT}/clouddocs.cpp"
         "${INGE_PROJECT_ROOT}/src/documents/nothingdocuments.h"
         "${INGE_PROJECT_ROOT}/src/documents/nothingdocuments.cpp"
+        "${INGE_PROJECT_ROOT}/src/cpp/supabaserealtimechannel.h"
+        "${INGE_PROJECT_ROOT}/src/cpp/supabaserealtimechannel.cpp"
         "${INGE_PROJECT_ROOT}/src/documents/nothingfileops.h"
         "${INGE_PROJECT_ROOT}/src/documents/nothingfileops.cpp"
         "${INGE_PROJECT_ROOT}/betadiagnostics.h"
@@ -248,10 +301,16 @@ if(INGE_BUILD_MOBILE)
         "${INGE_PROJECT_ROOT}/src/cpp/renditionrepository.cpp"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionlocalstore.h"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionlocalstore.cpp"
+        "${INGE_PROJECT_ROOT}/src/cpp/renditionlocalstore_working.cpp"
+        "${INGE_PROJECT_ROOT}/src/cpp/renditionconnectivity.h"
+        "${INGE_PROJECT_ROOT}/src/cpp/renditionworkingcontract.h"
+        "${INGE_PROJECT_ROOT}/src/cpp/renditiondiagnostics.h"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionsynccontroller.h"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionsynccontroller.cpp"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionflutterbridge.h"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionflutterbridge.cpp"
+        "${INGE_PROJECT_ROOT}/src/cpp/renditionuicontroller.h"
+        "${INGE_PROJECT_ROOT}/src/cpp/renditionuicontroller.cpp"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionsnapshotexporter.h"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionsnapshotexporter.cpp"
         "${INGE_PROJECT_ROOT}/androidcalicataexporter.h"
@@ -263,26 +322,17 @@ if(INGE_BUILD_MOBILE)
         "${INGE_PROJECT_ROOT}/calicatacloudservice.cpp"
         "${INGE_PROJECT_ROOT}/dropboxbridge.h"
         "${INGE_PROJECT_ROOT}/dropboxbridge.cpp"
-        "${INGE_PROJECT_ROOT}/firstexperiencecontroller.h"
-        "${INGE_PROJECT_ROOT}/firstexperiencecontroller.cpp"
-        "${INGE_PROJECT_ROOT}/ingenarrator.h"
-        "${INGE_PROJECT_ROOT}/ingenarrator.cpp"
-        "${INGE_PROJECT_ROOT}/ingeexperienceaudio.h"
-        "${INGE_PROJECT_ROOT}/ingeexperienceaudio.cpp"
         "${INGE_PROJECT_ROOT}/flowhaptics.h"
         "${INGE_PROJECT_ROOT}/flowhaptics.cpp"
-        "${INGE_PROJECT_ROOT}/mapworkspacecontroller.h"
-        "${INGE_PROJECT_ROOT}/mapworkspacecontroller.cpp"
-        "${INGE_PROJECT_ROOT}/src/graphics/InGeGraphicsCore.h"
-        "${INGE_PROJECT_ROOT}/src/graphics/InGeGraphicsCore.cpp"
-        "${INGE_PROJECT_ROOT}/src/graphics/InGeGraphicsDiagnostics.h"
-        "${INGE_PROJECT_ROOT}/src/graphics/InGeGraphicsDiagnostics.cpp"
-        "${INGE_PROJECT_ROOT}/src/graphics/InGeEarthHostController.h"
-        "${INGE_PROJECT_ROOT}/src/graphics/InGeEarthHostController.cpp"
+        # Dock contextual: controladores originales (vista V2 en HomeScreen.qml).
         "${INGE_PROJECT_ROOT}/src/dock/DockContextController.h"
         "${INGE_PROJECT_ROOT}/src/dock/DockContextController.cpp"
         "${INGE_PROJECT_ROOT}/src/dock/DockCommandRouter.h"
         "${INGE_PROJECT_ROOT}/src/dock/DockCommandRouter.cpp"
+        "${INGE_PROJECT_ROOT}/src/graphics/InGeGraphicsCore.h"
+        "${INGE_PROJECT_ROOT}/src/graphics/InGeGraphicsCore.cpp"
+        "${INGE_PROJECT_ROOT}/src/graphics/InGeGraphicsDiagnostics.h"
+        "${INGE_PROJECT_ROOT}/src/graphics/InGeGraphicsDiagnostics.cpp"
     )
 
     # Falla temprano y con ruta de SOURCE clara, antes de qt_add_executable.
@@ -322,12 +372,13 @@ if(INGE_BUILD_MOBILE)
             "${INGE_PROJECT_ROOT}/docscontroller.h"
             "${INGE_PROJECT_ROOT}/docscontroller.cpp"
         )
+        add_subdirectory(src/retroplasma)
+        target_link_libraries(AppCalicatasMobile PRIVATE InGeRetroplasma InGeRetroplasmaplugin)
         if(WIN32)
             set_target_properties(AppCalicatasMobile PROPERTIES OUTPUT_NAME AppCalicatasDemo)
             if(MINGW)
                 set_source_files_properties(
                     "${CMAKE_CURRENT_BINARY_DIR}/.rcc/qmlcache/AppCalicatasMobile_qml/Mobile/Main_qml.cpp"
-                    "${CMAKE_CURRENT_BINARY_DIR}/.rcc/qmlcache/AppCalicatasMobile_qml/Mobile/pages/CalicataFormPage_qml.cpp"
                     PROPERTIES COMPILE_OPTIONS "-Wa,-mbig-obj")
             endif()
         endif()
@@ -393,34 +444,13 @@ if(INGE_BUILD_MOBILE)
             add_custom_target(inge_flutter_aar DEPENDS "${INGE_FLUTTER_RELEASE_AAR}")
             add_dependencies(AppCalicatasMobile inge_flutter_aar)
 
-            # Actual Gemini Live React sources; generated only when the user builds.
-            find_program(INGE_NPM_EXECUTABLE NAMES npm.cmd npm REQUIRED)
-            find_program(INGE_NODE_EXECUTABLE NAMES node.exe node REQUIRED)
-            file(GLOB_RECURSE INGE_AI_WEB_SOURCES CONFIGURE_DEPENDS
-                "${CMAKE_CURRENT_SOURCE_DIR}/android/web/inge-ai/src/*")
-            set(INGE_AI_WEB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android/web/inge-ai")
-            add_custom_command(
-                OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/android/assets/inge-ai/index.html"
-                COMMAND "${INGE_NODE_EXECUTABLE}" "${INGE_AI_WEB_DIR}/prepare-dependencies.mjs"
-                    --npm "${INGE_NPM_EXECUTABLE}"
-                COMMAND "${INGE_NPM_EXECUTABLE}" run build
-                WORKING_DIRECTORY "${INGE_AI_WEB_DIR}"
-                DEPENDS ${INGE_AI_WEB_SOURCES}
-                    "${INGE_AI_WEB_DIR}/package.json" "${INGE_AI_WEB_DIR}/package-lock.json"
-                    "${INGE_AI_WEB_DIR}/prepare-dependencies.mjs"
-                    "${INGE_AI_WEB_DIR}/index.html" "${INGE_AI_WEB_DIR}/vite.config.ts"
-                    "${CMAKE_CURRENT_SOURCE_DIR}/android/assets/cesium/ui/inge-earth-ui.css"
-                COMMENT "Generando Gemini Live Web Console para el paquete Android"
-                VERBATIM USES_TERMINAL)
-            add_custom_target(inge_ai_web_assets
-                DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/android/assets/inge-ai/index.html")
-            add_dependencies(AppCalicatasMobile inge_ai_web_assets)
+            # InGe+ IA sin interfaz (Visual Zero): sin consola web empaquetada.
 
             # ConfiguraciÃ³n Android para empaquetar APK/AAB con Qt 6.9.x
             set_property(TARGET AppCalicatasMobile PROPERTY
                 QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
             )
-            set_property(TARGET AppCalicatasMobile PROPERTY QT_ANDROID_ABIS "arm64-v8a")
+            set_property(TARGET AppCalicatasMobile PROPERTY QT_ANDROID_ABIS "${ANDROID_ABI}")
             set_property(TARGET AppCalicatasMobile PROPERTY
                 QT_ANDROID_PACKAGE_NAME "${INGE_ANDROID_PACKAGE_NAME}")
             set_property(TARGET AppCalicatasMobile PROPERTY QT_ANDROID_VERSION_CODE 122)
@@ -500,16 +530,15 @@ if(INGE_BUILD_MOBILE)
             Qt${QT_VERSION_MAJOR}::Qml
             Qt${QT_VERSION_MAJOR}::Quick
             Qt${QT_VERSION_MAJOR}::QuickControls2
-            Qt${QT_VERSION_MAJOR}::QuickDialogs2
-            Qt${QT_VERSION_MAJOR}::Location
             Qt${QT_VERSION_MAJOR}::Positioning
+            Qt${QT_VERSION_MAJOR}::Location
             Qt${QT_VERSION_MAJOR}::Concurrent
             Qt${QT_VERSION_MAJOR}::Xml
         )
 
         if(QT_VERSION_MAJOR GREATER_EQUAL 6)
-            target_include_directories(AppCalicatasMobile PRIVATE "${INGE_PROJECT_ROOT}/src/documents")
-            target_link_libraries(AppCalicatasMobile PRIVATE Qt6::QuickEffects Qt6::GuiPrivate)
+            target_include_directories(AppCalicatasMobile PRIVATE "${INGE_PROJECT_ROOT}/src/documents" "${INGE_PROJECT_ROOT}/src/cpp")
+            target_link_libraries(AppCalicatasMobile PRIVATE Qt6::GuiPrivate Qt6::QuickDialogs2)
         endif()
 
         if(ANDROID)
@@ -549,201 +578,143 @@ if(INGE_BUILD_MOBILE)
         # ============================
         set(MOBILE_QML_DIR "${CMAKE_CURRENT_SOURCE_DIR}/qml/Mobile")
 
+        # Visual Zero (2026-10-10): sin interfaz. Raiz minima + logica de dominio.
         set(MOBILE_QML_FILES
             "${MOBILE_QML_DIR}/Main.qml"
-            "${MOBILE_QML_DIR}/documents/NothingDocumentsRoot.qml"
-            "${MOBILE_QML_DIR}/documents/NothingIcon.qml"
+            "${MOBILE_QML_DIR}/AuroraField.qml"
+            "${MOBILE_QML_DIR}/HomeScreen.qml"
+            "${MOBILE_QML_DIR}/RetroplasmaEarthView.qml"
+            "${MOBILE_QML_DIR}/EarthDocumentSheet.qml"
+            "${MOBILE_QML_DIR}/EarthGlassAction.qml"
+            "${MOBILE_QML_DIR}/AddToolPanel.qml"
+            "${MOBILE_QML_DIR}/GlassSurface.qml"
+            # Calicatas: editor original restaurado y sus dependencias reales.
+            "${MOBILE_QML_DIR}/CalicataSaveOpenDialog.qml"
+            "${MOBILE_QML_DIR}/components/FlowIcon.qml"
             "${MOBILE_QML_DIR}/documents/NothingButton.qml"
+            "${MOBILE_QML_DIR}/documents/NothingDocumentsRoot.qml"
             "${MOBILE_QML_DIR}/documents/NothingEntry.qml"
-            "${MOBILE_QML_DIR}/AppShell.qml"
-            "${MOBILE_QML_DIR}/HeaderBar.qml"
-            "${MOBILE_QML_DIR}/BottomNav.qml"
-            "${MOBILE_QML_DIR}/GlobalSearchOverlay.qml"
+            "${MOBILE_QML_DIR}/documents/NothingIcon.qml"
+            "${MOBILE_QML_DIR}/flowcore/ContextPublisher.qml"
+            "${MOBILE_QML_DIR}/flowcore/FlowAccessibility.qml"
+            "${MOBILE_QML_DIR}/flowcore/FlowBusyIndicator.qml"
             "${MOBILE_QML_DIR}/flowcore/FlowColors.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowTypography.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowSpacing.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowRadius.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowElevation.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowMetrics.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowOpacity.qml"
             "${MOBILE_QML_DIR}/flowcore/FlowDuration.qml"
             "${MOBILE_QML_DIR}/flowcore/FlowEasing.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowSpring.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowTheme.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowVariant.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowState.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowMotion.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowGesture.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowAccessibility.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowPerformance.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowRipple.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowBusyIndicator.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowThreeBalls.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowProgressRing.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowFocusRing.qml"
+            "${MOBILE_QML_DIR}/flowcore/FlowElevation.qml"
             "${MOBILE_QML_DIR}/flowcore/FlowGlassSurface.qml"
-            "${MOBILE_QML_DIR}/flowcore/LiquidGlassSurface.qml"
-            "${MOBILE_QML_DIR}/flowcore/GlobalContextDock.qml"
-            "${MOBILE_QML_DIR}/flowcore/ContextPublisher.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowSurface.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowText.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowButton.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowCard.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowField.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowTab.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowToolbar.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowSection.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowPage.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowSheet.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowDialog.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowGlassButton.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowGlassCard.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowDeepPressArea.qml"
-            "${MOBILE_QML_DIR}/flowcore/FlowQuickBubble.qml"
+            "${MOBILE_QML_DIR}/flowcore/FlowMetrics.qml"
+            "${MOBILE_QML_DIR}/flowcore/FlowMotion.qml"
+            "${MOBILE_QML_DIR}/flowcore/FlowOpacity.qml"
+            "${MOBILE_QML_DIR}/flowcore/FlowPerformance.qml"
+            "${MOBILE_QML_DIR}/flowcore/FlowProgressRing.qml"
+            "${MOBILE_QML_DIR}/flowcore/FlowRadius.qml"
+            "${MOBILE_QML_DIR}/flowcore/FlowRipple.qml"
+            "${MOBILE_QML_DIR}/flowcore/FlowSpacing.qml"
+            "${MOBILE_QML_DIR}/flowcore/FlowSpring.qml"
+            "${MOBILE_QML_DIR}/flowcore/FlowState.qml"
+            "${MOBILE_QML_DIR}/flowcore/FlowTheme.qml"
+            "${MOBILE_QML_DIR}/flowcore/FlowThreeBalls.qml"
+            "${MOBILE_QML_DIR}/flowcore/FlowTypography.qml"
+            "${MOBILE_QML_DIR}/flowcore/FlowVariant.qml"
             "${MOBILE_QML_DIR}/flowcore/ImeAwareFlickable.qml"
-            "${MOBILE_QML_DIR}/onboarding/FirstExperience.qml"
-            "${MOBILE_QML_DIR}/onboarding/ExperienceScene.qml"
-            "${MOBILE_QML_DIR}/onboarding/AnimatedGreeting.qml"
-            "${MOBILE_QML_DIR}/onboarding/MorphingPlus.qml"
-            "${MOBILE_QML_DIR}/onboarding/ExperienceCard.qml"
-            "${MOBILE_QML_DIR}/onboarding/OnboardingProgress.qml"
-            "${MOBILE_QML_DIR}/onboarding/PremiumBackdrop.qml"
-            "${MOBILE_QML_DIR}/onboarding/SceneTitle.qml"
-            "${MOBILE_QML_DIR}/onboarding/HeroIllustration.qml"
-            "${MOBILE_QML_DIR}/onboarding/PremiumGlassCard.qml"
-            "${MOBILE_QML_DIR}/onboarding/NarrationWave.qml"
-            "${MOBILE_QML_DIR}/onboarding/PhoneDemoFrame.qml"
-            "${MOBILE_QML_DIR}/onboarding/BrandFooter.qml"
-            "${MOBILE_QML_DIR}/onboarding/scenes/WelcomeScene.qml"
-            "${MOBILE_QML_DIR}/onboarding/scenes/CommitmentScene.qml"
-            "${MOBILE_QML_DIR}/onboarding/scenes/LanguageScene.qml"
-            "${MOBILE_QML_DIR}/onboarding/scenes/PersonalizationScene.qml"
-            "${MOBILE_QML_DIR}/onboarding/scenes/MotionLabScene.qml"
-            "${MOBILE_QML_DIR}/onboarding/scenes/HomeTourScene.qml"
-            "${MOBILE_QML_DIR}/onboarding/scenes/CreateTourScene.qml"
-            "${MOBILE_QML_DIR}/onboarding/scenes/MapTourScene.qml"
-            "${MOBILE_QML_DIR}/onboarding/scenes/OfflineScene.qml"
-            "${MOBILE_QML_DIR}/onboarding/scenes/DocumentsScene.qml"
-            "${MOBILE_QML_DIR}/onboarding/scenes/PrivacyScene.qml"
-            "${MOBILE_QML_DIR}/onboarding/scenes/ReadyScene.qml"
-            "${MOBILE_QML_DIR}/components/AppButton.qml"
-            "${MOBILE_QML_DIR}/components/AppCard.qml"
-            "${MOBILE_QML_DIR}/components/AppLoadingOverlay.qml"
-            "${MOBILE_QML_DIR}/components/AppModuleCard.qml"
-            "${MOBILE_QML_DIR}/components/AppPhotoSlot.qml"
-            "${MOBILE_QML_DIR}/components/AppStatusChip.qml"
-            "${MOBILE_QML_DIR}/components/CircularAvatar.qml"
-            "${MOBILE_QML_DIR}/components/FlowIcon.qml"
-            "${MOBILE_QML_DIR}/components/FlowIconButton.qml"
-            "${MOBILE_QML_DIR}/components/BotonFlotante.qml"
-            "${MOBILE_QML_DIR}/components/ModuloCard.qml"
-            "${MOBILE_QML_DIR}/lib/GpsBus.js"
-            "${MOBILE_QML_DIR}/lib/CalicataRules.js"
-            "${MOBILE_QML_DIR}/lib/CalicataExcelImport.js"
-            "${MOBILE_QML_DIR}/lib/CalicataElevation.js"
             "${MOBILE_QML_DIR}/lib/IconCatalog.js"
             "${MOBILE_QML_DIR}/lib/PropACalicataIconMap.js"
-            "${MOBILE_QML_DIR}/lib/UiV2Resources.js"
-            "${MOBILE_QML_DIR}/lib/UiV2Theme.js"
-            "${MOBILE_QML_DIR}/pages/HomePage.qml"
-            "${MOBILE_QML_DIR}/pages/HomePageContent.qml"
-            "${MOBILE_QML_DIR}/pages/HomePagePhase1.qml"
-            "${MOBILE_QML_DIR}/pages/LoginPage.qml"
-            "${MOBILE_QML_DIR}/pages/LoginPageForm.qml"
-            "${MOBILE_QML_DIR}/pages/MapPage.qml"
-            "${MOBILE_QML_DIR}/pages/MapPageContent.qml"
-            "${MOBILE_QML_DIR}/pages/MapWorkspacePage.qml"
-            "${MOBILE_QML_DIR}/pages/MapNativePage.qml"
-            "${MOBILE_QML_DIR}/pages/ProfilePage.qml"
-            "${MOBILE_QML_DIR}/pages/ProfilePageContent.qml"
-            "${MOBILE_QML_DIR}/pages/RegisterPage.qml"
-            "${MOBILE_QML_DIR}/pages/RegisterPageForm.qml"
-            "${MOBILE_QML_DIR}/pages/CalicatasEditorPage.qml"
             "${MOBILE_QML_DIR}/pages/CalicataFormPage.qml"
-            "${MOBILE_QML_DIR}/pages/CalicataReview.qml"
-            "${MOBILE_QML_DIR}/pages/CalicataLiquidGlass.qml"
-            "${MOBILE_QML_DIR}/pages/CalicataProfile.qml"
-            "${MOBILE_QML_DIR}/pages/CalicataPointPicker.qml"
-            "${MOBILE_QML_DIR}/pages/CalicataPhotoEditor.qml"
             "${MOBILE_QML_DIR}/pages/CalicataOperationOverlay.qml"
-            "${MOBILE_QML_DIR}/pages/Phase54CalicataOverview.qml"
-            "${MOBILE_QML_DIR}/CalicataSaveOpenDialog.qml"
+            "${MOBILE_QML_DIR}/pages/CalicataPhotoEditor.qml"
+            "${MOBILE_QML_DIR}/pages/CalicataPointPicker.qml"
+            "${MOBILE_QML_DIR}/pages/CalicataProfile.qml"
+            "${MOBILE_QML_DIR}/pages/CalicataReview.qml"
+            "${MOBILE_QML_DIR}/pages/CalicataSurface.qml"
+            "${MOBILE_QML_DIR}/pages/CalicatasEditorPage.qml"
+            "${MOBILE_QML_DIR}/pages/CalicatasHome.qml"
+            "${MOBILE_QML_DIR}/pages/CalicatasTopoMap.qml"
+            "${MOBILE_QML_DIR}/lib/CalicataRules.js"
+            "${MOBILE_QML_DIR}/lib/CalicataElevation.js"
+            "${MOBILE_QML_DIR}/lib/CalicataExcelImport.js"
+            "${MOBILE_QML_DIR}/lib/GpsBus.js"
+            "${MOBILE_QML_DIR}/lib/CalicataFormLogic.js"
+            "${MOBILE_QML_DIR}/lib/CalicataWorkspaceLogic.js"
+            "${MOBILE_QML_DIR}/lib/CalicataDiagnostics.js"
+            "${MOBILE_QML_DIR}/lib/AccountText.js"
+            "${MOBILE_QML_DIR}/lib/PhotoEditSchema.js"
+            # Rendiciones: subapp QML nativa (RenditionsUi -> RenditionFlutterBridge).
+            "${MOBILE_QML_DIR}/renditions/RStyle.js"
+            "${MOBILE_QML_DIR}/renditions/RButton.qml"
+            "${MOBILE_QML_DIR}/renditions/RField.qml"
+            "${MOBILE_QML_DIR}/renditions/RSelect.qml"
+            "${MOBILE_QML_DIR}/renditions/RDateField.qml"
+            "${MOBILE_QML_DIR}/renditions/RChip.qml"
+            "${MOBILE_QML_DIR}/renditions/RBadge.qml"
+            "${MOBILE_QML_DIR}/renditions/RCard.qml"
+            "${MOBILE_QML_DIR}/renditions/RConfirm.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionsApp.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionsHome.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionEditor.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionDetail.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionExpenses.qml"
+            "${MOBILE_QML_DIR}/renditions/ExpenseEditor.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionFinancial.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionDocuments.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionReview.qml"
+            "${MOBILE_QML_DIR}/renditions/ReviewPanel.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionReceived.qml"
+            "${MOBILE_QML_DIR}/renditions/RendicionesSyncAura.qml"
+            "${MOBILE_QML_DIR}/renditions/RendicionesSyncStars.qml"
+            "${MOBILE_QML_DIR}/renditions/RendicionesSyncBackdrop.qml"
+            "${MOBILE_QML_DIR}/renditions/RGlassMenu.qml"
+            "${MOBILE_QML_DIR}/renditions/RMenuItem.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionCard.qml"
+            "${MOBILE_QML_DIR}/renditions/FilesBrowser.qml"
+            "${MOBILE_QML_DIR}/renditions/RConfetti.qml"
+            "${MOBILE_QML_DIR}/renditions/RenditionsDiagnostics.qml"
+            "${MOBILE_QML_DIR}/renditions/RExpenseQuickForm.qml"
+            "${MOBILE_QML_DIR}/renditions/REditableTile.qml"
+            "${MOBILE_QML_DIR}/renditions/RPackedLayout.qml"
+            "${MOBILE_QML_DIR}/settings/SettingsApp.qml"
+            "${MOBILE_QML_DIR}/settings/SettingsPage.qml"
+            "${MOBILE_QML_DIR}/settings/SettingsGroup.qml"
+            "${MOBILE_QML_DIR}/settings/SettingsRow.qml"
+            "${MOBILE_QML_DIR}/settings/SettingsSwitch.qml"
+            "${MOBILE_QML_DIR}/assistant/InGeAssistantSheet.qml"
+            "${MOBILE_QML_DIR}/assistant/InGeAssistantController.qml"
         )
 
-        # Recursos del mÃ³dulo QML.
-        # IMPORTANTE:
-        # CalicataFormPage.qml carga:
-        #     qrc:/InGe/Mobile/images/camera_thin_dark.svg
-        # Por eso el recurso debe quedar con alias:
-        #     images/camera_thin_dark.svg
-        # dentro del mÃ³dulo URI InGe.Mobile.
-        set(COREFLOW_SINGLETON_RESOURCES
+        # Acceso (Login V1): tipografia corporativa Rubik (SIL OFL) y simbolo
+        # InGe+ en blanco (scripts/make_white_symbol.py).
+        set(MOBILE_QML_RESOURCES
+            "${MOBILE_QML_DIR}/fonts/Rubik-Light.ttf"
+            "${MOBILE_QML_DIR}/fonts/Rubik-Regular.ttf"
+            "${MOBILE_QML_DIR}/fonts/Rubik-SemiBold.ttf"
+            "${MOBILE_QML_DIR}/fonts/OFL.txt"
+            "${MOBILE_QML_DIR}/assets/inge_symbol_white.png"
+            # Home V1: iconos Lucide (ISC) y fotografias de campo originales.
+            "${MOBILE_QML_DIR}/fonts/lucide/Lucide-w300.ttf"
+            "${MOBILE_QML_DIR}/fonts/lucide/LICENSE"
+            "${MOBILE_QML_DIR}/assets/home/field_01.webp"
+            "${MOBILE_QML_DIR}/assets/home/field_02.webp"
+            "${MOBILE_QML_DIR}/assets/home/field_03.webp"
+            "${MOBILE_QML_DIR}/assets/space/space_bg.webp"
+            "${MOBILE_QML_DIR}/assets/space/galaxy.webp"
+            "${MOBILE_QML_DIR}/assets/space/space_bg_light.webp"
+            "${MOBILE_QML_DIR}/assets/space/galaxy_light.webp"
+            "${MOBILE_QML_DIR}/assets/space/accretion.webp"
+            # InGe.CoreFlow 3.0: singletons registrados desde main_mobile.cpp.
             "${MOBILE_QML_DIR}/flowcore/InGeCoreFlow.qml"
             "${MOBILE_QML_DIR}/flowcore/FlowIcons.qml"
             "${MOBILE_QML_DIR}/flowcore/InGeIconLibrary.qml"
         )
-
-        set(MOBILE_QML_RESOURCES)
-        foreach(_coreflow_singleton IN LISTS COREFLOW_SINGLETON_RESOURCES)
-            file(RELATIVE_PATH _coreflow_alias
-                "${MOBILE_QML_DIR}" "${_coreflow_singleton}")
-            set_source_files_properties("${_coreflow_singleton}" PROPERTIES
-                QT_RESOURCE_ALIAS "${_coreflow_alias}"
-            )
-            list(APPEND MOBILE_QML_RESOURCES "${_coreflow_singleton}")
-        endforeach()
-
-        # Recursos usados por Main.qml: icons/*.png, fondos, logos, SVG, etc.
-        # Sin esto, Android puede compilar pero la interfaz queda sin imÃ¡genes/fondos.
-        file(GLOB_RECURSE MOBILE_EXTRA_RESOURCES CONFIGURE_DEPENDS
+        # Recursos del editor de Calicatas (rutas qrc:/InGe/Mobile/icons, images, documents/assets).
+        file(GLOB_RECURSE MOBILE_CALICATAS_RESOURCES CONFIGURE_DEPENDS
             "${MOBILE_QML_DIR}/icons/*"
             "${MOBILE_QML_DIR}/images/*"
-            "${MOBILE_QML_DIR}/onboarding/assets/*"
-            "${MOBILE_QML_DIR}/documents/assets/*"
-        )
-        foreach(_res IN LISTS MOBILE_EXTRA_RESOURCES)
-            if(NOT IS_DIRECTORY "${_res}")
-                file(RELATIVE_PATH _res_alias "${MOBILE_QML_DIR}" "${_res}")
-                set_source_files_properties("${_res}" PROPERTIES QT_RESOURCE_ALIAS "${_res_alias}")
-                list(APPEND MOBILE_QML_RESOURCES "${_res}")
-            endif()
-        endforeach()
+            "${MOBILE_QML_DIR}/documents/assets/*")
+        list(APPEND MOBILE_QML_RESOURCES ${MOBILE_CALICATAS_RESOURCES})
+        list(REMOVE_DUPLICATES MOBILE_QML_RESOURCES)
 
-        set(MOBILE_CAMERA_ICON "")
-        set(MOBILE_CAMERA_ICON_CANDIDATES
-            "${MOBILE_QML_DIR}/images/camera_thin_dark.svg"
-            "${MOBILE_QML_DIR}/icons/camera_thin_dark.svg"
-            "${CMAKE_CURRENT_SOURCE_DIR}/images/camera_thin_dark.svg"
-            "${CMAKE_CURRENT_SOURCE_DIR}/icons/images/camera_thin_dark.svg"
-            "${MOBILE_QML_DIR}/images/camera.svg"
-            "${CMAKE_CURRENT_SOURCE_DIR}/icons/images/camera.svg"
-        )
-
-        foreach(_camera_candidate IN LISTS MOBILE_CAMERA_ICON_CANDIDATES)
-            if(EXISTS "${_camera_candidate}")
-                set(MOBILE_CAMERA_ICON "${_camera_candidate}")
-                break()
-            endif()
-        endforeach()
-
-        if(MOBILE_CAMERA_ICON)
-            list(APPEND MOBILE_QML_RESOURCES "${MOBILE_CAMERA_ICON}")
-
-            # Fuerza exactamente esta ruta:
-            # qrc:/InGe/Mobile/images/camera_thin_dark.svg
-            set_source_files_properties("${MOBILE_CAMERA_ICON}" PROPERTIES
-                QT_RESOURCE_ALIAS "images/camera_thin_dark.svg"
-            )
-        else()
-            message(WARNING
-                "No se encontro camera_thin_dark.svg ni camera.svg. "
-                "Copia el icono a qml/Mobile/images/camera_thin_dark.svg "
-                "o corrige root.icCamera en CalicataFormPage.qml."
-            )
-        endif()
-
-        # Alias para QML: Main.qml, pages/CalicataFormPage.qml, lib/GpsBus.js, etc.
-        foreach(f IN LISTS MOBILE_QML_FILES)
+        # Alias para QML: Main.qml y lib/*.js (C++ lee lib/CalicataRules.js del modulo).
+        foreach(f IN LISTS MOBILE_QML_FILES MOBILE_QML_RESOURCES)
             file(RELATIVE_PATH rel "${MOBILE_QML_DIR}" "${f}")
             set_source_files_properties("${f}" PROPERTIES QT_RESOURCE_ALIAS "${rel}")
         endforeach()
@@ -774,111 +745,49 @@ if(INGE_BUILD_MOBILE)
             QT_QML_IMPORT_PATH "${CMAKE_CURRENT_BINARY_DIR}")
         # INGE_CPP_QMLDIR_FIX_V5_END
 
+
         # InGe.CoreFlow 3.0 se registra en main_mobile.cpp desde sus fuentes QML.
-        # Esta copia de herramientas describe el mismo modulo para qmlcachegen
-        # y qmlimportscanner; no crea otra instancia ni se empaqueta en el APK.
-        set(_COREFLOW_QML_TOOL_ROOT
-            "${CMAKE_CURRENT_BINARY_DIR}/InGe/CoreFlow")
+        # Esta copia de herramientas (igual que antes de Visual Zero) describe el
+        # mismo modulo para qmlcachegen/qmlimportscanner; no crea otra instancia.
+        set(_COREFLOW_QML_TOOL_ROOT "${CMAKE_CURRENT_BINARY_DIR}/InGe/CoreFlow")
         file(MAKE_DIRECTORY "${_COREFLOW_QML_TOOL_ROOT}")
-
-        set(_COREFLOW_QML_TOOL_TYPES
-            InGeCoreFlow
-            FlowIcons
-            InGeIconLibrary
-            FlowColors
-            FlowTypography
-            FlowSpacing
-            FlowRadius
-            FlowElevation
-            FlowMetrics
-            FlowOpacity
-            FlowDuration
-            FlowEasing
-            FlowSpring
-            FlowTheme
-            FlowVariant
-            FlowState
-            FlowAccessibility
-            FlowPerformance
-            FlowMotion
-        )
-
-        foreach(_coreflow_tool_type IN LISTS _COREFLOW_QML_TOOL_TYPES)
-            configure_file(
-                "${MOBILE_QML_DIR}/flowcore/${_coreflow_tool_type}.qml"
-                "${_COREFLOW_QML_TOOL_ROOT}/${_coreflow_tool_type}.qml"
-                COPYONLY
-            )
+        foreach(_coreflow_tool_type IN ITEMS InGeCoreFlow FlowIcons InGeIconLibrary)
+            configure_file("${MOBILE_QML_DIR}/flowcore/${_coreflow_tool_type}.qml"
+                           "${_COREFLOW_QML_TOOL_ROOT}/${_coreflow_tool_type}.qml" COPYONLY)
         endforeach()
-
         file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/InGe/lib")
-        configure_file(
-            "${MOBILE_QML_DIR}/lib/IconCatalog.js"
-            "${CMAKE_CURRENT_BINARY_DIR}/InGe/lib/IconCatalog.js"
-            COPYONLY
-        )
-
-        string(CONCAT _COREFLOW_QMLDIR_TEXT
+        configure_file("${MOBILE_QML_DIR}/lib/IconCatalog.js"
+                       "${CMAKE_CURRENT_BINARY_DIR}/InGe/lib/IconCatalog.js" COPYONLY)
+        file(WRITE "${_COREFLOW_QML_TOOL_ROOT}/qmldir"
             "module InGe.CoreFlow\n"
             "singleton InGeCoreFlow 3.0 InGeCoreFlow.qml\n"
             "singleton FlowIcons 3.0 FlowIcons.qml\n"
-            "singleton InGeIconLibrary 3.0 InGeIconLibrary.qml\n"
-        )
-        foreach(_coreflow_tool_type IN LISTS _COREFLOW_QML_TOOL_TYPES)
-            if(NOT _coreflow_tool_type STREQUAL "InGeCoreFlow"
-               AND NOT _coreflow_tool_type STREQUAL "FlowIcons"
-               AND NOT _coreflow_tool_type STREQUAL "InGeIconLibrary")
-                string(APPEND _COREFLOW_QMLDIR_TEXT
-                    "${_coreflow_tool_type} 3.0 ${_coreflow_tool_type}.qml\n")
-            endif()
-        endforeach()
-        file(WRITE
-            "${_COREFLOW_QML_TOOL_ROOT}/qmldir"
-            "${_COREFLOW_QMLDIR_TEXT}"
+            "singleton InGeIconLibrary 3.0 InGeIconLibrary.qml\n")
+
+        qt_add_qml_module(AppCalicatasMobile
+            URI InGe.Mobile
+            VERSION 1.0
+            RESOURCE_PREFIX /
+            QML_FILES
+                ${MOBILE_QML_FILES}
+            RESOURCES
+                ${MOBILE_QML_RESOURCES}
+            SOURCES
+                calicatadocument.h calicatadocument.cpp
+                docsops.h
+                src/documents/nothingdocuments.h
+                src/cpp/supabaserealtimechannel.h
+                fsutil.h fsutil.cpp
         )
 
-        if(MOBILE_QML_RESOURCES)
-            list(REMOVE_DUPLICATES MOBILE_QML_RESOURCES)
-            qt_add_qml_module(AppCalicatasMobile
-                URI InGe.Mobile
-                VERSION 1.0
-                RESOURCE_PREFIX /
-                QML_FILES
-                    ${MOBILE_QML_FILES}
-                RESOURCES
-                    ${MOBILE_QML_RESOURCES}
-                SOURCES
-                    calicatadocument.h calicatadocument.cpp
-                    docsops.h
-                    src/documents/nothingdocuments.h
-                    fsutil.h fsutil.cpp
-            )
-        else()
-            qt_add_qml_module(AppCalicatasMobile
-                URI InGe.Mobile
-                VERSION 1.0
-                RESOURCE_PREFIX /
-                QML_FILES
-                    ${MOBILE_QML_FILES}
-                SOURCES
-                    calicatadocument.h calicatadocument.cpp
-                    docsops.h
-                    src/documents/nothingdocuments.h
-                    fsutil.h fsutil.cpp
-            )
-        endif()
-
-        # Dock glass material (liquidglass.frag -> .qsb in the module resources).
-        qt_add_shaders(AppCalicatasMobile "inge_dock_glass_shaders"
-            PREFIX "/InGe/Mobile/shaders"
-            BASE "qml/Mobile/shaders"
-            # No GLSL override: ShaderEffect links this fragment stage with Qt's
-            # built-in vertex stage, which only ships the default variants
-            # (100 es,120,150). Adding "300 es" here made GLES 3 drivers pick
-            # 300 es for the fragment and 100 es for the vertex, and Mali
-            # rejects that program ("L0001 Shader languages do not match").
+        # Aurora del acceso: shader GPU compilado con qsb (Qt ShaderTools).
+        find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS ShaderTools)
+        qt_add_shaders(AppCalicatasMobile "inge_access_shaders"
+            PREFIX "/InGe/Mobile"
+            BASE "${MOBILE_QML_DIR}"
             FILES
-                qml/Mobile/shaders/liquidglass.frag
+                "${MOBILE_QML_DIR}/shaders/aurora.frag"
+                "${MOBILE_QML_DIR}/shaders/glass.frag"
         )
 
         if(ANDROID)
@@ -894,38 +803,11 @@ if(INGE_BUILD_MOBILE)
         # ---------------------------------------------------------
         # V35.1 QML MODULE SOURCE OF TRUTH:
         # All mobile QML is packaged exactly once by qt_add_qml_module()
-        # under URI InGe.Mobile. The old resources_mobile_raw.qrc is kept
-        # in the repository only as historical material and is NOT linked.
+        # under URI InGe.Mobile (Visual Zero: Main.qml minimo + lib/*.js).
         # This prevents duplicate QML copies and ambiguous URI resolution.
         # ---------------------------------------------------------
         message(STATUS "InGe+ V35.1 single QML module enabled: InGe.Mobile")
 
-        # ---------------------------------------------------------
-        # FASE 5.4: recursos reales Propuesta A usados por Fichas.
-        # Mantiene prefijo QRC oficial: qrc:/ui/ingeplus/propuesta_a/...
-        # ---------------------------------------------------------
-        set(INGE_PROPA_F54_QRC "${CMAKE_CURRENT_SOURCE_DIR}/resources/ui/InGePlus_UI_Resources_PropuestaA_Fase54/fase54_iconos_reales_propuesta_a.qrc")
-        if(EXISTS "${INGE_PROPA_F54_QRC}")
-            target_sources(AppCalicatasMobile PRIVATE "${INGE_PROPA_F54_QRC}")
-            message(STATUS "InGe+ Fase 5.4 UI resources enabled: ${INGE_PROPA_F54_QRC}")
-        else()
-            message(WARNING "No se encontro fase54_iconos_reales_propuesta_a.qrc. Los iconos Propuesta A no cargaran.")
-        endif()
-
-
-        # ---------------------------------------------------------
-        # FASE UI 02: recursos limpios para nueva interfaz.
-        # Prefijo QRC estable: qrc:/ui/v2/...
-        # Todos los archivos referenciados existen como placeholders
-        # para evitar errores por rutas faltantes durante la implementaciÃ³n.
-        # ---------------------------------------------------------
-        set(INGE_UI_V2_QRC "${CMAKE_CURRENT_SOURCE_DIR}/resources_mobile_ui_v2.qrc")
-        if(EXISTS "${INGE_UI_V2_QRC}")
-            target_sources(AppCalicatasMobile PRIVATE "${INGE_UI_V2_QRC}")
-            message(STATUS "InGe+ UI V2 clean resources enabled: ${INGE_UI_V2_QRC}")
-        else()
-            message(WARNING "No se encontro resources_mobile_ui_v2.qrc. Los recursos UI V2 no cargaran.")
-        endif()
 
         # ---------------------------------------------------------
         # OpenSSL Android para HTTPS/Supabase.

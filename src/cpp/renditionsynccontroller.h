@@ -26,12 +26,20 @@ signals:
     void busyChanged();
     void lastErrorChanged();
     void syncFinished(int remaining);
-    void syncStopped(const QString &state, const QString &message);
+    // state = estado aplicado a la operación; code = causa real (transporte, CAS, permisos…).
+    void syncStopped(const QString &state, const QString &code, const QString &message);
+    // El entorno no tiene el contrato Working (PGRST202): borradores sólo locales.
+    void workingContractMissing();
 
 private:
     void processNext();
     void finishCurrent(const QVariantMap &remote);
     void failCurrent(const QString &code, const QString &message);
+    // Working Document: guardado -> sustentos -> registro/descarte (mismo outbox).
+    void processWorking();
+    void nextWorkingSource();
+    void failWorking(const QString &code, const QString &message);
+    void continueQueue();
     void setBusy(bool busy);
     void setLastError(const QString &message);
 

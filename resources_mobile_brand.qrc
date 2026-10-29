@@ -1,0 +1,20 @@
+<RCC>
+    <!-- Mobile Calicatas only: retain QRC aliases used by exporter and photographs. -->
+    <!-- Desktop retains the original resources.qrc file unchanged. -->
+    <qresource prefix="/images">
+        <file alias="ICONO_LOGO_MTC.jpeg">images/ICONO_LOGO_MTC.jpeg</file>
+        <file alias="INGEMA_LOGO_COMPLETO.png">images/INGEMA_LOGO_COMPLETO.png</file>
+        <file alias="INGEMA_CONSULTORES_LOGO.png">images/INGEMA_CONSULTORES_LOGO.png</file>
+        <file alias="INGEMA_CONSULTORES_LOGO_NEGATIVO.png">images/INGEMA_CONSULTORES_LOGO_NEGATIVO.png</file>
+        <file alias="HVA_GROUP_LOGO.png">images/HVA_GROUP_LOGO.png</file>
+        <file alias="HVA_GROUP_LOGO_NEGATIVO.png">images/HVA_GROUP_LOGO_NEGATIVO.png</file>
+        <file alias="INGEPLUS_LOGO_2026.png">images/INGEPLUS_LOGO_2026.png</file>
+        <file alias="default_avatar_men.png">images/default_avatar_men.png</file>
+    </qresource>
+    <!-- Semilla de InGe Drive › Recursos (DocsController/DocsOps): mismos archivos
+         y misma ruta :/Logos/images/... que el Desktop (resources.qrc). -->
+    <qresource prefix="/Logos">
+        <file>images/ICONO_LOGO_MTC.jpeg</file>
+        <file>images/aldesa_logo.png</file>
+    </qresource>
+</RCC>

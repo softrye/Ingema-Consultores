@@ -1,4 +1,5 @@
 #include "src/cpp/renditionlocalstore.h"
+#include "src/cpp/renditioncontract.h"
 #include "src/cpp/renditionsnapshotexporter.h"
 #include "xlsxdocument.h"
 #include <QGuiApplication>
@@ -8,6 +9,8 @@
 #include <QDir>
 #include <QUuid>
 #include <QTemporaryDir>
+#include <QDateTime>
+#include <QTimeZone>
 #include <QFileInfo>
 #include <iostream>
 #include <cstdlib>
@@ -22,8 +25,8 @@ int main(int argc, char **argv) {
  auto local=store.createDraft("2026-09-01","2026-09-30",{"p1"},"p1","folder","space",true);
  check(!local.isEmpty(), "persist draft");
  check(!store.presentationBlocker(local).isEmpty(), "invalid presentation blocked");
- check(store.markRenditionSynced(local,{{"rendition_id",rid},{"visible_code","RDC-2026-000007"},{"row_version",1}}), "remote rendition identity");
- QVariantMap expense{{"projectId","p1"},{"expenseDate","2026-09-08"},{"categoryCode","FOOD"},{"currencyCode","PEN"},{"amount","10.00"},{"concept","Lunch"},{"beneficiary","Provider"},{"paymentMethodCode","CASH"},{"supportTypeCode","RECEIPT"}};
+ check(store.markRenditionSynced(local,{{"rendition_id",rid},{"visible_code","RDC-2026-000007"},{"row_version",1},{"can_edit_content",true}}), "remote rendition identity and effective capability");
+ QVariantMap expense{{"projectId","p1"},{"expenseDate","2026-09-08"},{"categoryCode","FOOD"},{"currencyCode","PEN"},{"amount","10.00"},{"concept","Almuerzo de campo"},{"beneficiary","Provider"},{"paymentMethodCode","CASH"},{"supportTypeCode","RECEIPT"}};
  auto child=store.addLocalExpense(local,expense,true); check(!child.isEmpty(),"persist expense");
  check(store.markExpenseSynced(local,child,{{"expense_id",eid},{"row_version",1},{"rendition_row_version",2}}),"remote expense");
  expense.insert("amount","20.00"); check(store.saveLocalExpense(local,child,expense,true),"edit same expense");
@@ -109,11 +112,57 @@ int main(int argc, char **argv) {
  check(reopened.addLocalExpense(local,expense).isEmpty(),"presented create blocked");
  check(!reopened.saveLocalExpense(local,child,expense),"presented edit blocked");
  check(reopened.addLocalAttachment(local,child,{{"sizeBytes",1}}).isEmpty(),"presented attachment mutation blocked");
+
+ check(reopened.markRenditionPresented(local,{{"rendition_id",rid},{"status","EN_REVISION"},{"row_version",5},{"version_number",1},{"version_id","version-1"}}),"canonical v02 presentation accepted");
+ check(reopened.rendition(local).value("status")=="EN_REVISION","four-state response retained");
+ check(reopened.addLocalExpense(local,expense).isEmpty(),"EN_REVISION remains immutable");
+
+ // Financial intentions use the actual persistent native store, not a fake queue.
+ const auto moneyScope=QUuid::createUuid().toString();
+ RenditionLocalStore money(moneyScope);
+ const auto ml=money.createDraft("2026-09-01","2026-09-30",{"p1"},"p1","folder","space");
+ check(money.markRenditionSynced(ml,{{"rendition_id",rid},{"row_version",1},{"can_edit_content",true}}),"financial remote identity");
+ check(!money.saveFinancial(ml,"funding_set",{{"enabled",true},{"pen","-1"},{"usd","0"}},1),"negative fund rejected");
+ check(money.saveFinancial(ml,"funding_set",{{"enabled",true},{"pen","0"},{"usd","100"}},1),"PEN/USD fund queued");
+ const auto fund=money.pendingOperations().first().toMap();const auto request=fund.value("requestId").toString();
+ check(fund.value("kind")=="funding_set" && !QUuid(request).isNull(),"financial UUID intention");
+ check(!money.saveFinancial(ml,"funding_set",{{"enabled",true},{"pen","200"},{"usd","0"}},1),"cannot replace an unconfirmed intention");
+ check(money.markFinancialState(ml,"funding_set",request,"SYNCING"),"financial dispatch persisted");
+ const auto immutable=money.outbox().last().toMap().value("payloadHash");
+ RenditionLocalStore restartedMoney(moneyScope);
+ const auto retry=restartedMoney.pendingOperations().first().toMap();
+ check(retry.value("requestId")==request && retry.value("expectedRowVersion").toLongLong()==1,"restart replays original UUID and CAS");
+ check(restartedMoney.outbox().last().toMap().value("payloadHash")==immutable,"restart preserves payload hash");
+ check(!restartedMoney.markFinancialSynced(ml,"funding_set",request,{{"rendition_id",eid},{"row_version",2}}),"wrong financial identity rejected");
+ check(restartedMoney.markFinancialSynced(ml,"funding_set",request,{{"rendition_id",rid},{"row_version",2},{"enabled",true},{"pen",0},{"usd",100}}),"fund confirmed once");
+ check(restartedMoney.pendingOperations().isEmpty(),"confirmed fund not replayed");
+ check(!restartedMoney.markFinancialSynced(ml,"funding_set",request,{{"rendition_id",rid},{"row_version",2},{"enabled",true},{"pen",0},{"usd",100}}),"late duplicate does not mutate cache");
+ check(restartedMoney.saveFinancial(ml,"exchange_set",{{"rate","3.75"},{"mode","MANUAL"}},2),"manual FX queued with new CAS");
+ auto fx=restartedMoney.pendingOperations().first().toMap();const auto fxRequest=fx.value("requestId").toString();
+ check(fxRequest!=request && fx.value("expectedRowVersion").toLongLong()==2,"independent request identity and updated own version");
+ check(restartedMoney.markFinancialState(ml,"exchange_set",fxRequest,"SYNCING"),"FX request persisted");
+ check(restartedMoney.markFinancialState(ml,"exchange_set",fxRequest,"ERROR","response lost"),"ambiguous FX retains retry");
+ check(restartedMoney.pendingOperations().first().toMap().value("requestId")==fxRequest,"FX response loss retries same request");
+ check(restartedMoney.markFinancialSynced(ml,"exchange_set",fxRequest,{{"rendition_id",rid},{"row_version",3},{"rate",3.75},{"mode","MANUAL"},{"quoted_on",QVariant()}}),"manual rate reconciled");
+ check(!restartedMoney.saveFinancial(ml,"exchange_set",{{"rate","1"},{"mode","AUTOMATIC"}},3),"automatic without quote rejected");
+ const auto today=QDateTime::currentDateTimeUtc().toTimeZone(QTimeZone("America/Lima")).date().toString(Qt::ISODate);
+ check(restartedMoney.saveFinancial(ml,"exchange_set",{{"rate","3.437"},{"mode","AUTOMATIC"},{"quoted_on",today},{"checked_at",QDateTime::currentDateTimeUtc().toString(Qt::ISODate)}},3),"valid automatic quote queued");
+ fx=restartedMoney.pendingOperations().first().toMap();
+ check(fx.value("sequence").toLongLong()>fund.value("sequence").toLongLong(),"new intentions follow queue chronology");
+ const auto autoRequest=fx.value("requestId").toString();
+ restartedMoney.mergeRemoteRenditions({QVariantMap{{"id",rid},{"row_version",4},{"status","OBSERVADO"},{"can_edit_content",true},{"exchangeRate",QVariantMap{{"rate",4.0}}}}});
+ check(restartedMoney.rendition(ml).value("exchangeRate").toMap().value("rate").toString()=="3.437000","pull retains pending FX");
+ check(restartedMoney.pendingOperations().first().toMap().value("expectedRowVersion").toLongLong()==3,"external update cannot rebase intention silently");
+ check(restartedMoney.markFinancialState(ml,"exchange_set",autoRequest,"CONFLICT","stale CAS"),"CAS conflict retained");
+ check(restartedMoney.pendingOperations().isEmpty(),"conflict blocks automatic retry");
+ restartedMoney.mergeRemoteRenditions({QVariantMap{{"id",rid},{"row_version",4},{"status","OBSERVADO"},{"can_edit_content",false}}});
+ check(!restartedMoney.saveFinancial(ml,"funding_set",{{"enabled",true},{"pen","50"},{"usd","0"}},4),"WRITE revocation blocks financial mutation");
+ check(reopened.rendition(local).value("currentVersionId")=="version-1","financial checks do not rewrite presented version");
  // Deletion uses the current remote identity and keeps its tombstone on replay.
  const auto deleteScope=QUuid::createUuid().toString();
  RenditionLocalStore deletes(deleteScope);
  const auto dl=deletes.createDraft("2026-09-01","2026-09-30",{"p1"},"p1","folder","space");
- check(deletes.markRenditionSynced(dl,{{"rendition_id",rid},{"row_version",1}}),"delete fixture header");
+ check(deletes.markRenditionSynced(dl,{{"rendition_id",rid},{"row_version",1},{"can_edit_content",true}}),"delete fixture header");
  const auto dc=deletes.addLocalExpense(dl,expense);
  check(deletes.markExpenseSynced(dl,dc,{{"expense_id",eid},{"expense_row_version",1},{"rendition_row_version",2}}),"delete fixture expense");
  check(deletes.removeLocalExpense(dl,dc),"remote delete queued");
@@ -125,16 +174,56 @@ int main(int argc, char **argv) {
  check(deleteReopened.expensesFor(dl).isEmpty(),"stale pull cannot resurrect deleted expense");
  check(deleteReopened.removeDraft(dl),"draft tombstone staged");
  check(deleteReopened.pendingOperations().first().toMap().value("kind")=="rendition_delete","draft uses delete RPC");
+ // A list row's content permission must not authorize or veto owner draft deletion.
+ // The server's delete RPC remains the authority for ownership and version history.
+ for (bool explicitDenial : {false, true}) {
+  RenditionLocalStore listDeletes(QUuid::createUuid().toString());
+  QVariantMap target{{"id",rid},{"row_version",7},{"status","BORRADOR"}};
+  if (explicitDenial) target.insert("can_edit_content",false);
+  listDeletes.mergeRemoteRenditions({target,QVariantMap{{"id",eid},{"row_version",9},{"status","BORRADOR"},{"can_edit_content",true}}});
+  const auto targetLocal=listDeletes.renditions().at(0).toMap().value("localId").toString();
+  const auto otherLocal=listDeletes.renditions().at(1).toMap().value("localId").toString();
+  check(!RenditionContract::canEditWorkingCopy(listDeletes.rendition(targetLocal)),"delete does not grant content edit permission");
+  check(listDeletes.removeDraft(targetLocal),"list deletion accepts absent or false content permission");
+  const auto pending=listDeletes.pendingOperations();
+  check(pending.size()==1,"list deletion queues one operation");
+  const auto queued=pending.first().toMap();
+  check(queued.value("kind")=="rendition_delete" && queued.value("aggregateLocalId")==targetLocal
+        && queued.value("remoteId")==rid && queued.value("expectedRowVersion").toLongLong()==7,"delete preserves target identity and CAS");
+  check(!listDeletes.rendition(otherLocal).value("archived").toBool(),"list deletion leaves other rendition untouched");
+ }
+ // Modern working copy: authorization may allow OBSERVADO while its prior version remains immutable.
+ RenditionLocalStore observed(QUuid::createUuid().toString());
+ QVariantMap working{{"id",rid},{"row_version",4},{"status","OBSERVADO"},{"can_edit_content",true},{"current_version_id","immutable-version"},{"period_start","2026-09-01"},{"period_end","2026-09-30"},{"project_ids",QVariantList{"p1"}},{"primary_project_id","p1"}};
+ observed.mergeRemoteRenditions({working});
+ const auto observedLocal=observed.renditions().first().toMap().value("localId").toString();
+ const auto observedExpense=observed.addLocalExpense(observedLocal,expense);
+ check(!observedExpense.isEmpty(),"OBSERVADO WRITE persists local intent");
+ check(!observed.removeDraft(observedLocal),"prior presented version cannot be deleted as draft");
+ working.insert("can_edit_content",false);
+ observed.mergeRemoteRenditions({working});
+ check(observed.addLocalExpense(observedLocal,expense).isEmpty(),"READ revocation prevents new writes");
+ check(observed.expensesFor(observedLocal).size()==1,"revocation retains pending financial intent");
+ check(observed.rendition(observedLocal).value("currentVersionId")=="immutable-version","revocation retains snapshot identity");
  QVariantMap header{{"id",rid},{"visible_code","RDC-2026-000007"},{"status","PRESENTADA"},{"period_start","2026-09-01"},{"period_end","2026-09-30"},{"owner_user_id","owner"}};
  QVariantMap snapshot{{"schema_version","RENDITION_SNAPSHOT_V01"},{"rendition",header},{"totals",QVariantMap{{"total_declared_pen",20.0},{"total_declared_usd",0.0}}},{"projects",QVariantList{QVariantMap{{"id","p1"},{"name","Project"},{"is_primary",true}}}},{"expenses",QVariantList{QVariantMap{{"id",eid},{"project_id","p1"},{"expense_date","2026-09-08"},{"amount",20.0},{"currency_code","PEN"},{"concept","Lunch"}}}}};
  QVariantMap version{{"snapshot_payload",snapshot},{"rendition_id",rid},{"visible_code","RDC-2026-000007"},{"version_number",1},{"rendition_version_id","version-1"},{"snapshot_hash",QString(64,'a')},{"owner_name","Owner"}};
  SnapshotExportModel model; QString error;
  check(SnapshotExportModel::fromReceived(version,&model,&error),"immutable export model");
+ version.insert("funding",QVariantMap{{"rendition_id",rid},{"enabled",true},{"pen","500.00"},{"usd","100.00"}});
+ version.insert("exchangeRate",QVariantMap{{"rendition_id",rid},{"rate","3.437000"},{"mode","AUTOMATIC"},{"quoted_on","2026-09-08"}});
+ version.insert("financialVersionId","other-version");
+ check(!SnapshotExportModel::fromReceived(version,&model,&error),"export rejects unpinned financial supplement");
+ version.insert("financialVersionId","version-1");
+ check(SnapshotExportModel::fromReceived(version,&model,&error)&&model.financialSupplements,"export accepts frozen supplement only");
+ check(model.funding.value("pen")=="500.00"&&model.exchangeRate.value("rate")=="3.437000","export never substitutes working money");
  QDir().mkpath("artifacts");
  check(RenditionSnapshotExporter::write(model,"pdf","artifacts/rendition-v1.pdf",&error),"PDF write");
  QFile pdf("artifacts/rendition-v1.pdf"); check(pdf.open(QIODevice::ReadOnly)&&pdf.read(5)=="%PDF-","valid PDF bytes");
  check(RenditionSnapshotExporter::write(model,"xlsx","artifacts/rendition-v1.xlsx",&error),"XLSX write");
  QXlsx::Document xlsx("artifacts/rendition-v1.xlsx"); check(xlsx.load(),"XLSX readable");
- check(xlsx.selectSheet("Gastos")&&xlsx.read(2,1).toString()==model.code&&xlsx.read(2,13).toDouble()==20,"XLSX snapshot values");
+ // Formato de la Web: Detalle_Gastos (fila 5, monto en J) y Versión (RDC en B6).
+ check(xlsx.selectSheet("Detalle_Gastos")&&xlsx.read(5,1).toInt()==1&&xlsx.read(5,10).toDouble()==20,"XLSX snapshot values");
+ check(xlsx.selectSheet("Versión")&&xlsx.read(6,2).toString()==model.code&&xlsx.selectSheet("Resumen")&&xlsx.selectSheet("Evidencias"),"XLSX web layout sheets");
  std::cout<<"PASS persistence, retry, same-ID presentation, immutability, PDF bytes, XLSX contents\n";
 }

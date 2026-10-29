@@ -1,0 +1,17 @@
+{
+  "policy": "Existing PostgreSQL numeric nearest rounding, ties away from zero; user accepted 2026-10-09. Fixture strings, wire RPC still numeric.",
+  "cases": [
+    {"input":"1.005","cents":101}, {"input":"2.675","cents":268},
+    {"input":"0.005","cents":1}, {"input":"0.004","cents":0},
+    {"input":"-1.005","cents":-101}, {"input":"1e-2","cents":1},
+    {"input":"999999999999.99","cents":99999999999999},
+    {"input":"NaN","error":true}, {"input":"Infinity","error":true},
+    {"input":"1.2.3","error":true}
+  ],
+  "fundCases": [
+    {"fundPen":"0","fundUsd":"100","spentPen":"75","spentUsd":"20","rate":"3.75","balancePenCents":22500,"balanceUsdCents":6000},
+    {"fundPen":"500","fundUsd":"0","spentPen":"75","spentUsd":"20","rate":"3.437","balancePenCents":35626,"balanceUsdCents":10365},
+    {"fundPen":"0","fundUsd":"0","spentPen":"0.01","spentUsd":"0","rate":"2","balancePenCents":-1,"balanceUsdCents":-1},
+    {"fundPen":"100","fundUsd":"0","spentPen":"10","spentUsd":"0","rate":null,"balancePenCents":9000,"balanceUsdCents":null}
+  ]
+}

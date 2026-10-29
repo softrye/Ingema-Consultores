@@ -1,0 +1,132 @@
+{
+  "format": "inge-retroplasma-scene-v1",
+  "title": "Terreno sintético georreferenciado · prueba CC0",
+  "source": "Fixture original InGe+; no imágenes ni fotogrametría de Google",
+  "license": "CC0-1.0",
+  "origin": {
+    "latitude": -12.0464,
+    "longitude": -77.0428,
+    "altitude": 100
+  },
+  "nodes": [
+    {
+      "id": "root",
+      "bounds": [
+        -400,
+        -400,
+        0,
+        400,
+        400,
+        150
+      ],
+      "lods": [
+        {
+          "error": 40,
+          "mesh": "root-coarse.obj",
+          "texture": "terrain.png"
+        },
+        {
+          "error": 8,
+          "mesh": "root-fine.obj",
+          "texture": "terrain.png"
+        }
+      ]
+    },
+    {
+      "id": "tile0",
+      "parent": "root",
+      "bounds": [
+        -400,
+        -400,
+        0,
+        0,
+        0,
+        150
+      ],
+      "lods": [
+        {
+          "error": 10,
+          "mesh": "tile0-coarse.obj",
+          "texture": "terrain.png"
+        },
+        {
+          "error": 1,
+          "mesh": "tile0-fine.obj",
+          "texture": "terrain.png"
+        }
+      ]
+    },
+    {
+      "id": "tile1",
+      "parent": "root",
+      "bounds": [
+        0,
+        -400,
+        0,
+        400,
+        0,
+        150
+      ],
+      "lods": [
+        {
+          "error": 10,
+          "mesh": "tile1-coarse.obj",
+          "texture": "terrain.png"
+        },
+        {
+          "error": 1,
+          "mesh": "tile1-fine.obj",
+          "texture": "terrain.png"
+        }
+      ]
+    },
+    {
+      "id": "tile2",
+      "parent": "root",
+      "bounds": [
+        -400,
+        0,
+        0,
+        0,
+        400,
+        150
+      ],
+      "lods": [
+        {
+          "error": 10,
+          "mesh": "tile2-coarse.obj",
+          "texture": "terrain.png"
+        },
+        {
+          "error": 1,
+          "mesh": "tile2-fine.obj",
+          "texture": "terrain.png"
+        }
+      ]
+    },
+    {
+      "id": "tile3",
+      "parent": "root",
+      "bounds": [
+        0,
+        0,
+        0,
+        400,
+        400,
+        150
+      ],
+      "lods": [
+        {
+          "error": 10,
+          "mesh": "tile3-coarse.obj",
+          "texture": "terrain.png"
+        },
+        {
+          "error": 1,
+          "mesh": "tile3-fine.obj",
+          "texture": "terrain.png"
+        }
+      ]
+    }
+  ]
+}

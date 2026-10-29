@@ -153,6 +153,9 @@ QVariantList DockContextController::normalizeActions(const QVariantList &actions
         action.insert(QStringLiteral("priority"), priorityOk ? priority : kDefaultPriority);
         action.insert(QStringLiteral("repeatable"), in.value(QStringLiteral("repeatable")).toBool());
         action.insert(QStringLiteral("destructive"), in.value(QStringLiteral("destructive")).toBool());
+        // Opt-in: con hijos, el toque ejecuta `command` y el Deep Press abre la rama
+        // (sin esta marca, el toque de una rama abre su menú, como hasta ahora).
+        action.insert(QStringLiteral("tapCommand"), in.value(QStringLiteral("tapCommand")).toBool());
         action.insert(QStringLiteral("children"), children);
         normalized.append(action);
         if (normalized.size() >= limit)

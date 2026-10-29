@@ -1,0 +1,31 @@
+name: InGe+ Android source release 2026-10-29
+on:
+  push:
+    tags:
+      - 'android-2026.10.29-source'
+permissions:
+  contents: write
+jobs:
+  publish-source-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Publish GitHub prerelease with changelog
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release already exists: $GITHUB_REF_NAME"
+            exit 0
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --title "InGe+ Android | 29-10-2026 | Source (QA pendiente)" \
+            --notes-file "docs/CHANGELOG_ANDROID_SOURCE_20261029.md" \
+            --prerelease \
+            --target "$GITHUB_SHA"

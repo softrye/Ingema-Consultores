@@ -45,35 +45,11 @@ public:
     Q_INVOKABLE bool isLocationServiceEnabled() const;
     Q_INVOKABLE bool openLocationSettings();
     Q_INVOKABLE bool openApplicationSettings();
-
-    // Adaptador acotado del Home Flutter add-to-app. NavigationShellV51 sigue
-    // siendo propiedad de QML y consume las acciones mediante take...().
-    Q_INVOKABLE bool setFlutterHomeVisible(bool visible,
-                                             const QString &themeMode,
-                                             double motionScale,
-                                             double glassIntensity,
-                                             const QString &performanceProfile);
-    Q_INVOKABLE bool setFlutterRenditionsVisible(bool visible,
-                                                 const QString &themeMode,
-                                                 double motionScale,
-                                                 double glassIntensity,
-                                                 const QString &performanceProfile);
-    Q_INVOKABLE bool isFlutterHomeReady() const;
-    Q_INVOKABLE QString takeFlutterHomeAction();
-    Q_INVOKABLE bool setFlutterAuthVisible(bool visible,
-                                           const QString &authStateJson,
-                                           const QString &themeMode,
-                                           double motionScale,
-                                           double glassIntensity,
-                                           const QString &performanceProfile);
-    Q_INVOKABLE bool setFlutterSecurityVisible(bool visible,
-                                               const QString &authStateJson,
-                                               const QString &themeMode,
-                                               double motionScale,
-                                               double glassIntensity,
-                                               const QString &performanceProfile);
-    Q_INVOKABLE bool updateFlutterAuthState(const QString &authStateJson);
-    Q_INVOKABLE QString takeFlutterAuthRequest();
+    // Recordatorios diarios (InGeReminderScheduler): solo con una acción
+    // pendiente verificable; enabled=false o pendingCount=0 los cancela.
+    Q_INVOKABLE void updateReminders(bool enabled, int pendingCount);
+    // Háptica de pulsación prolongada (personalización del Home).
+    Q_INVOKABLE void hapticLongPress();
 
     Q_INVOKABLE bool startNativeLocationUpdates();
     Q_INVOKABLE void stopNativeLocationUpdates();
@@ -86,6 +62,18 @@ public:
     Q_INVOKABLE void capturePhoto(int targetIdx);
     Q_INVOKABLE void pickPhoto(int targetIdx);
     Q_INVOKABLE void releaseImportedPhoto(const QUrl &localUrl);
+    // Home de Calicatas › Abrir: selector de documentos del sistema (Storage
+    // Access Framework). Muestra los proveedores instalados (Google Drive incluido
+    // si está instalado y habilitado). El archivo se copia a caché privada y se
+    // valida (.xlsx = ZIP de Office, .json = ficha) antes de llegar a QML.
+    Q_INVOKABLE void pickCalicataDocument();
+    // Android puede matar el proceso mientras la camara externa esta delante
+    // (habitual en equipos de 2-4 GB). La captura pendiente se guarda en
+    // QSettings con la ficha que la pidio; al reabrir esa ficha se recupera
+    // por el mismo camino (photoSelected) y no se pierde la foto.
+    Q_INVOKABLE void setPhotoCaptureContext(const QString &contextKey);
+    Q_INVOKABLE int pendingCaptureSlot(const QString &contextKey) const;
+    Q_INVOKABLE bool recoverPendingCapture(const QString &contextKey);
 
     bool nativeLocationSupported() const;
     bool nativePermissionGranted() const { return hasLocationPermission(); }
@@ -115,6 +103,11 @@ signals:
     // Android sustituye temporalmente la Surface de Qt por Cámara/Galería.
     void externalPhotoActivityStarted();
     void externalPhotoActivityFinished();
+    // kind: "xlsx" | "json"; provider: "Google Drive" o autoridad del proveedor.
+    void calicataDocumentPicked(const QUrl &localUrl, const QString &kind,
+                                const QString &displayName, const QString &provider);
+    void calicataDocumentPickCanceled();
+    void calicataDocumentPickError(const QString &code, const QString &message);
 
 private:
     bool ensurePositionSource();
@@ -130,6 +123,9 @@ private:
     void launchGallery(int targetIdx);
     void finishPhotoActivity(int targetIdx, const QString &sourceKind,
                              int resultCode, const QString &contentUri);
+    void persistPendingCapture(int targetIdx);
+    void finishDocumentActivity(int resultCode, const QString &contentUri);
+    void clearPersistedPendingCapture();
 
     QGeoPositionInfoSource *m_positionSource = nullptr;
     QTimer m_watchdogTimer;
@@ -151,6 +147,8 @@ private:
     QString m_nativeLocationStatus = QStringLiteral("idle");
     QString m_nativeLocationError;
     bool m_photoRequestInFlight = false;
+    bool m_documentRequestInFlight = false;
     QString m_pendingCameraUri;
     QString m_pendingCameraFilePath;
+    QString m_photoCaptureContext;
 };

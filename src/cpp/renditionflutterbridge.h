@@ -1,5 +1,7 @@
 #pragma once
 
+#include "renditionconnectivity.h"
+
 #include <QObject>
 #include <QSet>
 #include <QTimer>
@@ -12,9 +14,10 @@ class RenditionRepository;
 class RenditionSyncController;
 class AndroidCalicataExporter;
 
-// Adaptador del único dominio Renditions V02 hacia el engine Flutter add-to-app
-// que ya pertenece al shell Android. No contiene reglas de negocio ni acceso a
-// Supabase: sólo traduce comandos JSON a las APIs existentes y publica estado.
+// Adaptador de comandos JSON del dominio Renditions V02 (sin interfaz, Visual
+// Zero 2026-10-10). No contiene reglas de negocio ni acceso a Supabase: traduce
+// comandos JSON (submit) a las APIs existentes y publica estado y resultados
+// como JSON mediante eventReady. Sin JNI: ningún consumidor visual conectado.
 class RenditionFlutterBridge final : public QObject
 {
     Q_OBJECT
@@ -28,7 +31,7 @@ public:
     ~RenditionFlutterBridge() override;
     void setCoreRemote(inge::core::RemoteExecutor *core);
 
-    static void submitFromAndroid(const QString &requestJson);
+    Q_INVOKABLE void submit(const QString &requestJson);
     Q_INVOKABLE void openDocumentTarget(const QString &renditionId);
     Q_INVOKABLE void pickCalicataProject(const QString &documentId);
 
@@ -36,6 +39,7 @@ signals:
     void calicataProjectPickerRequested();
     void calicataProjectPicked(const QString &documentId, const QVariantMap &project);
     void globalActionRequested(const QString &action);
+    void eventReady(const QString &eventJson);
 
 private:
     void handleCommand(const QString &requestJson);
@@ -49,8 +53,12 @@ private:
                         const QString &message);
     void continuePresentationAfterSync();
     void clearPendingPresentation();
-    void updateConnectionState(const QString &code);
-    void sendEvent(const QVariantMap &event) const;
+    // Conectividad (fuente única): evidencia de red/transporte -> estado publicado.
+    void applyConnectivity(bool changed);
+    void scheduleRetry();
+    void reconnect();
+    void observeLocalCode(const QString &code);
+    void sendEvent(const QVariantMap &event);
     void sendResult(const QString &requestId, const QVariantMap &result = {});
     void sendError(const QString &requestId, const QString &code,
                    const QString &message);
@@ -77,8 +85,21 @@ private:
     QString m_pendingFoldersRequestId;
     QString m_lastPullAt;
     QString m_lastServerConfirmationAt;
-    QString m_connectionState = QStringLiteral("UNKNOWN");
+    RenditionConnectivity::State m_link;
+    QTimer m_retryTimer;                 // reintento controlado (sin sondeo continuo)
+    // Working Document: UNKNOWN hasta la primera respuesta; UNAVAILABLE con PGRST202
+    // (contrato no desplegado en este entorno: sin escrituras, borradores locales).
+    QString m_workingContract = QStringLiteral("UNKNOWN");
+    QTimer m_workingSyncTimer;           // agrupa guardados de borrador antes de enviarlos
+    void scheduleWorkingSync(int delayMs);
+    bool m_selectionPullPending = false; // detalle elegido durante otro pull
+    int m_selectionSerial = 0;           // token de cada apertura de detalle (select)
     QSet<QString> m_pendingPullOperations;
+    QTimer m_pullWatchdog;               // un pull sin todas sus respuestas no queda colgado
     bool m_presentAfterSync = false;
     QTimer m_publishTimer;
+    QVariantMap m_lastPublishedState;
+    QTimer m_renderDiagnosticsTimer;
+    int m_publishRequests = 0;
+    int m_publishEmissions = 0;
 };

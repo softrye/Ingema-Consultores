@@ -29,7 +29,9 @@ bool similarExpense(JsonMap candidate, JsonMap existing) {
       (typeA.isEmpty || typeB.isEmpty || typeA == typeB) &&
       ((rucA.isNotEmpty && rucA == rucB) ||
         (field(candidate, 'expenseDate', 'expense_date').isNotEmpty &&
-         field(candidate, 'expenseDate', 'expense_date') == field(existing, 'expenseDate', 'expense_date')))) return true;
+         field(candidate, 'expenseDate', 'expense_date') == field(existing, 'expenseDate', 'expense_date')))) {
+    return true;
+  }
   for (final entry in keys.entries) {
     if (normalized(candidate[entry.key]) != normalized(existing[entry.key] ?? existing[entry.value])) return false;
   }

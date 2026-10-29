@@ -7,18 +7,27 @@
 #include <atomic>
 
 class QQuickWindow;
-class InGeEarthHostController;
 
+// Servicio de estado gráfico y de dispositivo (sin interfaz, Visual Zero
+// 2026-10-10): backend/GPU del scene graph, estado del dispositivo publicado
+// por InGePerformanceRuntime (Android) y protección del render de Qt mientras
+// la cámara o la galería sustituyen la Surface de la actividad.
 class InGeGraphicsCore final : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString graphicsBackend READ graphicsBackend NOTIFY stateChanged)
     Q_PROPERTY(QString gpuName READ gpuName NOTIFY stateChanged)
     Q_PROPERTY(bool vulkanAvailable READ vulkanAvailable NOTIFY stateChanged)
-    Q_PROPERTY(bool earthAvailable READ earthAvailable NOTIFY stateChanged)
-    Q_PROPERTY(bool earthActive READ earthActive NOTIFY stateChanged)
-    Q_PROPERTY(QString earthState READ earthState NOTIFY stateChanged)
-    Q_PROPERTY(QString renderProfile READ renderProfile NOTIFY stateChanged)
+    // Estado vivo del dispositivo calculado por InGePerformanceRuntime (Android).
+    Q_PROPERTY(QString deviceTier READ deviceTier NOTIFY deviceStateChanged)
+    Q_PROPERTY(QString baseDeviceTier READ baseDeviceTier NOTIFY deviceStateChanged)
+    Q_PROPERTY(bool lowRamDevice READ lowRamDevice NOTIFY deviceStateChanged)
+    Q_PROPERTY(int totalMemoryMb READ totalMemoryMb NOTIFY deviceStateChanged)
+    Q_PROPERTY(bool powerSaveMode READ powerSaveMode NOTIFY deviceStateChanged)
+    Q_PROPERTY(int thermalStatus READ thermalStatus NOTIFY deviceStateChanged)
+    Q_PROPERTY(bool systemAnimationsEnabled READ systemAnimationsEnabled NOTIFY deviceStateChanged)
+    Q_PROPERTY(qreal systemFontScale READ systemFontScale NOTIFY deviceStateChanged)
+    Q_PROPERTY(int memoryTrimLevel READ memoryTrimLevel NOTIFY deviceStateChanged)
 
 public:
     explicit InGeGraphicsCore(QObject *parent = nullptr);
@@ -26,46 +35,47 @@ public:
     QString graphicsBackend() const;
     QString gpuName() const;
     bool vulkanAvailable() const;
-    bool earthAvailable() const;
-    bool earthActive() const;
-    QString earthState() const;
-    QString renderProfile() const;
+    QString deviceTier() const;
+    QString baseDeviceTier() const;
+    bool lowRamDevice() const;
+    int totalMemoryMb() const;
+    bool powerSaveMode() const;
+    int thermalStatus() const;
+    bool systemAnimationsEnabled() const;
+    qreal systemFontScale() const;
+    int memoryTrimLevel() const;
+
+    // JSON from InGePerformanceRuntime.stateJson(); GUI thread only.
+    void applyDevicePerformanceState(const QString &json);
 
     void attachWindow(QQuickWindow *window);
-    void setEarthHostController(InGeEarthHostController *controller);
     void prepareForExternalActivity();
     void completeExternalActivity();
 
-    Q_INVOKABLE bool openEarth();
-    Q_INVOKABLE bool focusEarthCoordinate(double latitude, double longitude,
-                                          double altitude,
-                                          const QString &label);
-    Q_INVOKABLE void closeEarth();
-    Q_INVOKABLE bool setRenderProfile(const QString &profile);
-
 signals:
     void stateChanged();
+    void deviceStateChanged();
 
 private:
     void inspectRuntime(QQuickWindow *window);
     void applyRuntimeState(const QString &backend, const QString &gpuName,
                            bool vulkanAvailable);
-    void setEarthState(const QString &state, bool active);
-    void setQtRenderingSuspended(bool suspended);
     void restoreAfterExternalActivityIfReady();
+    void readInitialDeviceState();
 
     QString m_graphicsBackend = QStringLiteral("PENDING_RUNTIME_INSPECTION");
     QString m_gpuName = QStringLiteral("PENDING");
     bool m_vulkanAvailable = false;
-    bool m_earthAvailable = false;
-    bool m_earthActive = false;
-    bool m_earthExitPending = false;
-    QString m_earthState = QStringLiteral("UNINITIALIZED");
-    QString m_renderProfile = QStringLiteral("BALANCED");
-    InGeEarthHostController *m_earthHostController = nullptr;
+    QString m_deviceTier = QStringLiteral("UNKNOWN");
+    QString m_baseDeviceTier = QStringLiteral("UNKNOWN");
+    bool m_lowRamDevice = false;
+    int m_totalMemoryMb = 0;
+    bool m_powerSaveMode = false;
+    int m_thermalStatus = -1;
+    bool m_systemAnimationsEnabled = true;
+    qreal m_systemFontScale = 1.0;
+    int m_memoryTrimLevel = 0;
     QPointer<QQuickWindow> m_window;
-    bool m_qtRenderingSuspended = false;
-    bool m_windowWasVisible = true;
     bool m_externalActivityInFlight = false;
     bool m_externalActivityRestorePending = false;
     bool m_externalWindowWasVisible = true;

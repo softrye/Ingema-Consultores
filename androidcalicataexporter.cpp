@@ -848,6 +848,10 @@ QString firstText(const QVariantMap &map, const QStringList &keys)
 // asignado usa el nombre antiguo guardado en su encabezado.
 QString exportProjectName(const QVariantMap &header, const QVariantMap &timestamp = {})
 {
+    // Denominación oficial escrita en la ficha (Nombre del proyecto) manda.
+    const QString official = firstText(header, {QStringLiteral("project_full_name")});
+    if (!official.isEmpty())
+        return official;
     if (!header.value(QStringLiteral("projectId")).toString().trimmed().isEmpty()) {
         const QString name = firstText(header, {QStringLiteral("projectName"), QStringLiteral("project_name")});
         if (!name.isEmpty()) return name;
@@ -2947,7 +2951,8 @@ QString AndroidCalicataExporter::exportGenericWorkbookToXlsx(const QVariantMap &
 #endif
 }
 
-QString AndroidCalicataExporter::exportReceivedSnapshot(const QVariantMap &received, const QString &format)
+QString AndroidCalicataExporter::exportReceivedSnapshot(const QVariantMap &received, const QString &format,
+                                                       const QString &destination)
 {
     setLastError({});
     SnapshotExportModel model;
@@ -2968,9 +2973,14 @@ QString AndroidCalicataExporter::exportReceivedSnapshot(const QVariantMap &recei
     const auto projects = snapshot.value("projects").toList();
     const auto project = header.value("primary_project_id",
         projects.isEmpty() ? QVariant{} : projects.first().toMap().value("id")).toString();
-    if (appContext() && appContext()->auth() && appContext()->supabase()) {
+    if (destination != QLatin1String("phone") && appContext() && appContext()->auth() && appContext()->supabase()) {
         auto *exports = RenditionExportService::shared(appContext()->supabase(), appContext()->auth());
-        if (!exports->enqueue(path, project, received.value("rendition_id", header.value("id")).toString(), model.versionId, format))
+        const QString renditionId = received.value("rendition_id", header.value("id")).toString();
+        const bool queued = destination == QLatin1String("google")
+            ? exports->enqueueDocument(path, project, "Export/Rendiciones/" + renditionId + "/" + model.versionId + "/" + QFileInfo(path).fileName(),
+                                       {}, {}, {}, QStringLiteral("GOOGLE_DRIVE"), true)
+            : exports->enqueue(path, project, renditionId, model.versionId, format);
+        if (!queued)
             setLastError(QStringLiteral("Archivo creado localmente; no se pudo registrar su subida. Conserva el archivo y reintenta."));
     }
     return path;

@@ -3,7 +3,10 @@
 #include "renditionlocalstore.h"
 #include "renditionrepository.h"
 #include "renditionattachmentcontract.h"
+#include "renditionconnectivity.h"
+#include "renditionworkingcontract.h"
 #include <QDateTime>
+#include <QDebug>
 #include <QGuiApplication>
 #include <QNetworkInformation>
 #include <QTimer>
@@ -44,6 +47,7 @@ RenditionSyncController::RenditionSyncController(
         setBusy(false);
         setLastError({});
     });
+    connect(m_repository, &RenditionRepository::financialSaved, this, &RenditionSyncController::finishCurrent);
     connect(m_repository, &RenditionRepository::renditionCreated,
             this, &RenditionSyncController::finishCurrent);
     connect(m_repository, &RenditionRepository::renditionEdited,
@@ -55,6 +59,10 @@ RenditionSyncController::RenditionSyncController(
     connect(m_repository, &RenditionRepository::expenseDeleted,
             this, &RenditionSyncController::finishCurrent);
     connect(m_repository, &RenditionRepository::draftDeleted,
+            this, &RenditionSyncController::finishCurrent);
+    connect(m_repository, &RenditionRepository::draftTrashed,
+            this, &RenditionSyncController::finishCurrent);
+    connect(m_repository, &RenditionRepository::renditionArchived,
             this, &RenditionSyncController::finishCurrent);
     connect(m_repository, &RenditionRepository::documentLocationChanged, this,
             [this]() {
@@ -163,6 +171,28 @@ RenditionSyncController::RenditionSyncController(
         if (!m_busy || m_current.isEmpty())
             return;
         const QString kind = m_current.value(QStringLiteral("kind")).toString();
+        if (kind.startsWith(QLatin1String("working_"))) {
+            if (!operation.startsWith(QLatin1String("working_")) && operation != QLatin1String("attachment_upload"))
+                return;
+            if (operation == QLatin1String("working_list"))
+                return;                                       // lectura del pull, no de la cola
+            // El objeto aún no existe: subir y volver a confirmar (flujo Web exacto).
+            if (operation == QLatin1String("working_confirm") && code == QLatin1String("RENDITION_ATTACHMENT_OBJECT_MISSING")
+                && m_current.value(QStringLiteral("phase")).toString() == QLatin1String("CONFIRM")) {
+                const QVariantMap source = m_current.value(QStringLiteral("source")).toMap();
+                const QString workingId = m_current.value(QStringLiteral("workingId")).toString();
+                m_current.insert(QStringLiteral("phase"), QStringLiteral("UPLOAD"));
+                m_store->markWorkingSourcePhase(workingId, source.value(QStringLiteral("id")).toString(), QStringLiteral("UPLOAD"));
+                m_repository->uploadReservedAttachment(source.value(QStringLiteral("localUri")).toString(),
+                                                       QStringLiteral("project-files"),
+                                                       m_current.value(QStringLiteral("storagePath")).toString(),
+                                                       m_current.value(QStringLiteral("mimeType")).toString(),
+                                                       source.value(QStringLiteral("uploadRequestId")).toString());
+                return;
+            }
+            failWorking(code, message);
+            return;
+        }
         const bool related = (kind == QLatin1String("rendition_create")
                               && operation == QLatin1String("create"))
             || (kind == QLatin1String("rendition_update")
@@ -174,6 +204,172 @@ RenditionSyncController::RenditionSyncController(
             return;
         failCurrent(code, message);
     });
+
+    // ---- Working Document: respuestas de la cola.
+    const auto isWorking = [this](const char *kind) {
+        return m_busy && m_current.value(QStringLiteral("kind")).toString() == QLatin1String(kind);
+    };
+    connect(m_repository, &RenditionRepository::workingSaved, this, [this, isWorking](const QVariantMap &row) {
+        if (!isWorking("working_save") || m_current.value(QStringLiteral("phase")) != QLatin1String("SAVE")) return;
+        if (!m_store->markWorkingSaved(m_current.value(QStringLiteral("workingId")).toString(), row)) {
+            failWorking(QStringLiteral("RENDITION_INVALID_RESPONSE"), m_store->lastError());
+            return;
+        }
+        nextWorkingSource();
+    });
+    connect(m_repository, &RenditionRepository::workingFileReserved, this, [this, isWorking](const QVariantMap &file) {
+        if (!isWorking("working_save") || m_current.value(QStringLiteral("phase")) != QLatin1String("RESERVE")) return;
+        const QVariantMap source = m_current.value(QStringLiteral("source")).toMap();
+        const QString workingId = m_current.value(QStringLiteral("workingId")).toString();
+        // La ruta la asigna el servidor; sólo se acepta la esperada para este borrador.
+        if (file.value(QStringLiteral("id")) != source.value(QStringLiteral("uploadRequestId"))
+            || !RenditionWorkingContract::reservedPathValid(file, m_current.value(QStringLiteral("renditionRemoteId")).toString(), workingId)) {
+            failWorking(QStringLiteral("RENDITION_WORKING_INVALID_FILE"), QStringLiteral("El servidor devolvió una reserva que no corresponde a este sustento."));
+            return;
+        }
+        if (file.value(QStringLiteral("status")).toString() == QLatin1String("READY")) {
+            m_store->markWorkingSourcePhase(workingId, source.value(QStringLiteral("id")).toString(), QStringLiteral("READY"), file);
+            nextWorkingSource();
+            return;
+        }
+        // Un intento previo pudo subir los bytes: se confirma primero.
+        m_current.insert(QStringLiteral("phase"), QStringLiteral("CONFIRM"));
+        m_current.insert(QStringLiteral("storagePath"), file.value(QStringLiteral("storage_path")));
+        m_current.insert(QStringLiteral("mimeType"), file.value(QStringLiteral("mime_type")));
+        m_store->markWorkingSourcePhase(workingId, source.value(QStringLiteral("id")).toString(), QStringLiteral("CONFIRM"));
+        m_repository->confirmWorkingFile(source.value(QStringLiteral("uploadRequestId")).toString());
+    });
+    connect(m_repository, &RenditionRepository::attachmentUploaded, this, [this, isWorking](const QString &fileId) {
+        if (!isWorking("working_save") || m_current.value(QStringLiteral("phase")) != QLatin1String("UPLOAD")) return;
+        if (fileId != m_current.value(QStringLiteral("source")).toMap().value(QStringLiteral("uploadRequestId")).toString()) return;
+        m_current.insert(QStringLiteral("phase"), QStringLiteral("CONFIRM_UPLOADED"));
+        m_repository->confirmWorkingFile(fileId);
+    });
+    connect(m_repository, &RenditionRepository::workingFileConfirmed, this, [this, isWorking](const QVariantMap &file) {
+        const QString phase = m_current.value(QStringLiteral("phase")).toString();
+        if (!isWorking("working_save") || (phase != QLatin1String("CONFIRM") && phase != QLatin1String("CONFIRM_UPLOADED"))) return;
+        const QVariantMap source = m_current.value(QStringLiteral("source")).toMap();
+        if (file.value(QStringLiteral("id")) != source.value(QStringLiteral("uploadRequestId"))
+            || file.value(QStringLiteral("status")).toString() != QLatin1String("READY")) {
+            failWorking(QStringLiteral("RENDITION_WORKING_INVALID_FILE"), QStringLiteral("El servidor no confirmó el sustento."));
+            return;
+        }
+        m_store->markWorkingSourcePhase(m_current.value(QStringLiteral("workingId")).toString(),
+                                        source.value(QStringLiteral("id")).toString(), QStringLiteral("READY"), file);
+        nextWorkingSource();
+    });
+    connect(m_repository, &RenditionRepository::workingPromoted, this, [this, isWorking](const QVariantMap &result) {
+        if (!isWorking("working_promote")) return;
+        if (!m_store->markWorkingPromoted(m_current.value(QStringLiteral("workingId")).toString(), result)) {
+            failWorking(QStringLiteral("RENDITION_INVALID_RESPONSE"), m_store->lastError());
+            return;
+        }
+        continueQueue();
+    });
+    connect(m_repository, &RenditionRepository::workingArchived, this, [this, isWorking](const QVariantMap &row) {
+        if (!isWorking("working_archive")) return;
+        if (!m_store->markWorkingArchived(m_current.value(QStringLiteral("workingId")).toString(), row)) {
+            failWorking(QStringLiteral("RENDITION_INVALID_RESPONSE"), m_store->lastError());
+            return;
+        }
+        continueQueue();
+    });
+}
+
+// ------------------------------------------------------- Working Document
+void RenditionSyncController::processWorking()
+{
+    const QString kind = m_current.value(QStringLiteral("kind")).toString();
+    const QString workingId = m_current.value(QStringLiteral("workingId")).toString();
+    if (kind == QLatin1String("working_save")) {
+        const QVariantMap args = m_current.value(QStringLiteral("saveArguments")).toMap();
+        // El intento se registra ANTES de enviarlo: si el proceso muere o la respuesta
+        // se pierde, se reenvía idéntico (mismo request_id, misma versión esperada).
+        if (!m_store->markWorkingSending(workingId, args)) {
+            failWorking(QStringLiteral("LOCAL_PERSISTENCE_FAILED"), m_store->lastError());
+            return;
+        }
+        if (!args.isEmpty()) {
+            m_current.insert(QStringLiteral("phase"), QStringLiteral("SAVE"));
+            m_repository->saveWorkingRow(args);
+            return;
+        }
+        nextWorkingSource();
+        return;
+    }
+    if (kind == QLatin1String("working_promote")) {
+        // Promoción atómica en el servidor; un reintento devuelve el mismo resultado.
+        m_current.insert(QStringLiteral("phase"), QStringLiteral("PROMOTE"));
+        m_repository->promoteWorkingRow(m_current.value(QStringLiteral("promoteArguments")).toMap());
+        return;
+    }
+    if (kind == QLatin1String("working_archive")) {
+        m_current.insert(QStringLiteral("phase"), QStringLiteral("ARCHIVE"));
+        m_repository->archiveWorkingRow(m_current.value(QStringLiteral("archiveArguments")).toMap());
+        return;
+    }
+    failWorking(QStringLiteral("UNKNOWN_OPERATION"), QStringLiteral("Operación de borrador desconocida."));
+}
+
+void RenditionSyncController::nextWorkingSource()
+{
+    const QString workingId = m_current.value(QStringLiteral("workingId")).toString();
+    const QVariantList sources = m_store->workingPendingSources(workingId);
+    if (sources.isEmpty()) {
+        m_store->finishWorkingSave(workingId);
+        continueQueue();
+        return;
+    }
+    const QVariantMap source = sources.constFirst().toMap();
+    m_current.insert(QStringLiteral("source"), source);
+    m_current.insert(QStringLiteral("phase"), QStringLiteral("RESERVE"));
+    // Reserva idempotente (renueva la concesión con la misma identidad y ruta).
+    m_repository->reserveWorkingFile(RenditionWorkingContract::reserveArguments(workingId, source));
+}
+
+void RenditionSyncController::continueQueue()
+{
+    m_current.clear();
+    processNext();
+}
+
+void RenditionSyncController::failWorking(const QString &code, const QString &message)
+{
+    if (!m_busy || m_current.isEmpty())
+        return;
+    const QString kind = m_current.value(QStringLiteral("kind")).toString();
+    const QString workingId = m_current.value(QStringLiteral("workingId")).toString();
+    const QString normalized = code.toUpper();
+    if (RenditionConnectivity::isTransportFailure(normalized) || normalized == QLatin1String("AUTH_REQUIRED")) {
+        // Sin servidor: el intento queda en vuelo y se reenviará idéntico. Silencioso.
+        qInfo() << "INGE_RENDITIONS_SYNC working_transport_retry" << kind << normalized;
+        m_store->markWorkingFailed(kind, workingId, QStringLiteral("ERROR"), RenditionConnectivity::transportMarker());
+        m_current.clear();
+        setBusy(false);
+        emit syncStopped(QStringLiteral("ERROR"), code, QString());
+        return;
+    }
+    if (normalized == QLatin1String("PGRST202")) {
+        // Contrato Working no desplegado en este entorno: nada se escribe; el borrador
+        // se conserva sólo en este equipo.
+        m_store->markWorkingFailed(kind, workingId, QStringLiteral("LOCAL_ONLY"), QString());
+        emit workingContractMissing();
+        continueQueue();
+        return;
+    }
+    if (RenditionWorkingContract::conflict(normalized)) {
+        // Conflicto CAS REAL de esta fila: se conserva la intención local; la
+        // resolución es explícita (panel de conflicto). Las demás filas siguen.
+        m_store->markWorkingFailed(kind, workingId, QStringLiteral("CONFLICT"), RenditionWorkingContract::message(normalized));
+        continueQueue();
+        return;
+    }
+    // Rechazo definitivo del servidor (validación, permisos, sustentos pendientes,
+    // versión de la rendición): visible en la fila, sin reintento automático.
+    const QString text = RenditionWorkingContract::message(normalized).isEmpty()
+        ? message : RenditionWorkingContract::message(normalized);
+    m_store->markWorkingFailed(kind, workingId, QStringLiteral("ERROR"), text.isEmpty() ? normalized : text);
+    continueQueue();
 }
 
 void RenditionSyncController::synchronize()
@@ -200,10 +396,30 @@ void RenditionSyncController::processNext()
     const QString localId = m_current.value(QStringLiteral("localId")).toString();
     const QString aggregateLocalId = m_current.value(
         QStringLiteral("aggregateLocalId"), localId).toString();
+
+    if (kind.startsWith(QLatin1String("working_"))) {
+        processWorking();
+        return;
+    }
+    if (kind=="funding_set" || kind=="exchange_set") {
+        if (!m_store->markFinancialState(aggregateLocalId,kind,m_current.value("requestId").toString(),"SYNCING")) {
+            failCurrent("LOCAL_PERSISTENCE_FAILED",m_store->lastError());return;
+        }
+        m_repository->setFinancial(kind,m_current);return;
+    }
     if (kind == QLatin1String("rendition_delete")) {
         if (!m_store->markRenditionSyncing(aggregateLocalId)) { failCurrent("LOCAL_PERSISTENCE_FAILED", m_store->lastError()); return; }
         m_repository->deleteDraft(m_current.value(QStringLiteral("remoteId")).toString(),
                                   m_current.value(QStringLiteral("expectedRowVersion")).toLongLong());
+        return;
+    }
+    if (kind == QLatin1String("rendition_trash") || kind == QLatin1String("rendition_archive")) {
+        if (!m_store->markRenditionSyncing(aggregateLocalId)) { failCurrent("LOCAL_PERSISTENCE_FAILED", m_store->lastError()); return; }
+        const auto remoteId=m_current.value(QStringLiteral("remoteId")).toString();
+        const auto version=m_current.value(QStringLiteral("expectedRowVersion")).toLongLong();
+        const auto requestId=m_current.value(QStringLiteral("requestId")).toString();
+        if (kind == QLatin1String("rendition_archive")) m_repository->archiveRendition(remoteId,version,requestId);
+        else m_repository->trashDraft(remoteId,version,requestId);
         return;
     }
     if (kind == QLatin1String("rendition_create")) {
@@ -214,7 +430,8 @@ void RenditionSyncController::processNext()
             m_current.value(QStringLiteral("periodEnd")).toString(),
             m_current.value(QStringLiteral("projectIds")).toList(),
             m_current.value(QStringLiteral("primaryProjectId")).toString(),
-            m_current.value(QStringLiteral("documentParentNodeId")).toString());
+            m_current.value(QStringLiteral("documentParentNodeId")).toString(),
+            m_current.value(QStringLiteral("displayName")).toString());
         return;
     }
     if (kind == QLatin1String("rendition_update")) {
@@ -312,8 +529,17 @@ void RenditionSyncController::finishCurrent(const QVariantMap &remote)
     const QString localId = m_current.value(QStringLiteral("localId")).toString();
     const QString aggregateLocalId = m_current.value(
         QStringLiteral("aggregateLocalId"), localId).toString();
-    if (kind == QLatin1String("rendition_delete")) {
+
+    if (kind=="funding_set" || kind=="exchange_set") {
+        if (!m_store->markFinancialSynced(aggregateLocalId,kind,m_current.value("requestId").toString(),remote)) {
+            failCurrent("INVALID_RESPONSE",m_store->lastError());return;
+        }
+    } else if (kind == QLatin1String("rendition_delete")) {
         if (!m_store->markDraftDeleted(aggregateLocalId, remote)) { failCurrent("INVALID_RESPONSE", m_store->lastError()); return; }
+    } else if (kind == QLatin1String("rendition_trash")) {
+        if (!m_store->markDraftTrashed(aggregateLocalId, remote)) { failCurrent("INVALID_RESPONSE", m_store->lastError()); return; }
+    } else if (kind == QLatin1String("rendition_archive")) {
+        if (!m_store->markRenditionArchived(aggregateLocalId, remote)) { failCurrent("INVALID_RESPONSE", m_store->lastError()); return; }
     } else if (kind.startsWith(QLatin1String("expense_"))) {
         if (!m_store->markExpenseSynced(aggregateLocalId, localId, remote)) {
             failCurrent(QStringLiteral("INVALID_RESPONSE"), m_store->lastError());
@@ -348,12 +574,24 @@ void RenditionSyncController::failCurrent(const QString &code,
     const QString aggregateLocalId = m_current.value(
         QStringLiteral("aggregateLocalId"), localId).toString();
     const QString normalized = code.toUpper();
-    const bool conflict = normalized.contains(QStringLiteral("CONFLICT"))
-        || normalized.contains(QStringLiteral("ROW_VERSION"));
-    const bool ambiguous = normalized.contains(QStringLiteral("NETWORK"))
+    // Sin respuesta del servidor (sin red, timeout, 5xx): NO es un conflicto ni un
+    // error de datos. La operación conserva su intención (mismo request_id/CAS) y su
+    // estado de reintento/reconciliación, sin texto visible: lo comunica el aura.
+    // Sesión expirada (401): el servidor no ejecutó la operación; espera intacta a
+    // que se renueve la sesión. No es un rechazo de datos: sin texto en la ficha
+    // (lo comunica el aura y el panel "Estado de Rendiciones").
+    const bool authWait = normalized == QLatin1String("AUTH_REQUIRED")
+        || normalized == QLatin1String("HTTP_401");
+    const bool transport = RenditionConnectivity::isTransportFailure(normalized) || authWait;
+    const bool conflict = !transport
+        && (normalized.contains(QStringLiteral("CONFLICT"))
+            || normalized.contains(QStringLiteral("ROW_VERSION")));
+    const bool ambiguous = transport
         || normalized.contains(QStringLiteral("INVALID_RESPONSE"))
-        || normalized.contains(QStringLiteral("TIMEOUT"))
         || normalized.contains(QStringLiteral("UPLOAD"));
+    const QString shown = transport ? RenditionConnectivity::transportMarker() : message;
+    if (transport)
+        qInfo() << "INGE_RENDITIONS_SYNC transport_retry" << kind << normalized;
     QString state = conflict ? QString::fromLatin1(Conflict)
                              : QString::fromLatin1(Error);
 
@@ -364,7 +602,13 @@ void RenditionSyncController::failCurrent(const QString &code,
         state = ambiguous ? QString::fromLatin1(NeedsReconciliation) : state;
     }
 
-    if (kind == QLatin1String("attachment_reserve")) {
+
+    if (kind=="funding_set" || kind=="exchange_set") {
+        // Both financial RPCs deduplicate BEFORE CAS. Ambiguous failures replay
+        // the original request, not a rebased or newly generated intention.
+        state=conflict ? QString::fromLatin1(Conflict) : QString::fromLatin1(Error);
+        m_store->markFinancialState(aggregateLocalId,kind,m_current.value("requestId").toString(),state,shown);
+    } else if (kind == QLatin1String("attachment_reserve")) {
         const QString phase = m_current.value(
             QStringLiteral("phase"), QStringLiteral("RESERVE")).toString();
         if (conflict)
@@ -377,29 +621,36 @@ void RenditionSyncController::failCurrent(const QString &code,
             aggregateLocalId,
             m_current.value(QStringLiteral("expenseLocalId")).toString(),
             localId, state,
-            {{QStringLiteral("syncError"), message}});
+            {{QStringLiteral("syncError"), shown}});
     } else if (kind == QLatin1String("expense_create")) {
         // CREATE V02 es idempotente: ERROR conserva el mismo request/payload
         // y permite retry seguro. Un conflicto de idempotencia sí se detiene.
         state = conflict ? QString::fromLatin1(Conflict)
                          : QString::fromLatin1(Error);
-        m_store->markExpenseState(aggregateLocalId, localId, state, message);
+        m_store->markExpenseState(aggregateLocalId, localId, state, shown);
+    } else if ((kind == QLatin1String("rendition_trash") || kind == QLatin1String("rendition_archive")) && !ambiguous) {
+        const bool persisted=kind==QLatin1String("rendition_archive")
+            ? m_store->rejectRenditionArchive(aggregateLocalId, shown) : m_store->rejectDraftTrash(aggregateLocalId, shown);
+        if (!persisted)
+            m_store->markRenditionState(aggregateLocalId, QString::fromLatin1(Error), m_store->lastError());
     } else if (kind.startsWith(QLatin1String("expense_"))) {
         state = conflict ? QString::fromLatin1(Conflict)
                          : QString::fromLatin1(NeedsReconciliation);
-        m_store->markExpenseState(aggregateLocalId, localId, state, message);
+        m_store->markExpenseState(aggregateLocalId, localId, state, shown);
     } else {
-        m_store->markRenditionState(aggregateLocalId, state, message);
+        m_store->markRenditionState(aggregateLocalId, state, shown);
     }
     const QString renditionRemoteId = m_current.value(
         QStringLiteral("renditionRemoteId"),
         m_current.value(QStringLiteral("remoteId"))).toString();
     m_current.clear();
-    setLastError(message);
+    setLastError(transport ? QString() : message);
     setBusy(false);
-    emit syncStopped(state, message);
-    if (state == QLatin1String(NeedsReconciliation)
-        || state == QLatin1String(Conflict)) {
+    emit syncStopped(state, code, transport ? QString() : message);
+    // Sin servidor no se relanzan consultas: la reconexión (evento de red o
+    // reintento controlado) ejecuta sync + pull y resuelve la reconciliación.
+    if (!transport && (state == QLatin1String(NeedsReconciliation)
+        || state == QLatin1String(Conflict))) {
         m_repository->listRenditions(50, {}, {});
         if (!renditionRemoteId.isEmpty()) {
             m_repository->getRendition(renditionRemoteId);

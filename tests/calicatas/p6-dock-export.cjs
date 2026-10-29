@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const base = path.resolve(__dirname, '../..');
 const editor = fs.readFileSync(path.join(base, 'qml/Mobile/pages/CalicatasEditorPage.qml'), 'utf8');
-const dock = fs.readFileSync(path.join(base, 'qml/Mobile/flowcore/GlobalContextDock.qml'), 'utf8');
+const mainQml = fs.readFileSync(path.join(base, 'qml/Mobile/Main.qml'), 'utf8').replace(/\r\n/g, '\n');
 function method(source, name) {
   const match = source.match(new RegExp('function ' + name + '\\([^]*?^    }', 'm'));
   assert.ok(match, name);
@@ -37,46 +37,50 @@ assert.equal(deferred.length, 1, 'retry permitted after generation failure');
 root.currentIndex = 1;
 deferred.shift()();
 assert.equal(root._exportPreparing, false, 'changed document releases guard');
-assert.match(dock, /onMenuNodeChanged:\s*Qt.callLater\(validateMenu\)/,
-  'menu validation must not mutate its dependency during binding evaluation');
-assert.match(dock, /menuGeneration !== generation/, 'stale displayed branches cannot dispatch');
-const leaf = {id: 'leaf', visible: true, enabled: true};
-const nested = {id: 'nested', visible: true, enabled: true, children: [leaf]};
+// Barra de acciones + menú jerárquico (sustituyen al Dock): mismas reglas de
+// toque, submenús por niveles, generación vigente y enabled === true.
+const fnSrc = (name, indent) => {
+  const re = new RegExp('\\n' + indent + 'function ' + name + '\\([^)]*\\) \\{(?:[^\\n]*\\}\\n|[^]*?\\n' + indent + '\\}\\n)');
+  const m = mainQml.match(re);
+  assert.ok(m, name);
+  return m[0];
+};
+const dispatchedIds = [];
+const bar = vm.createContext({});
+for (const name of ['visibleOf', 'hasCommand', 'hasChildren', 'tapKind']) vm.runInContext(fnSrc(name, '        '), bar);
+const leaf = {id: 'leaf', command: 'leaf', visible: true, enabled: true};
+const hidden = {id: 'hidden', command: 'hidden', visible: false, enabled: true};
+const nested = {id: 'nested', visible: true, enabled: true, children: [leaf, hidden]};
 const parent = {id: 'parent', visible: true, enabled: true, children: [nested]};
-let dispatched = 0;
-const menu = vm.createContext({visibleActions: [parent], menuPath: [], generation: 4,
-  menuGeneration: -1, menuAvailable: true, transitionPending: false, width: 400,
-  flow: null, console: {info() {}}, Qt: {point: (x, y) => ({x, y})},
-  router: {busy: false, dispatch() {dispatched++; return true;}}});
-const resolver = dock.match(/readonly property var menuNode: (\{[^]*?^    \})/m)[1];
-for (const name of ['visibleChildren', 'haptic', 'openMenu', 'pushMenu', 'popMenu',
-                    'closeMenu', 'handleBack', 'activateMenuEntry', 'validateMenu'])
-  vm.runInContext(method(dock, name), menu);
-Object.defineProperties(menu, {
-  menuNode: {get: () => vm.runInContext('(function() ' + resolver + ')()', menu)},
-  menuEntries: {get: () => menu.menuNode ? menu.visibleChildren(menu.menuNode) : []},
-  menuOpen: {get: () => menu.menuGeneration === menu.generation && menu.menuPath.length > 0 && !!menu.menuNode}
-});
-assert.equal(menu.openMenu('parent', null), true);
-assert.equal(menu.menuEntries[0].id, 'nested');
-menu.activateMenuEntry(nested);
-assert.equal(menu.menuPath.length, 2);
-assert.equal(menu.handleBack(), true);
-assert.equal(menu.menuPath.length, 1, 'Back pops exactly one level');
-menu.activateMenuEntry(nested);
-menu.activateMenuEntry(leaf);
-assert.equal(dispatched, 1);
-assert.equal(menu.menuPath.length, 0, 'leaf dispatch closes branch');
-menu.openMenu('parent', null);
-menu.generation++;
-menu.activateMenuEntry(leaf);
-assert.equal(dispatched, 1, 'stale branch cannot dispatch in a new generation');
-menu.validateMenu();
-assert.equal(menu.menuPath.length, 0);
-menu.openMenu('parent', null);
-parent.children = [];
-menu.validateMenu();
-assert.equal(menu.menuPath.length, 0, 'removed children close the branch');
+const direct = {id: 'direct', command: 'direct', visible: true, enabled: true};
+assert.equal(bar.tapKind(direct), 'dispatch');
+assert.equal(bar.tapKind(parent), 'menu');
+assert.equal(bar.tapKind({id: 'off', command: 'off', enabled: false}), 'none', 'disabled actions do nothing');
+assert.equal(bar.tapKind({id: 'empty', enabled: true, children: [hidden]}), 'none', 'hidden children do not open a menu');
+const menu = vm.createContext({path: [], generation: 4, closed: 0,
+  bareNavBarV1: bar, dockContextController: {generation: 4},
+  dockCommandRouter: {dispatch(id, gen) { dispatchedIds.push(id + '@' + gen); return true; }}});
+menu.close = () => { menu.closed++; menu.path = []; };
+vm.runInContext(fnSrc('back', '        '), menu);
+vm.runInContext(fnSrc('activate', '        '), menu);
+menu.path = [parent];
+menu.activate(nested);
+assert.equal(menu.path.length, 2, 'entry with children opens the next level');
+menu.back();
+assert.equal(menu.path.length, 1, 'Back pops exactly one level');
+menu.activate(nested);
+menu.activate(leaf);
+assert.deepEqual(dispatchedIds, ['leaf@4'], 'leaf dispatches with the menu generation');
+assert.equal(menu.closed, 1, 'leaf dispatch closes the menu');
+menu.path = [parent, nested];
+menu.dockContextController.generation = 5;
+menu.activate(leaf);
+assert.equal(dispatchedIds.length, 1, 'stale generation cannot dispatch');
+menu.path = [parent];
+menu.back();
+assert.equal(menu.closed, 3, 'Back on the first level closes the menu');
+assert.ok(mainQml.includes('if (actionMenuV1.visible) {\n        actionMenuV1.back()'), 'Android Back walks the menu');
+assert.ok(mainQml.includes('dockCommandRouter.dispatch(String(modelData.id), dockContextController.generation)'), 'bar dispatches through the router');
 root.calicataBranch = () => [];
 root.statusLabel = s => s;
 root.contextStatus = 'BORRADOR';

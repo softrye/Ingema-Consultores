@@ -1,0 +1,204 @@
+{
+  "status": "ACTIVE_USER_ACCEPTED_SERVER_ROUNDING",
+  "date": "2026-10-06",
+  "moneyTransport": "decimal strings in this shared test vector; current RPC args remain numeric",
+  "cases": [
+    {
+      "id": "CALC-01",
+      "expenses": [
+        {
+          "id": "00000000-0000-4000-8000-000000001000",
+          "amount": "0.10",
+          "currency": "PEN",
+          "reviewStatus": "PENDIENTE"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000001001",
+          "amount": "0.20",
+          "currency": "PEN",
+          "reviewStatus": "PENDIENTE"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000001002",
+          "amount": "1.01",
+          "currency": "PEN",
+          "reviewStatus": "VALIDADO"
+        }
+      ],
+      "expected": {
+        "pen": "1.31",
+        "usd": "0.00",
+        "count": 3,
+        "pending": 2
+      },
+      "renditionId": "00000000-0000-4000-8000-000000000900"
+    },
+    {
+      "id": "CALC-02",
+      "expenses": [
+        {
+          "id": "00000000-0000-4000-8000-000000001020",
+          "amount": "47.20",
+          "currency": "PEN",
+          "reviewStatus": "PENDIENTE"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000001021",
+          "amount": "10.30",
+          "currency": "PEN",
+          "reviewStatus": "VALIDADO"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000001022",
+          "amount": "90.86",
+          "currency": "USD",
+          "reviewStatus": "PENDIENTE"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000001023",
+          "amount": "0.14",
+          "currency": "USD",
+          "reviewStatus": "VALIDADO"
+        }
+      ],
+      "expected": {
+        "pen": "57.50",
+        "usd": "91.00",
+        "count": 4,
+        "pending": 2
+      },
+      "renditionId": "00000000-0000-4000-8000-000000000901"
+    },
+    {
+      "id": "CALC-03",
+      "expenses": [
+        {
+          "id": "00000000-0000-4000-8000-000000001040",
+          "amount": "10.00",
+          "currency": "PEN",
+          "reviewStatus": "PENDIENTE"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000001041",
+          "amount": "20.00",
+          "currency": "PEN",
+          "reviewStatus": "VALIDADO"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000001042",
+          "amount": "5.00",
+          "currency": "PEN",
+          "reviewStatus": "OBSERVADO"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000001043",
+          "amount": "7.00",
+          "currency": "PEN",
+          "reviewStatus": "RECHAZADO"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000001044",
+          "amount": "100.00",
+          "currency": "PEN",
+          "reviewStatus": "PENDIENTE",
+          "archived": true
+        }
+      ],
+      "expected": {
+        "pen": "42.00",
+        "usd": "0.00",
+        "count": 4,
+        "pending": 1
+      },
+      "renditionId": "00000000-0000-4000-8000-000000000902"
+    },
+    {
+      "id": "CALC-04",
+      "expenses": [],
+      "invalid": [
+        {
+          "amount": "0.00",
+          "currency": "PEN"
+        },
+        {
+          "amount": "-1.00",
+          "currency": "PEN"
+        },
+        {
+          "amount": "NaN",
+          "currency": "PEN"
+        },
+        {
+          "amount": "Infinity",
+          "currency": "PEN"
+        },
+        {
+          "amount": "1.00",
+          "currency": "EUR"
+        }
+      ],
+      "expected": {
+        "roundedPen": "1.01",
+        "rejectNonPositiveOrNonFiniteOrUnsupportedCurrency": true
+      },
+      "currentGap": "User accepted current PostgreSQL rounding on 2026-10-09; preview and validator must match persistence.",
+      "renditionId": "00000000-0000-4000-8000-000000000903",
+      "accepted": [
+        {
+          "amount": "1.005",
+          "currency": "PEN"
+        }
+      ]
+    },
+    {
+      "id": "CALC-05",
+      "fund": {
+        "enabled": true,
+        "pen": "100.00",
+        "usd": "20.00"
+      },
+      "expenses": [
+        {
+          "id": "00000000-0000-4000-8000-000000001080",
+          "amount": "40.00",
+          "currency": "PEN",
+          "reviewStatus": "PENDIENTE"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000001081",
+          "amount": "5.00",
+          "currency": "USD",
+          "reviewStatus": "PENDIENTE"
+        }
+      ],
+      "pending": [
+        {
+          "id": "00000000-0000-4000-8000-000000001180",
+          "amount": "10.00",
+          "currency": "PEN"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000001181",
+          "amount": "1.00",
+          "currency": "USD"
+        }
+      ],
+      "expected": {
+        "pen": "40.00",
+        "usd": "5.00",
+        "count": 2,
+        "pending": 2,
+        "balancePen": "60.00",
+        "balanceUsd": "15.00",
+        "projectedPen": "50.00",
+        "projectedUsd": "6.00",
+        "projectedBalancePen": "50.00",
+        "projectedBalanceUsd": "14.00",
+        "disabledBalance": null,
+        "immutableFundPen": "100.00",
+        "immutableFundUsd": "20.00"
+      },
+      "renditionId": "00000000-0000-4000-8000-000000000904"
+    }
+  ]
+}

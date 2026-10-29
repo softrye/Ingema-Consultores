@@ -276,7 +276,7 @@ check('C04 stale async callbacks are dropped after leave', () => {
     assert.ok(extract(editor, fn).includes('root.leaving'), fn);
 });
 check('C05-C07 blocking operation suppresses the Dock; end/error/leave restore it', () => {
-  assert.ok(mainQml.includes('|| (app.pageIndex === 1 && app.calicataDockSuppressed)'));
+  assert.ok(mainQml.includes('&& !(app.pageIndex === 1 && app.calicataDockSuppressed)'));
   assert.ok(editor.includes('readonly property bool dockSuppressed: operationOverlay.shown'));
   assert.ok(mainQml.includes('onDockSuppressedChanged: app.setCalicataDockSuppressed(dockSuppressed'));
   assert.ok(/Component\.onDestruction: \{[\s\S]{0,200}app\.setCalicataDockSuppressed\(false, ""\)/.test(mainQml));

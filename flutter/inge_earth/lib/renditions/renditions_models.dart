@@ -1,3 +1,5 @@
+import 'rendition_money.dart';
+
 typedef JsonMap = Map<String, dynamic>;
 
 JsonMap jsonMap(Object? value) => value is Map
@@ -101,7 +103,20 @@ class RenditionData {
   double get totalPen => numberField(raw, 'totalPen', 'total_pen');
   double get totalUsd => numberField(raw, 'totalUsd', 'total_usd');
   int get expenseCount => intField(raw, 'expenseCount', 'expense_count');
-  bool get readOnly => status != 'BORRADOR';
+  JsonMap get funding => jsonMap(raw['funding']);
+  JsonMap get exchangeRate => jsonMap(raw['exchangeRate']);
+  ({int? pen, int? usd}) get fundBalanceCents {
+    if (funding['enabled'] != true) return (pen: null, usd: null);
+    return commonFundBalance(funding['pen'] ?? 0, funding['usd'] ?? 0, totalPen, totalUsd, exchangeRate['rate']);
+  }
+  bool get readOnly {
+    final version = field(raw, 'rowVersion', 'row_version');
+    if (version != null && (intField(raw, 'rowVersion', 'row_version') < 0 || intField(raw, 'rowVersion', 'row_version') > 9007199254740991)) return true;
+    if (raw['archived'] == true || field(raw, 'isBlocked', 'is_blocked') == true || raw['isSnapshot'] == true || !const ['BORRADOR', 'OBSERVADO'].contains(status)) return true;
+    final permission = field(raw, 'canEditContent', 'can_edit_content');
+    if (permission != null) return permission != true;
+    return status != 'BORRADOR' || remoteId.isNotEmpty || textField(raw, 'currentVersionId', 'current_version_id').isNotEmpty;
+  }
   bool get hasConflict =>
       syncState == 'CONFLICT' || syncState == 'NEEDS_RECONCILIATION';
 }
@@ -134,7 +149,7 @@ class ExpenseData {
   String get currency => textField(raw, 'currencyCode', 'currency_code').isEmpty
       ? 'PEN'
       : textField(raw, 'currencyCode', 'currency_code');
-  double get amount => numberField(raw, 'amount');
+  double get amount => moneyCents(raw['amount'] ?? 0) / 100;
   String get justification => textField(raw, 'justification');
   String get reviewStatus {
     final value = textField(raw, 'reviewStatus', 'review_status');

@@ -25,20 +25,35 @@ public:
     QVariantList renditions() const;
     bool removeDraft(const QString &localId);
     bool markDraftDeleted(const QString &localId, const QVariantMap &remote);
+    bool requestDraftTrash(const QString &localId);
+    bool markDraftTrashed(const QString &localId, const QVariantMap &remote);
+    bool rejectDraftTrash(const QString &localId, const QString &error);
+    bool requestRenditionArchive(const QString &localId);
+    bool markRenditionArchived(const QString &localId, const QVariantMap &remote);
+    bool rejectRenditionArchive(const QString &localId, const QString &error);
     QVariantList outbox() const { return m_outbox; }
     int pendingCount() const;
     QString lastError() const { return m_lastError; }
     QVariantMap editorDrafts() const { return m_editorDrafts; }
-    bool saveEditorDraft(const QString &key, const QVariantMap &draft);
+    // quiet: autoguardado mientras se escribe; no republica el estado (evita reconstruir la UI).
+    bool saveEditorDraft(const QString &key, const QVariantMap &draft, bool quiet = false);
 
     Q_INVOKABLE void reload();
+    bool saveFinancial(const QString &localId, const QString &kind,
+                       const QVariantMap &values, qint64 expectedRowVersion);
+    bool markFinancialState(const QString &localId, const QString &kind,
+                            const QString &requestId, const QString &state,
+                            const QString &error = {});
+    bool markFinancialSynced(const QString &localId, const QString &kind,
+                             const QString &requestId, const QVariantMap &remote);
     Q_INVOKABLE QString createDraft(const QString &periodStart,
                                     const QString &periodEnd,
                                     const QVariantList &projectIds,
                                     const QString &primaryProjectId,
                                     const QString &documentParentNodeId = {},
                                     const QString &spaceId = {},
-                                    bool stageForSync = true);
+                                    bool stageForSync = true,
+                                    const QString &displayName = {});
     Q_INVOKABLE bool saveDraft(const QString &localId,
                                const QString &periodStart,
                                const QString &periodEnd,
@@ -72,7 +87,7 @@ public:
     Q_INVOKABLE QVariantList expensesFor(const QString &localId) const;
     Q_INVOKABLE QVariantList attachmentsFor(const QString &localId,
                                              const QString &expenseLocalId) const;
-    Q_INVOKABLE void mergeRemoteRenditions(const QVariantList &remoteRows);
+    Q_INVOKABLE void mergeRemoteRenditions(const QVariantList &remoteRows, bool fromActiveList = true);
     void reconcileCompleteRenditionList(const QVariantList &remoteRows);
     Q_INVOKABLE void mergeRemoteExpenses(const QString &renditionLocalId,
                                          const QVariantList &remoteRows);
@@ -110,6 +125,40 @@ public:
                                         const QString &expenseLocalId,
                                         const QString &error);
 
+    // ---- Working Document (borradores de gasto en la nube, Web PR #6).
+    // Mismo almacén persistente y MISMO outbox (working_save / working_promote /
+    // working_archive) que procesa RenditionSyncController: un solo motor.
+    // Implementación: renditionlocalstore_working.cpp.
+    QVariantList workingRowsFor(const QString &renditionLocalId) const;   // vista para UI
+    QVariantMap workingRow(const QString &workingId) const;
+    int activeWorkingCount(const QString &renditionLocalId) const;
+    int workingConflictCount(const QString &renditionLocalId) const;
+    // Borradores cuya promoción a gasto CONFIRMÓ el servidor (no basta el outbox).
+    QStringList promotedWorkingIds(const QString &renditionLocalId) const;
+    // Crea/actualiza la intención deseada (form + sustentos). files: [{localUri,
+    // fileName, mimeType, sizeBytes} | {id (sustento ya existente)}]. Devuelve el id.
+    QString saveWorkingDraft(const QString &renditionLocalId, const QString &workingId,
+                             const QVariantMap &form, const QVariantList &files,
+                             const QString &expenseLocalId = {});
+    bool requestWorkingPromotion(const QString &renditionLocalId, const QString &workingId);
+    bool requestWorkingArchive(const QString &renditionLocalId, const QString &workingId);
+    // Conflicto real: keepLocal=true reaplica la intención local sobre la versión
+    // vigente del servidor (serverRow); false adopta la versión del servidor.
+    bool resolveWorkingConflict(const QString &renditionLocalId, const QString &workingId,
+                                bool keepLocal, const QVariantMap &serverRow);
+    void mergeRemoteWorkingRows(const QString &renditionLocalId, const QVariantList &rows);
+    // Transiciones de la cola.
+    bool markWorkingSending(const QString &workingId, const QVariantMap &saveArguments);
+    bool markWorkingSaved(const QString &workingId, const QVariantMap &serverRow);
+    QVariantList workingPendingSources(const QString &workingId) const;
+    bool markWorkingSourcePhase(const QString &workingId, const QString &sourceId,
+                                const QString &phase, const QVariantMap &file = {});
+    bool finishWorkingSave(const QString &workingId);
+    bool markWorkingPromoted(const QString &workingId, const QVariantMap &result);
+    bool markWorkingArchived(const QString &workingId, const QVariantMap &serverRow);
+    bool markWorkingFailed(const QString &operation, const QString &workingId,
+                           const QString &state, const QString &error);
+
 signals:
     void accountIdChanged();
     void renditionsChanged();
@@ -119,6 +168,9 @@ signals:
     void persistenceFailed(const QString &message);
 
 private:
+    bool requestRenditionLifecycle(const QString &localId, bool archive);
+    bool markRenditionLifecycle(const QString &localId, const QVariantMap &remote, bool archive);
+    bool rejectRenditionLifecycle(const QString &localId, const QString &error, bool archive);
     void selectAccount(const QString &accountScope);
     QString storagePath() const;
     bool persist();
@@ -148,6 +200,12 @@ private:
     static qint64 remoteRowVersion(const QVariantMap &remote, qint64 fallback);
     static QVariantMap canonicalDraftPayload(const QVariantMap &draft);
     static QByteArray payloadHash(const QVariantMap &payload);
+    // Working (renditionlocalstore_working.cpp)
+    int workingIndex(const QString &workingId) const;
+    QVariantMap workingDocument(const QVariantMap &row) const;
+    QVariantMap workingOperation(const QVariantMap &outboxEntry) const;
+    void adoptOwnRenditionVersion(const QString &renditionLocalId, qint64 version);
+    QVariantList m_workingRows;
 
     AuthSession *m_auth = nullptr;
     QString m_accountScope;

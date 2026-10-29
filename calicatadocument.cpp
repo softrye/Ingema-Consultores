@@ -1226,7 +1226,7 @@ QVariantMap CalicataDocument::buildFullJson() const
         root["timestamp"] = ts;
     }
     root["images"] = m_images;
-    
+
     root["instance_id"] = m_instanceId;
     root["photo_draft_id"] = m_photoDraftId;
 
@@ -1276,7 +1276,7 @@ bool CalicataDocument::applyFullJson(const QVariantMap& root)
 
     m_timestamp = root.value("timestamp").toMap();
     m_images = restoredImages;
-    
+
     {
         // Legacy files may carry their stable UUID only in the header.
         const QString rawId = root.value("instance_id").toString().trimmed();
@@ -2375,6 +2375,31 @@ QVariantList CalicataDocument::scanDrafts(bool includeArchived) const
         item["status"] = status;
         item["syncState"] = header.value("sync_state");
         item["lastModifiedMs"] = info.lastModified().toMSecsSinceEpoch();
+        // Home de Calicatas (lista y mapa): datos de presentación ya guardados en la
+        // ficha, solo lectura. Las coordenadas se convierten en QML con la misma
+        // función de la ficha (Rules.utmToGeoForDatum); nada se rellena si falta.
+        item["location"] = header.value("ubicacion", header.value("tramo"));     // Ubicación / Tramo
+        item["progresiva"] = header.value("progresiva", header.value("pk"));
+        item["utmX"] = header.value("utm_x");
+        item["utmY"] = header.value("utm_y");
+        item["utmZone"] = header.value("zona", header.value("utm_zone"));
+        item["datum"] = header.value("datum");
+        item["latitude"] = header.value("latitude");
+        item["longitude"] = header.value("longitude");
+        item["altitudeM"] = header.value("altitude_m");
+        item["supervisor"] = header.value("supervisor");
+        item["startDate"] = header.value("fecha_inicio");
+        item["observations"] = root.value("observaciones");
+        {
+            // Primera fotografía local existente (sin descargar nada ni inventar imagen).
+            const QVariantMap images = root.value("images").toMap();
+            for (const QString &key : {QStringLiteral("foto1_path"), QStringLiteral("foto2_path"), QStringLiteral("foto3_path")}) {
+                const QString rel = images.value(key).toString().trimmed();
+                if (rel.isEmpty()) continue;
+                const QString abs = resolveMaybeRelToAbs(rel);
+                if (!abs.isEmpty() && QFileInfo::exists(abs)) { item["photoUrl"] = QUrl::fromLocalFile(abs).toString(); break; }
+            }
+        }
         out.append(item);
     }
 
@@ -3134,7 +3159,9 @@ QVariantMap CalicataDocument::photoSheetMetadata() const
     // Rótulo de fotos = projects.name (contrato Web, CalicataPhotos: misma
     // fuente que la ficha y la exportación). Sin proyecto asignado, el nombre
     // antiguo guardado en la ficha se conserva como rótulo.
-    meta[QStringLiteral("project")] = m_header.value(QStringLiteral("projectId")).toString().trimmed().isEmpty()
+    // Rótulo de fotos: nombre corto de la ficha; si no existe, projects.name.
+    meta[QStringLiteral("project")] = !text({"project_short_name"}).isEmpty() ? text({"project_short_name"})
+        : m_header.value(QStringLiteral("projectId")).toString().trimmed().isEmpty()
         ? text({"project_full_name", "excel_title", "project_short_name"})
         : text({"projectName", "project_name"});
     // Fecha/hora: fecha de la ficha + hora manual o de la foto (photoMetadata);
@@ -3447,6 +3474,25 @@ bool CalicataDocument::emptyPhotoSlot(int idx)
     images[key("sync")] = QStringLiteral("PENDING");
     images[key("pending_op")] = QStringLiteral("EMPTY_SLOT");
     return commitPhotoImages(images);
+}
+
+// Igual que el bookkeeping de fotos: recuperar bytes remotos no es una edición.
+void CalicataDocument::cacheLogoFromCloud(const QString &category, const QString &relativePath,
+                                         const QString &mediaId, const QVariantList &history)
+{
+    if (m_closed || (category != QLatin1String("ENTITY") && category != QLatin1String("PROJECT"))) return;
+    const QString prefix = category == QLatin1String("ENTITY") ? QStringLiteral("logo_mtc") : QStringLiteral("logo_proyecto");
+    QVariantMap images = m_images;
+    images[prefix + QStringLiteral("_path")] = relativePath;
+    images[prefix + QStringLiteral("_removed")] = relativePath.isEmpty();
+    images[prefix + QStringLiteral("_cloud_media_id")] = mediaId;
+    images[prefix + QStringLiteral("_cloud_path")] = relativePath;
+    images[prefix + QStringLiteral("_history")] = history;
+    if (images == m_images) return;
+    const bool wasDirty = m_dirty;
+    m_images = images;
+    emit dataChanged();
+    if (saveDraft() && wasDirty) setDirty(true);
 }
 
 void CalicataDocument::setPhotoCloudState(int idx, const QVariantMap &changes)
