@@ -78,7 +78,9 @@ void main()
                          + backdropAt(sampleAt + vec2(0.0, frost), rectSize)
                          + backdropAt(sampleAt - vec2(0.0, frost), rectSize));
     }
-    vec3 glass = mix(backdrop, tint.rgb, tint.a);
+    // QColor uniforms arrive premultiplied from Qt Quick. Multiplying their
+    // RGB by alpha again turns a translucent white tint into a gray film.
+    vec3 glass = backdrop * (1.0 - tint.a) + tint.rgb;
     if (contrast > 0.0) {
         // Luminancia del fondo real: sobre blanco/tarjetas el cristal se vuelve
         // humo azulado (iconos blancos legibles); sobre fondos oscuros no cambia.
@@ -101,7 +103,7 @@ void main()
 
     // Borde fino dentro del contorno.
     float edgeMask = clamp(edgeWidth + 0.5 + d, 0.0, 1.0) * inside;
-    glass = mix(glass, edge.rgb, edge.a * edgeMask);
+    glass = glass * (1.0 - edge.a * edgeMask) + edge.rgb * edgeMask;
 
     vec4 surface = vec4(glass, 1.0) * inside;
 
