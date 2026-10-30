@@ -2611,9 +2611,26 @@ Item {
         }
     }
 
+    // The Loader may finish after hydration; docChanged is not an initial-load hook.
+    // Reconcile once ready, and again when cloud identity or the account arrives.
+    readonly property string mediaCloudScope: root.doc && root.auth && root.auth.logged
+        ? String(root.doc.instanceId || "") + ":" + String(root.auth.userId || "") + ":"
+          + String(root.doc.header.projectId || "") + ":" + String(root.doc.header.remoteCalicataId || "") : ""
+    onMediaCloudScopeChanged: root._scheduleMediaCloudReconcile()
+    function _scheduleMediaCloudReconcile() {
+        if (root._ready) mediaCloudReconcile.restart()
+    }
+    Timer {
+        id: mediaCloudReconcile
+        interval: 0
+        repeat: false
+        onTriggered: root._reconcileMediaCloud()
+    }
+
     // Resultados confirmados mientras la ficha estaba cerrada o el proceso murió.
     function _reconcileMediaCloud() {
-        if (!doc || doc.closed === true || typeof CalicataCloud === "undefined") return
+        if (!root._ready || !root.auth || !root.auth.logged
+                || !doc || doc.closed === true || typeof CalicataCloud === "undefined") return
         var confirmed = CalicataCloud.takeConfirmedMedia(doc.instanceId)
         for (var i = 0; i < confirmed.length; ++i) {
             var c = confirmed[i]
@@ -2791,7 +2808,7 @@ Item {
         target: root
         function onDocChanged() {
             if (!root.doc && typeof CalicataCloud !== "undefined") CalicataCloud.leavePresence()
-            root._reconcileMediaCloud()
+            root._scheduleMediaCloudReconcile()
         }
         // Presencia: EDITING mientras un campo tiene una edición en curso.
         function on_ActiveCommitFieldChanged() {
@@ -2810,6 +2827,7 @@ Item {
         function onStateChanged() {
             if (typeof CalicataCloud !== "undefined")
                 CalicataCloud.setPresenceActive(Qt.application.state === Qt.ApplicationActive)
+            if (Qt.application.state === Qt.ApplicationActive) root._scheduleMediaCloudReconcile()
         }
     }
     Component.onDestruction: if (typeof CalicataCloud !== "undefined") CalicataCloud.leavePresence()
@@ -2855,6 +2873,7 @@ Item {
             for (var idx = 1; idx <= 3; ++idx)
                 if (root._photoSyncState(idx) === "PENDING" && !root._photoMediaEntry(idx))
                     root._queuePhotoSync(root.doc, idx)
+            root._scheduleMediaCloudReconcile()
         }
     }
 
@@ -6047,7 +6066,7 @@ Item {
             observacionesText = ""
             setDirty(false)
         }
-
+        root._scheduleMediaCloudReconcile()
     }
 
 

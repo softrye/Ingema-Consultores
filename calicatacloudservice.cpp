@@ -3376,7 +3376,12 @@ void CalicataCloudService::rtConnect()
         rtScheduleRetry();
     });
     connect(socket, &QSslSocket::errorOccurred, this, [this, socket](QAbstractSocket::SocketError) {
-        if (socket == m_rtSocket) socket->abort();
+        if (socket != m_rtSocket) return;
+        // A failed TCP/TLS startup need not emit disconnected (it never connected).
+        // Release the attempt here; otherwise joinPresence sees a stale socket forever.
+        qWarning() << "INGE_LIVE_CONNECT_FAILED code=" << int(socket->error());
+        rtDisconnect(false);
+        rtScheduleRetry();
     });
     socket->connectToHostEncrypted(host, quint16(base.port(443)));
 }
