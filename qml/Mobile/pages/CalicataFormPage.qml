@@ -10,6 +10,7 @@ import "../lib/GpsBus.js" as GpsBus
 import "../lib/CalicataRules.js" as Rules
 import "../lib/CalicataElevation.js" as Elevation
 import "../lib/PropACalicataIconMap.js" as CalIcons
+import "../lib/IconCatalog.js" as GeneralIcons
 import "../flowcore" as FlowCore
 import "../components" as Components
 import InGe.CoreFlow 3.0 as Mobile
@@ -763,6 +764,8 @@ Item {
         return true
     }
     property string photoFeedbackText: ""
+    // Última incidencia real de selección de foto/logo ({kind, code, message}) o null.
+    property var mediaSelectionIssue: null
     property bool _logoRequestPending: false
     property string _pendingLogoPickTarget: ""
     property string _pendingLogoDocId: ""
@@ -805,20 +808,20 @@ Item {
     readonly property color cWhite: "#FFFFFF"
 
     // Superficies del formulario técnico (claro / oscuro)
-    readonly property color cPage: darkMode ? root.brand.ingemaDeep : "#FCFCFC"
+    readonly property color cPage: darkMode ? "#0A0A0A" : "#FCFCFC"
     readonly property color cSurface: darkMode ? root.brand.ingemaNavy : "#FFFFFF"
     readonly property color cSurfaceAlt: darkMode ? "#2A3A5A" : "#F1F1EE"
     readonly property color cBorder: darkMode ? "#404F6C" : "#DFE2E6"
     readonly property color cText: darkMode ? "#FFFFFF" : root.brand.ingemaDeep
     readonly property color cMuted: darkMode ? root.brand.ingemaPaperSecondary : root.brand.ingemaInkTertiary
     readonly property color cField: darkMode ? "#182440" : "#FFFFFF"
-    readonly property color cAccent: darkMode ? root.brand.ingemaBlueTint : root.brand.ingemaBlue
+    readonly property color cAccent: darkMode ? "#8DB85A" : root.brand.ingemaBlue
     // Acentos semánticos de Ficha > General: planos, sin glass ni gradientes.
     // Blue = interacción/en curso, Green = confirmado, Navy = categorías
     // secundarias (antes violeta/turquesa). Naranja se conserva como
     // advertencia semántica ("sugerido").
-    readonly property color cGenBlue: darkMode ? root.brand.ingemaBlueTint : root.brand.ingemaBlue
-    readonly property color cGenBlueSoft: darkMode ? "#102B52" : root.brand.ingemaBlueWash
+    readonly property color cGenBlue: darkMode ? "#8DB85A" : root.brand.ingemaBlue
+    readonly property color cGenBlueSoft: darkMode ? "#243A1C" : root.brand.ingemaBlueWash
     readonly property color cGenOrange: darkMode ? "#FFB35C" : "#DE7A12"
     readonly property color cGenOrangeSoft: darkMode ? "#33271A" : "#FDF2E5"
     readonly property color cGenViolet: darkMode ? root.brand.ingemaPaperSecondary : root.brand.ingemaNavy
@@ -2225,14 +2228,61 @@ Item {
         return full.substring(prefix.length).replace(/\\/g, "/")
     }
 
+    // Contrato Web (CalicataLogos.tsx + logoCloudSync.ts): la verdad es
+    // calicata_media (LOGO · ENTITY/PROJECT); una ranura vacía es "Sin logo".
+    // El recurso empaquetado ya no sustituye en silencio al logo remoto vigente.
     function _resolvedLogo(path, removed, target) {
         if (removed === true) return ""
-        return logoAbsUrlFromRel(path || (target === "mtc"
-            ? "qrc:/images/ICONO_LOGO_MTC.jpeg" : "qrc:/images/INGEMA_LOGO_COMPLETO.png"))
+        var rel = String(path || "").trim()
+        // Fichas antiguas que guardaron el recurso empaquetado como ruta: se
+        // siguen mostrando tal cual (es lo que tienen guardado), sin inventar otro.
+        return rel.length ? logoAbsUrlFromRel(rel) : ""
+    }
+
+    // ===== Logos antes de crear (Home › Nueva calicata › Identidad del reporte) =====
+    // Mismo selector real (identityPopup: Elegir del dispositivo / Recursos /
+    // biblioteca 10_RECURSOS, Restablecer, Vaciar). Mientras se prepara, las
+    // elecciones quedan en `stagedLogos` (archivos ya copiados a Recursos) y NO se
+    // escriben en ninguna ficha ni se publican en Media Cloud. Al pulsar Crear,
+    // CalicatasEditorPage las aplica a la ficha nueva con _storeLogoRelative
+    // (historial + outbox PUBLISH_LOGO). Cancelar descarta la preparación.
+    property var stagedLogos: null
+    readonly property bool logoStaging: stagedLogos !== null
+    property var _cloudLogoHistoryBeforeStaging: null
+    function beginLogoStaging() {
+        if (!root.logoStaging) {
+            root._cloudLogoHistoryBeforeStaging = root.cloudLogoHistory
+            root.cloudLogoHistory = ({ PROJECT: [], ENTITY: [] })      // Anteriores de otra ficha no aplican
+            root.stagedLogos = ({})
+        }
+        root.logoMtcSource = String(root.stagedLogos.mtc || "").length ? logoAbsUrlFromRel(root.stagedLogos.mtc) : ""
+        root.logoProyectoSource = String(root.stagedLogos.pro || "").length ? logoAbsUrlFromRel(root.stagedLogos.pro) : ""
+        root.logoFeedbackText = ""
+        identityPopup.open()
+    }
+    // Termina la preparación y devuelve lo elegido ({mtc, pro} con rutas relativas).
+    function endLogoStaging() {
+        if (!root.logoStaging) return ({})
+        var staged = Object.assign({}, root.stagedLogos)
+        if (identityPopup.opened) identityPopup.close()
+        root.stagedLogos = null
+        if (root._cloudLogoHistoryBeforeStaging) root.cloudLogoHistory = root._cloudLogoHistoryBeforeStaging
+        root._cloudLogoHistoryBeforeStaging = null
+        root.logoFeedbackText = ""
+        root._applyPendingToUI()                    // vuelve a mostrar los logos de la ficha abierta
+        return staged
     }
 
     function _storeLogoRelative(target, rel) {
         rel = String(rel || "").trim().replace(/\\/g, "/")
+        if (root.logoStaging) {
+            var staged = Object.assign({}, root.stagedLogos)
+            staged[target] = rel
+            root.stagedLogos = staged
+            if (target === "mtc") root.logoMtcSource = rel.length ? logoAbsUrlFromRel(rel) : ""
+            else if (target === "pro") root.logoProyectoSource = rel.length ? logoAbsUrlFromRel(rel) : ""
+            return
+        }
         if (target === "mtc")
             root.logoMtcSource = rel.length ? logoAbsUrlFromRel(rel) : ""
         else if (target === "pro")
@@ -2242,6 +2292,9 @@ Item {
 
         if (doc && doc.closed !== true) {
             var imgs = Object.assign({}, (doc.images || {}))
+            var prefix = target === "mtc" ? "logo_mtc" : "logo_proyecto"
+            delete imgs[prefix + "_cloud_media_id"]
+            delete imgs[prefix + "_cloud_path"]
             if (rel.length)
                 imgs[root._logoHistoryKey(target)] = root._logoHistoryWith(target, imgs, rel)
             if (target === "mtc") {
@@ -2270,13 +2323,17 @@ Item {
         root._markDirty()
     }
 
+    readonly property var officialLogoSources: ({
+        mtc: ":/images/ICONO_LOGO_MTC.jpeg",
+        pro: ":/images/INGEMA_LOGO_COMPLETO.png"
+    })
+    function _isOfficialLogoName(name) {
+        var s = String(name || "")
+        return s.indexOf("ICONO_LOGO_MTC") >= 0 || s.indexOf("INGEMA_LOGO_COMPLETO") >= 0
+    }
     function _useDefaultLogo(target) {
-        root._storeLogoRelative(target, target === "mtc"
-                                ? "qrc:/images/ICONO_LOGO_MTC.jpeg"
-                                : "qrc:/images/INGEMA_LOGO_COMPLETO.png")
-        root.logoFeedbackText = target === "mtc"
-                ? "Se usará el logo institucional predeterminado."
-                : "Se usará el logo de proyecto predeterminado."
+        root._beginLogoRequest(target)
+        root.logoFeedbackText = "Selecciona el recurso institucional de 10_RECURSOS y confirma. No hay un predeterminado asignado automáticamente."
     }
 
     function _deleteLogo(target) {
@@ -2353,7 +2410,7 @@ Item {
         root._pendingLogoDocId = ""
     }
 
-    function _beginLogoRequest(target) {
+    function _beginLogoRequest(target, deviceOnly) {
         if (root._logoRequestPending || root._photoRequestPending
                 || root._documentClosing)
             return
@@ -2369,6 +2426,12 @@ Item {
         if (!docsCtl.resourcesPath || !String(docsCtl.resourcesPath).length) {
             root.showInfo("No se pudo adjuntar el logo",
                           "No se encontró la carpeta persistente Recursos.")
+            return
+        }
+
+        if (deviceOnly !== true) {
+            resourcesPicker.pickTarget = target
+            resourcesPicker.open()
             return
         }
 
@@ -2640,7 +2703,7 @@ Item {
                 delete changes.idx
                 delete changes.category_code
                 doc.setPhotoCloudState(idx, changes)
-            }
+            } else if (idx === 0) root._confirmLogoPublication(c)
         }
         CalicataCloud.bindMediaIdentity(doc)
         CalicataCloud.flushMedia()
@@ -2651,8 +2714,7 @@ Item {
                 if (!String(doc.originalPhotoUrl(slotIdx)).length && root._photoSyncState(slotIdx) !== "PENDING")
                     CalicataCloud.downloadRemotePhoto(doc, slotIdx, "")
             ensureDocsRoots()
-            if (docsCtl.resourcesPath && String(docsCtl.resourcesPath).length)
-                CalicataCloud.loadRemoteLogos(doc, String(docsCtl.resourcesPath))
+            root._refreshRemoteLogos()
             root.activityRows = []
             CalicataCloud.loadActivity(doc, 0)
         }
@@ -2773,6 +2835,88 @@ Item {
 
     // ===== P5: versiones cloud de logos (PROJECT / ENTITY) =====
     property var cloudLogoHistory: ({ PROJECT: [], ENTITY: [] })
+    property var logoReadStates: ({})
+    property var remotePhotoReadIssues: ({})
+    readonly property string logoCloudScope: root.doc
+        ? String(root.doc.header.projectId || "") + ":" + String(root.doc.header.remoteCalicataId || "") : ""
+    onLogoCloudScopeChanged: {
+        root.cloudLogoHistory = ({ PROJECT: [], ENTITY: [] })
+        root.logoReadStates = ({})
+        root.remotePhotoReadIssues = ({})
+        Qt.callLater(root._refreshRemoteLogos)
+    }
+    function _setLogoReadState(category, state, message) {
+        var next = Object.assign({}, root.logoReadStates)
+        var previous = next[category] || {}
+        var retryingFailure = state === "LOADING" && (previous.state === "ERROR" || previous.failed === true)
+        next[category] = { state: state, message: retryingFailure ? previous.message : String(message || ""), failed: retryingFailure }
+        root.logoReadStates = next
+    }
+    function _refreshRemoteLogos() {
+        if (!doc || doc.closed === true || !String(doc.header.remoteCalicataId || "").length
+                || typeof CalicataCloud === "undefined") return
+        ensureDocsRoots()
+        if (!String(docsCtl.resourcesPath || "").length) return
+        root._setLogoReadState("PROJECT", "LOADING", "")
+        root._setLogoReadState("ENTITY", "LOADING", "")
+        CalicataCloud.loadRemoteLogos(doc, String(docsCtl.resourcesPath))
+    }
+    readonly property var mediaCloudIssues: {
+        var revision = root.mediaQueueRevision
+        var issues = [], entries = root.doc && typeof CalicataCloud !== "undefined"
+            ? CalicataCloud.mediaEntriesFor(root.doc.instanceId) : []
+        for (var i = 0; i < entries.length; ++i) {
+            var entry = entries[i]
+            if (entry.state === "FAILED" || entry.state === "CONFLICT")
+                issues.push({ key: (entry.resource_type === "LOGO" ? "logo-" : "photo-") + entry.category_code, message: String(entry.error || "La publicación del medio falló."),
+                              area: entry.resource_type === "LOGO" ? "General · Logos" : "Fotos" })
+        }
+        for (var category in root.logoReadStates) {
+            var read = root.logoReadStates[category]
+            if (read.state === "ERROR" || read.failed) issues.push({ key: "logo-" + category, message: read.message, area: "General · Logos" })
+        }
+        for (var slot in root.remotePhotoReadIssues)
+            issues.push({ key: "photo-" + slot, message: root.remotePhotoReadIssues[slot], area: "Fotos" })
+        return issues
+    }
+    readonly property bool mediaCloudPending: {
+        var revision = root.mediaQueueRevision
+        if (root.doc && typeof CalicataCloud !== "undefined" && CalicataCloud.mediaEntriesFor(root.doc.instanceId).length) return true
+        for (var category in root.logoReadStates)
+            if (root.logoReadStates[category].state === "LOADING") return true
+        return false
+    }
+    // Revisión de la cola de medios: re-evalúa el estado de las ranuras de logo.
+    property int mediaQueueRevision: 0
+    // Estado de sincronización REAL de una ranura de logo (contrato Web cloudNotice):
+    //   entrada en la outbox -> Pendiente / Sincronizando / Fallo de sincronización
+    //   sin entrada y versión vigente en calicata_media -> Sincronizado (Media Cloud)
+    //   con logo y sin nube confirmada -> Solo local; sin logo -> Sin logo.
+    function logoSlotSyncState(target, hasLogo) {
+        if (root.logoStaging) return hasLogo ? "Se guardará al crear la ficha" : "Sin logo"
+        var revision = root.mediaQueueRevision
+        var category = target === "mtc" ? "ENTITY" : "PROJECT"
+        var entries = root.doc && typeof CalicataCloud !== "undefined"
+                ? CalicataCloud.mediaEntriesFor(root.doc.instanceId) : []
+        for (var i = entries.length - 1; i >= 0; --i) {
+            if (entries[i].category_code !== category || entries[i].resource_type !== "LOGO") continue
+            var st = String(entries[i].state || "")
+            if (st === "SYNCING") return "Sincronizando…"
+            if (st === "FAILED" || st === "CONFLICT") return "Fallo de sincronización"
+            return "Pendiente de sincronización"
+        }
+        var read = (root.logoReadStates || {})[category] || {}
+        if (read.state === "ERROR") return "No se pudo recuperar el logo · " + read.message
+        if (read.state === "LOADING") return "Recuperando logo…"
+        if (!hasLogo) return "Sin logo"
+        var cloud = root.cloudLogoHistory[category] || []
+        var imgs = root.doc ? (root.doc.images || {}) : {}
+        var prefix = category === "ENTITY" ? "logo_mtc" : "logo_proyecto"
+        if (cloud.length && !cloud[0].discarded_at
+                && String(imgs[prefix + "_cloud_media_id"] || "") === String(cloud[0].media_id || "")
+                && imgs[prefix + "_cloud_path"] === imgs[prefix + "_path"]) return "Sincronizado · Media Cloud"
+        return "Solo local"
+    }
     function restoreCloudLogo(target, entry) {
         if (!doc || !entry || typeof CalicataCloud === "undefined") return
         ensureDocsRoots()
@@ -2786,27 +2930,56 @@ Item {
     property bool activityHasMore: false
 
     // P5: el logo en uso en la nube manda, salvo un envío local pendiente.
+    function _confirmLogoPublication(changes) {
+        if (!doc || doc.closed === true || !changes || !changes.media_id) return
+        var category = String(changes.category_code || "")
+        if (category !== "ENTITY" && category !== "PROJECT") return
+        var prefix = category === "ENTITY" ? "logo_mtc" : "logo_proyecto", imgs = doc.images || {}
+        var rel = String(imgs[prefix + "_path"] || "")
+        var currentAbs = root._fileUrlToAbs(root.logoAbsUrlFromRel(rel)).replace(/\\/g, "/")
+        if (!rel.length || currentAbs !== String(changes.original_abs || "").replace(/\\/g, "/")) return
+        doc.cacheLogoFromCloud(category, rel, String(changes.media_id), root._logoHistoryFrom(category === "ENTITY" ? "mtc" : "pro", imgs))
+    }
+    function _legacyCloudLogoId(category, path) {
+        var name = String(path || "").replace(/\\/g, "/").split("/").pop()
+        var history = root.cloudLogoHistory[category] || []
+        for (var i = 0; i < history.length; ++i) {
+            var entry = history[i], id = String(entry.media_id || "")
+            var extension = String(entry.original_storage_path || "").split(".").pop()
+            if (id.length && (name === "logo_" + category.toLowerCase() + "_" + id.substring(0, 8) + "." + extension
+                    || name === "logo_" + category.toLowerCase() + "_" + id + "." + extension)) return id
+        }
+        return ""
+    }
     function _adoptRemoteLogo(category, absPath) {
-        if (!doc || doc.closed === true || !absPath.length) return
+        if (!doc || doc.closed === true) return
         var entries = CalicataCloud.mediaEntriesFor(doc.instanceId)
         for (var i = 0; i < entries.length; ++i)
             if (entries[i].category_code === category) return
-        var rel = root._relativeToDocsBase(absPath)
-        if (!rel.length) return
-        var imgs = Object.assign({}, doc.images || {})
-        var key = category === "ENTITY" ? "logo_mtc_path" : "logo_proyecto_path"
-        if (imgs[key] === rel) return
-        imgs[key] = rel
-        imgs[category === "ENTITY" ? "logo_mtc_removed" : "logo_proyecto_removed"] = false
-        imgs[root._logoHistoryKey(category === "ENTITY" ? "mtc" : "pro")] =
-                root._logoHistoryWith(category === "ENTITY" ? "mtc" : "pro", imgs, rel)
-        doc.images = imgs
+        var rel = absPath.length ? root._relativeToDocsBase(absPath) : ""
+        if (absPath.length && !rel.length) return
+        var imgs = doc.images || {}, prefix = category === "ENTITY" ? "logo_mtc" : "logo_proyecto"
+        var legacyId = root._legacyCloudLogoId(category, imgs[prefix + "_path"])
+        var knownCloud = imgs[prefix + "_cloud_media_id"] || legacyId
+        if (rel.length && imgs[prefix + "_path"] && !knownCloud) return
+        // Una ranura vacía confirmada retira sólo la copia cloud anterior.
+        // Una selección local sin publicar no se pierde por una lectura remota.
+        var cloudPath = imgs[prefix + "_cloud_path"] || (legacyId ? imgs[prefix + "_path"] : "")
+        if (!rel.length && (!knownCloud || cloudPath !== imgs[prefix + "_path"])) return
+        var target = category === "ENTITY" ? "mtc" : "pro"
+        var history = rel.length ? root._logoHistoryWith(target, imgs, rel) : root._logoHistoryFrom(target, imgs)
+        var active = (root.cloudLogoHistory[category] || [])[0] || {}
+        doc.cacheLogoFromCloud(category, rel, rel.length ? String(active.media_id || "") : "", history)
         root._applyPendingToUI()
     }
 
     Connections {
         target: root
         function onDocChanged() {
+            root.cloudLogoHistory = ({ PROJECT: [], ENTITY: [] })
+            root.logoReadStates = ({})
+            root.remotePhotoReadIssues = ({})
+            root.logoFeedbackText = ""
             if (!root.doc && typeof CalicataCloud !== "undefined") CalicataCloud.leavePresence()
             root._scheduleMediaCloudReconcile()
         }
@@ -2840,24 +3013,47 @@ Item {
             var next = Object.assign({}, root.cloudLogoHistory)
             next[category] = history || []
             root.cloudLogoHistory = next
+            root._setLogoReadState(category, localPath.length ? "READY" : "EMPTY", "")
             root._adoptRemoteLogo(category, localPath)
+        }
+        function onRemoteLogoReadFailed(localId, category, message) {
+            if (!root.doc || localId !== root.doc.instanceId) return
+            root._setLogoReadState(category, "ERROR", message)
         }
         // Restaurar = volver a publicar esos bytes como logo nuevo (contrato Web).
         function onRemoteLogoRestored(localId, category, localPath, error) {
             if (!root.doc || localId !== root.doc.instanceId) return
             var rel = localPath.length ? root._relativeToDocsBase(localPath) : ""
-            if (!rel.length) { root.logoFeedbackText = "No se pudo recuperar el logo: " + error; return }
+            if (!rel.length) {
+                root.logoFeedbackText = "No se pudo recuperar el logo: " + error
+                root._setLogoReadState(category, "ERROR", error)
+                return
+            }
+            root._setLogoReadState(category, "READY", "")
             root._storeLogoRelative(category === "ENTITY" ? "mtc" : "pro", rel)
             root.logoFeedbackText = "Versión restaurada; se publicará como logo en uso."
-            CalicataCloud.loadRemoteLogos(root.doc, String(docsCtl.resourcesPath || ""))
+            root._refreshRemoteLogos()
         }
         function onActivityLoaded(localId, rows, offset, hasMore) {
             if (!root.doc || localId !== root.doc.instanceId) return
             root.activityRows = offset > 0 ? root.activityRows.concat(rows) : rows
             root.activityHasMore = hasMore
         }
+        function onMediaQueueChanged() { root.mediaQueueRevision++ }
         function onMediaSyncChanged(localId, idx, state, message, changes) {
-            if (!root.doc || root.doc.closed === true || localId !== root.doc.instanceId || idx < 1) return
+            root.mediaQueueRevision++
+            if (!root.doc || root.doc.closed === true || localId !== root.doc.instanceId) return
+            if (idx === 0) {
+                if (state === "SYNCED") {
+                    root._confirmLogoPublication(changes)
+                    root._refreshRemoteLogos()
+                }
+                return
+            }
+            var readIssues = Object.assign({}, root.remotePhotoReadIssues)
+            if (state === "REMOTE_FAILED") readIssues[idx] = message || "La lectura de la fotografía falló."
+            else if (state === "REMOTE_EMPTY" || state === "SYNCED") delete readIssues[idx]
+            root.remotePhotoReadIssues = readIssues
             if (state === "REMOTE_EMPTY" || state === "REMOTE_FAILED") return
             if (state === "SYNCED") {
                 CalicataCloud.takeConfirmedMedia(localId)   // aplicado aquí; no repetir al reabrir
@@ -3224,6 +3420,9 @@ Item {
         readonly property real panelPadding: sectionCard.glassPanel ? root.dp(14) : 0
         default property alias sectionContent: sectionBody.data
         visible: root.sectionVisible(sectionNumber)
+        // Cambio de etapa: la etapa nueva entra con un fundido corto (antes era instantáneo).
+        onVisibleChanged: if (visible && root.flowMotionEnabled) stageFadeIn.restart()
+        NumberAnimation { id: stageFadeIn; target: sectionCard; property: "opacity"; from: 0; to: 1; duration: 220; easing.type: Easing.OutCubic }
         width: parent ? parent.width : 0
         implicitHeight: sectionLayout.implicitHeight + root.dp(12) + 2 * sectionCard.panelPadding
         height: implicitHeight
@@ -3285,7 +3484,7 @@ Item {
         }
         contentItem: Text {
             text: stageButton.text
-            color: stageButton.primary ? (root.darkMode ? root.brand.ingemaDeep : "#FFFFFF") : root.cText
+            color: stageButton.primary ? (root.darkMode ? "#0A0A0A" : "#FFFFFF") : root.cText
             font: stageButton.font
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
@@ -3494,6 +3693,7 @@ Item {
     // modelo ya en orden más reciente primero. Solo presentación; las acciones
     // siguen siendo restoreCloudLogo / _restoreLogoVersion.
     function _logoVersionRows(target) {
+        if (root.logoStaging) return []            // la ficha aún no existe: sin versiones anteriores
         var rows = []
         var cloud = root.cloudLogoHistory[target === "mtc" ? "ENTITY" : "PROJECT"] || []
         for (var i = 0; i < cloud.length; ++i) {
@@ -3585,7 +3785,7 @@ Item {
     }
 
     component PhotoAmbient: Rectangle {
-        color: root.darkMode ? root.brand.ingemaDeep : "#F2F4F7"
+        color: root.darkMode ? "#0A0A0A" : "#F2F4F7"
     }
 
     component PhotoBadge: Rectangle {
@@ -3764,7 +3964,7 @@ Item {
                 anchors.centerIn: parent
                 visible: glassCheck.checked
                 text: "✓"
-                color: root.darkMode ? root.brand.ingemaDeep : "#FFFFFF"
+                color: root.darkMode ? "#0A0A0A" : "#FFFFFF"
                 font.pixelSize: root.sp(13)
                 font.bold: true
             }
@@ -4107,6 +4307,7 @@ Item {
         id: genDialogHeader
         property string title: ""
         property string subtitle: ""
+        property string badgeText: ""          // "3D Touch" en los selectores de General
         signal closeRequested()
         Layout.fillWidth: true
         spacing: root.dp(8)
@@ -4128,6 +4329,24 @@ Item {
                 color: root.cMuted
                 font.pixelSize: root.fsLabel
                 elide: Text.ElideRight
+            }
+        }
+        Rectangle {
+            visible: genDialogHeader.badgeText.length > 0
+            Layout.alignment: Qt.AlignVCenter
+            Layout.preferredHeight: root.dp(24)
+            Layout.preferredWidth: genDialogBadge.implicitWidth + root.dp(18)
+            radius: height / 2
+            color: Qt.rgba(root.cGenBlue.r, root.cGenBlue.g, root.cGenBlue.b, root.darkMode ? 0.18 : 0.10)
+            border.width: 1
+            border.color: Qt.rgba(root.cGenBlue.r, root.cGenBlue.g, root.cGenBlue.b, 0.30)
+            Text {
+                id: genDialogBadge
+                anchors.centerIn: parent
+                text: genDialogHeader.badgeText
+                color: root.cGenBlue
+                font.pixelSize: root.sp(11)
+                font.weight: Font.DemiBold
             }
         }
         GenRoundIconButton {
@@ -4188,7 +4407,7 @@ Item {
                     id: genBtnLabel
                     text: genBtn.text
                     font: genBtn.font
-                    color: genBtn.primary ? (root.darkMode ? root.brand.ingemaDeep : "#FFFFFF")
+                    color: genBtn.primary ? (root.darkMode ? "#0A0A0A" : "#FFFFFF")
                          : genBtn.soft ? genBtn.accent : root.cText
                 }
             }
@@ -4375,12 +4594,11 @@ Item {
         }
     }
 
-    component GenPopupSurface: Rectangle {
+    component GenPopupSurface: CalicataSurface {
         property var popupItem: null
         radius: root.dp(28)
-        color: root.darkMode ? "#171D29" : "#FFFFFF"
-        border.width: 1
-        border.color: root.darkMode ? "#3A4456" : "#D5DBE3"
+        dark: root.darkMode
+        level: "sheet"
     }
 
     component GenScrim: Rectangle {
@@ -4410,6 +4628,132 @@ Item {
         }
     }
 
+    // Metro de General: material nítido y contenido que se adapta al mosaico.
+    component GenTile: Button {
+        id: genTile
+        property string title: ""
+        property string subtitle: ""
+        property string iconName: ""
+        property color accent: root.cGenBlue
+        property color accentSoft: root.cGenBlueSoft
+        property color surfaceColor: Qt.hsla(root.brand.ingemaBlue.hslHue, 0.94, 0.42, 1)
+        property color foreground: "white"
+        property bool wide: false
+        property string badgeText: ""
+        Layout.fillWidth: true
+        Layout.preferredWidth: 1
+        readonly property bool horizontal: wide && availableWidth >= root.dp(260)
+        readonly property real minimumIconSize: root.dp(horizontal ? 80 : 44)
+        implicitHeight: topPadding + genTileContent.implicitHeight + bottomPadding
+        Layout.fillHeight: true
+        Layout.minimumHeight: implicitHeight
+        padding: root.dp(14)
+        // Foco solo por teclado/accesibilidad: un toque no roba el foco ni reabre el teclado.
+        focusPolicy: Qt.TabFocus
+        Accessible.role: Accessible.Button
+        Accessible.name: genTile.title
+        Accessible.description: genTile.subtitle
+        scale: down ? 0.985 : 1
+        Behavior on scale { NumberAnimation { duration: root.flowReduceMotion || !root.flowMotionEnabled ? 0 : 160; easing.type: Easing.OutCubic } }
+        background: CalicataSurface {
+            dark: root.darkMode; accent: genTile.accent
+            danger: root.flow ? root.flow.theme.error : "#D9483B"
+            radius: root.dp(7); tone: "primary"; pressed: genTile.down
+            focused: genTile.visualFocus
+            // Luz superficial, sin capas negras ni sombra exterior.
+            border.width: genTile.visualFocus ? 2 : 1
+            border.color: genTile.visualFocus ? genTile.foreground : Qt.rgba(1, 1, 1, 0.16)
+            gradient: Gradient {
+                GradientStop { position: 0; color: Qt.tint(genTile.surfaceColor, Qt.rgba(1, 1, 1, genTile.down ? 0.16 : 0.04)) }
+                GradientStop { position: 1; color: genTile.surfaceColor }
+            }
+        }
+        contentItem: Item {
+            id: genTileContent
+            implicitHeight: genTile.horizontal
+                            ? Math.max(genTile.minimumIconSize, genTileText.implicitHeight)
+                            : genTile.minimumIconSize + root.dp(12) + genTileText.implicitHeight
+            Components.FlowIcon {
+                id: genTileBadge
+                x: genTile.horizontal ? parent.width - width : (parent.width - width) / 2
+                y: genTile.horizontal ? (parent.height - height) / 2
+                                      : Math.max(0, (genTileText.y - height) / 2)
+                width: genTile.horizontal ? genTile.minimumIconSize
+                       : Math.min(root.dp(76), Math.max(genTile.minimumIconSize, genTileText.y - root.dp(12)))
+                height: width
+                name: genTile.iconName
+                flow: root.flow
+                // Recolorear el SVG existente evita capas GPU y trazos negros
+                // que MultiEffect.colorization no aclara en tema claro.
+                sourceOverride: GeneralIcons.source(name).replace(/black/g, encodeURIComponent(genTile.foreground.toString()))
+                tintEnabled: false
+                tintColor: genTile.foreground
+                activeTintColor: genTile.foreground
+                inactiveOpacity: 1
+            }
+            Components.FlowIcon {
+                id: genTileChevron
+                anchors.right: parent.right
+                y: 0
+                width: root.dp(18); height: width
+                name: "calgen.chevron"
+                flow: root.flow
+                sourceOverride: GeneralIcons.source(name).replace(/black/g, encodeURIComponent(genTile.foreground.toString()))
+                tintEnabled: false
+                opacity: 0.7
+                inactiveOpacity: 1
+            }
+            Column {
+                id: genTileText
+                width: genTile.horizontal ? parent.width - genTileBadge.width - root.dp(16) : parent.width
+                y: genTile.horizontal ? (parent.height - height) / 2 : parent.height - height
+                spacing: root.dp(4)
+                Text {
+                    width: parent.width
+                    text: genTile.title
+                    color: genTile.foreground
+                    font.family: genTile.font.family
+                    font.pixelSize: Math.max(root.sp(genTile.wide ? 20 : 18), genTile.font.pixelSize * 1.15)
+                    font.weight: Font.Medium
+                    textFormat: Text.PlainText
+                    wrapMode: Text.Wrap
+                }
+                Text {
+                    width: parent.width
+                    visible: text.length > 0
+                    text: genTile.subtitle
+                    color: genTile.foreground
+                    opacity: 0.98
+                    font.family: genTile.font.family
+                    font.pixelSize: Math.max(root.sp(14), genTile.font.pixelSize)
+                    textFormat: Text.PlainText
+                    wrapMode: Text.Wrap
+                }
+                Row {
+                    visible: genTile.badgeText.length > 0
+                    width: parent.width
+                    spacing: root.dp(5)
+                    opacity: 0.98
+                    Rectangle {
+                        width: root.dp(2); height: genTileHint.implicitHeight
+                        color: genTile.foreground
+                    }
+                    Text {
+                        id: genTileHint
+                        width: parent.width - root.dp(7)
+                        text: genTile.badgeText
+                        color: genTile.foreground
+                        font.family: genTile.font.family
+                        font.pixelSize: Math.max(root.sp(11), genTile.font.pixelSize * 0.8)
+                        font.weight: Font.Medium
+                        textFormat: Text.PlainText
+                        wrapMode: Text.Wrap
+                    }
+                }
+            }
+        }
+    }
+
     // Cabecera de la etapa General: contexto de la ficha y título de la etapa.
     component GenStageHeader: Column {
         id: genHeader
@@ -4418,10 +4762,14 @@ Item {
         property bool projectAssigned: false
         property string stageText: "General"
         property string stageIcon: "calgen.code"
+        // General muestra solo "FICHA DE CALICATA / General" (preview aprobado);
+        // código y proyecto viven en la box Código / Proyecto / Supervisor.
+        property bool showContext: true
         spacing: root.dp(6)
 
         Text {
             width: parent.width
+            visible: genHeader.showContext
             text: genHeader.codeText || "NUEVA CALICATA"
             color: root.cMuted
             font.pixelSize: root.sp(11)
@@ -4431,6 +4779,7 @@ Item {
         }
         Row {
             width: parent.width
+            visible: genHeader.showContext
             spacing: root.dp(8)
             Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
@@ -4449,7 +4798,7 @@ Item {
                 elide: Text.ElideRight
             }
         }
-        Item { width: 1; height: root.dp(10) }
+        Item { width: 1; height: root.dp(10); visible: genHeader.showContext }
         Row {
             width: parent.width
             spacing: root.dp(14)
@@ -5510,12 +5859,13 @@ Item {
         contentItem: ColumnLayout {
             spacing: root.dp(12)
             GenDialogHeader {
-                title: "Seleccionar proyecto"
+                title: "Seleccionar carpeta"
+                badgeText: "3D Touch"
                 onCloseRequested: projectPickerPopup.close()
             }
             GenSearchField {
                 id: projectSearchField
-                placeholderText: "Buscar proyecto…"
+                placeholderText: "Buscar carpeta…"
             }
             Text {
                 Layout.fillWidth: true
@@ -5575,6 +5925,357 @@ Item {
         }
     }
 
+    // ===== General · paneles contextuales (3D Touch de Calicatas = GenPopup) =====
+    // Los campos son los MISMOS controles y bindings del General anterior: solo
+    // cambia dónde se muestran. Aceptar confirma; Cancelar devuelve los valores
+    // que tenía la ficha al abrir el panel (la carpeta tiene su propio selector
+    // con su propia confirmación).
+    property var _generalSnapshot: ({})
+    function _generalIdentitySummary() {
+        var parts = []
+        if (txtCodigo.text.trim().length) parts.push(txtCodigo.text.trim())
+        var project = root.doc && root.doc.header.projectId ? String(root._projectDisplayName()) : ""
+        if (project.length) parts.push(project)
+        return parts.length ? parts.join(" · ") : "Información general del proyecto"
+    }
+    function _openGeneralPanel(popup) {
+        if (!root.doc || !root.commitPendingField()) return
+        Qt.inputMethod.hide()
+        var h = root.doc.header
+        root._generalSnapshot = {
+            code: txtCodigo.text, pk: txtPk.text, supervisor: txtSupervisor.text,
+            project_full_name: String(h.project_full_name || ""),
+            length_m: String(h.length_m || ""), width_m: String(h.width_m || ""),
+            technical_description: String(h.technical_description || "")
+        }
+        popup.open()
+    }
+    function _acceptGeneralPanel(popup) {
+        if (!root.commitPendingField()) return     // validación vigente: el panel sigue abierto
+        root._scheduleFlush(Date.now())
+        popup.close()
+    }
+    function _cancelGeneralPanel(popup, keys) {
+        root.commitPendingField()
+        var s = root._generalSnapshot || {}
+        var changed = false
+        if (keys.indexOf("code") >= 0 && s.code !== undefined && txtCodigo.text !== s.code) {
+            root._setCanonicalCalicataCode(s.code)
+            if (txtPk.text !== s.pk) root._setProgresiva(s.pk, false)
+            changed = true
+        }
+        if (keys.indexOf("supervisor") >= 0 && s.supervisor !== undefined && txtSupervisor.text !== s.supervisor) {
+            txtSupervisor.text = s.supervisor
+            changed = true
+        }
+        var headerKeys = ["project_full_name", "length_m", "width_m", "technical_description"]
+        var h = Object.assign({}, root.doc.header)
+        var headerChanged = false
+        for (var i = 0; i < headerKeys.length; ++i) {
+            var k = headerKeys[i]
+            if (keys.indexOf(k) >= 0 && s[k] !== undefined && String(h[k] || "") !== s[k]) {
+                h[k] = s[k]
+                headerChanged = true
+            }
+        }
+        if (headerChanged) root.doc.header = h
+        if (changed || headerChanged) root._markDirty()
+        popup.close()
+    }
+    function _openSheetTypePicker() {
+        var sheetTypes = ["FICHA DE CALICATA", "FICHA DE CANTERA"]
+        var current = root.doc ? String(root.doc.header.description || "") : ""
+        root._openOptionPicker("Seleccionar tipo de ficha", sheetTypes,
+                               Math.max(0, sheetTypes.indexOf(current)), "calgen.code",
+                               root.cGenGreen, root.cGenGreenSoft,
+                               function(i) {
+                                   if (!root.doc || i < 0 || i >= sheetTypes.length) return
+                                   var h = Object.assign({}, root.doc.header)
+                                   h.description = sheetTypes[i]
+                                   root.doc.header = h
+                                   root._markDirty()
+                               })
+    }
+
+    // Box 1 · Código / Proyecto / Supervisor (+ único subselector: carpeta).
+    GenPopup {
+        id: generalIdentityPopup
+        objectName: "generalIdentityPanel"
+        preferredWidth: root.dp(520)
+        preferredHeight: root.dp(600)
+        closePolicy: Popup.CloseOnEscape
+        onClosed: Qt.inputMethod.hide()
+        contentItem: ColumnLayout {
+            spacing: root.dp(12)
+            GenDialogHeader {
+                title: "Código / Proyecto / Supervisor"
+                badgeText: "3D Touch"
+                onCloseRequested: root._cancelGeneralPanel(generalIdentityPopup, ["code", "project_full_name", "supervisor"])
+            }
+            ScrollView {
+                id: generalIdentityScroll
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                contentWidth: availableWidth
+                ColumnLayout {
+                    width: generalIdentityScroll.availableWidth
+                    spacing: root.dp(12)
+                        GenHeaderField {
+                            label: "Código"
+                            labelCaps: true
+                            iconName: "calgen.code"
+                            boundText: txtCodigo.text
+                            inputPlaceholder: "Sin registrar"
+                            commitHandler: function(t) {
+                                root._setCanonicalCalicataCode(t)
+                                // Un código que termina en progresiva válida la refleja.
+                                var pkFromCode = Rules.progresivaFromCode(t)
+                                if (pkFromCode.length && pkFromCode !== txtPk.text.trim())
+                                    root._setProgresiva(pkFromCode, false)
+                            }
+                        }
+                        GenHeaderField {
+                            label: "Nombre del proyecto"
+                            labelCaps: true
+                            iconName: "calgen.project"
+                            headerKey: "project_full_name"
+                            inputPlaceholder: "Denominación oficial completa del proyecto"
+                            inputMaximumLength: 600
+                        }
+                        GenHeaderField {
+                            label: "Supervisor"
+                            labelCaps: true
+                            iconName: "calgen.supervisor"
+                            accent: root.cGenViolet
+                            accentSoft: root.cGenVioletSoft
+                            boundText: txtSupervisor.text
+                            inputMaximumLength: Rules.SUPERVISOR_MAX_LENGTH
+                            inputPlaceholder: "Sin registrar"
+                            commitHandler: function(t) { txtSupervisor.text = t }
+                        }
+                    // Único subselector: proyectos/carpetas reales autorizados
+                    // (búsqueda, selección y confirmación del selector existente).
+                    GenFieldShell {
+                        label: "Seleccionar carpeta"
+                        caption: "Proyecto / carpeta de trabajo. Define dónde se guarda y sincroniza la ficha."
+                        iconName: "calgen.project"
+                        tappable: true
+                        emphasized: true
+                        valueText: root.doc && root.doc.header.projectId ? root._projectDisplayName() : ""
+                        placeholder: "Seleccionar carpeta"
+                        onActivated: root._openProjectPicker()
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: root.dp(4)
+                        Layout.topMargin: -root.dp(6)
+                        text: root.doc ? String(root.doc.header.projectCode || "") : ""
+                        visible: text.length > 0
+                        color: root.cMuted
+                        font.pixelSize: root.fsLabel
+                        wrapMode: Text.WordWrap
+                    }
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: root.dp(10)
+                GenDialogButton {
+                    Layout.fillWidth: true
+                    text: "Cancelar"
+                    onClicked: root._cancelGeneralPanel(generalIdentityPopup, ["code", "project_full_name", "supervisor"])
+                }
+                GenDialogButton {
+                    Layout.fillWidth: true
+                    text: "Aceptar"
+                    primary: true
+                    onClicked: root._acceptGeneralPanel(generalIdentityPopup)
+                }
+            }
+        }
+    }
+
+    // Box 3 · Fechas / Logos: fecha de inicio, fecha de fin e Identidad del reporte.
+    GenPopup {
+        id: generalDatesPopup
+        objectName: "generalDatesPanel"
+        preferredWidth: root.dp(520)
+        preferredHeight: root.dp(470)
+        onClosed: Qt.inputMethod.hide()
+        contentItem: ColumnLayout {
+            spacing: root.dp(12)
+            GenDialogHeader {
+                title: "Fechas / Logos"
+                badgeText: "3D Touch"
+                onCloseRequested: generalDatesPopup.close()
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: root.dp(12)
+                GenFieldShell {
+                    label: "Fecha inicio"
+                    iconName: "calgen.date"
+                    accent: root.cGenOrange
+                    accentSoft: root.cGenOrangeSoft
+                    tappable: true
+                    valueText: btnFechaInicio.text === "Seleccionar fecha" ? "" : btnFechaInicio.text
+                    placeholder: "Seleccionar fecha"
+                    onActivated: root._openDatePicker(btnFechaInicio, "FECHA INICIO")
+                }
+                GenFieldShell {
+                    label: "Fecha fin"
+                    iconName: "calgen.date"
+                    accent: root.cGenOrange
+                    accentSoft: root.cGenOrangeSoft
+                    tappable: true
+                    valueText: btnFechaFin.text === "Seleccionar fecha" ? "" : btnFechaFin.text
+                    placeholder: "Seleccionar fecha"
+                    onActivated: root._openDatePicker(btnFechaFin, "FECHA FIN")
+                }
+                Text {
+                    Layout.fillWidth: true
+                    visible: text.length > 0
+                    text: Rules.validateFieldDates(root.doc ? String(root.doc.header.fecha_inicio || "") : "",
+                                                   root.doc ? String(root.doc.header.fecha_fin || "") : "")
+                    color: root.flow ? root.flow.theme.error : "#B4232E"
+                    font.pixelSize: root.fsLabel
+                    wrapMode: Text.WordWrap
+                }
+                GenFieldShell {
+                    label: "Identidad del reporte y logos"
+                    caption: "Logo MTC / entidad y logo del proyecto"
+                    iconName: "calgen.identity"
+                    tappable: true
+                    valueText: (root.hasLogoMtc ? "MTC / entidad" : "Sin MTC") + " · " + (root.hasLogoProyecto ? "Proyecto" : "Sin proyecto")
+                    onActivated: {
+                        generalDatesPopup.close()
+                        identityPopup.open()
+                    }
+                }
+            }
+            Item { Layout.fillHeight: true }
+            GenDialogButton {
+                Layout.fillWidth: true
+                text: "Cerrar"
+                onClicked: generalDatesPopup.close()
+            }
+        }
+    }
+
+    // Trabajo de campo · Excavación: largo/ancho, descripción, profundidad y nivel freático.
+    GenPopup {
+        id: generalExcavationPopup
+        objectName: "generalExcavationPanel"
+        preferredWidth: root.dp(520)
+        preferredHeight: root.dp(560)
+        closePolicy: Popup.CloseOnEscape
+        onClosed: Qt.inputMethod.hide()
+        contentItem: ColumnLayout {
+            spacing: root.dp(12)
+            GenDialogHeader {
+                title: "Datos de excavación"
+                badgeText: "3D Touch"
+                onCloseRequested: root._cancelGeneralPanel(generalExcavationPopup, ["length_m", "width_m", "technical_description"])
+            }
+            ScrollView {
+                id: generalExcavationScroll
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                contentWidth: availableWidth
+                ColumnLayout {
+                    width: generalExcavationScroll.availableWidth
+                    spacing: root.dp(12)
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: width >= root.dp(300) ? 2 : 1
+                            columnSpacing: root.dp(10)
+                            rowSpacing: root.dp(10)
+                            GenHeaderField {
+                                Layout.preferredWidth: 1
+                                Layout.alignment: Qt.AlignTop
+                                label: "Largo de excavación (m)"
+                                iconName: "calgen.length"
+                                accent: root.cGenGreen
+                                accentSoft: root.cGenGreenSoft
+                                headerKey: "length_m"
+                                numeric: true
+                                hint: "Ej. 2.5"
+                            }
+                            GenHeaderField {
+                                Layout.preferredWidth: 1
+                                Layout.alignment: Qt.AlignTop
+                                label: "Ancho de excavación (m)"
+                                iconName: "calgen.width"
+                                accent: root.cGenGreen
+                                accentSoft: root.cGenGreenSoft
+                                headerKey: "width_m"
+                                numeric: true
+                                hint: "Ej. 1.8"
+                            }
+                        }
+
+                        GenHeaderField {
+                            label: "Descripción técnica"
+                            iconName: "calgen.description"
+                            accent: root.cGenGreen
+                            accentSoft: root.cGenGreenSoft
+                            headerKey: "technical_description"
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: width >= root.dp(300) ? 2 : 1
+                            columnSpacing: root.dp(10)
+                            rowSpacing: root.dp(10)
+                            GenFieldShell {
+                                Layout.preferredWidth: 1
+                                Layout.alignment: Qt.AlignTop
+                                label: "Profundidad (m)"
+                                labelCaps: false
+                                caption: "Derivada de los cortes"
+                                iconName: "calgen.depth"
+                                accent: root.cGenGreen
+                                accentSoft: root.cGenGreenSoft
+                                readOnly: true
+                                valueText: root.derivedDepthText
+                                placeholder: "Sin cortes completos"
+                            }
+                            GenFieldShell {
+                                Layout.preferredWidth: 1
+                                Layout.alignment: Qt.AlignTop
+                                label: "Nivel freático (m)"
+                                labelCaps: false
+                                caption: root.groundwaterCustom ? "Personalizado" : "Primer corte con AGUA"
+                                iconName: "calgen.water"
+                                accent: root.cGenGreen
+                                accentSoft: root.cGenGreenSoft
+                                readOnly: true
+                                valueText: root.effectiveGroundwaterText
+                                placeholder: "No registrado"
+                            }
+                        }
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: root.dp(10)
+                GenDialogButton {
+                    Layout.fillWidth: true
+                    text: "Cancelar"
+                    onClicked: root._cancelGeneralPanel(generalExcavationPopup, ["length_m", "width_m", "technical_description"])
+                }
+                GenDialogButton {
+                    Layout.fillWidth: true
+                    text: "Guardar"
+                    primary: true
+                    onClicked: root._acceptGeneralPanel(generalExcavationPopup)
+                }
+            }
+        }
+    }
+
     // Selector de maquinaria (Ficha > General). Mismo modelo y mismo commit
     // que el ComboBox previo: índice 0 limpia, catálogo escribe, histórico se conserva.
     property int _pendingMachineIndex: 0
@@ -5615,6 +6316,7 @@ Item {
             spacing: root.dp(12)
             GenDialogHeader {
                 title: "Seleccionar maquinaria"
+                badgeText: "3D Touch"
                 onCloseRequested: machinePickerPopup.close()
             }
             GenSearchField {
@@ -7709,6 +8411,7 @@ Item {
         ignoreUnknownSignals: true
 
         function onPhotoSelected(targetIdx, localUrl, sourceKind) {
+            root.mediaSelectionIssue = null                       // incidencia resuelta
             if (targetIdx < 1 || targetIdx > 3) return   // slot de otra subapp (Rendiciones)
             if (root._logoRequestPending
                     && targetIdx === root._logoPickerIndex(root._pendingLogoPickTarget)
@@ -7761,6 +8464,10 @@ Item {
 
         function onPhotoSelectionError(targetIdx, code, message) {
             if (targetIdx < 1 || targetIdx > 3) return
+            root.mediaSelectionIssue = {
+                kind: root._logoRequestPending && targetIdx === root._logoPickerIndex(root._pendingLogoPickTarget) ? "logo" : "photo",
+                code: String(code || ""), message: String(message || "")
+            }
             if (root._logoRequestPending
                     && targetIdx === root._logoPickerIndex(root._pendingLogoPickTarget)) {
                 root._releasePendingLogoRequest()
@@ -7867,6 +8574,10 @@ Item {
     }
 
     Dialog {
+        // Entrada/salida suaves (fundido + leve escala).
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
+                            NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 220; easing.type: Easing.OutCubic } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 140; easing.type: Easing.InCubic } }
         id: replaceDlg
         parent: Overlay.overlay
         modal: true
@@ -7926,6 +8637,10 @@ Item {
     // Decisión del técnico ante una cota automática con discrepancia o frente a una
     // cota MANUAL: "Usar automática" o "Ingresar manual" (nunca se reemplaza sola).
     Dialog {
+        // Entrada/salida suaves (fundido + leve escala).
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
+                            NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 220; easing.type: Easing.OutCubic } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 140; easing.type: Easing.InCubic } }
         id: altitudeReplaceDialog
         parent: Overlay.overlay
         modal: true
@@ -7981,6 +8696,10 @@ Item {
     }
 
     Dialog {
+        // Entrada/salida suaves (fundido + leve escala).
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
+                            NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 220; easing.type: Easing.OutCubic } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 140; easing.type: Easing.InCubic } }
         id: coordsConfirm
         parent: Overlay.overlay
         modal: true
@@ -8287,6 +9006,10 @@ Item {
     }
 
     Dialog {
+        // Entrada/salida suaves (fundido + leve escala).
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
+                            NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 220; easing.type: Easing.OutCubic } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 140; easing.type: Easing.InCubic } }
         id: resourcesPicker
         parent: Overlay.overlay
         modal: true
@@ -8314,6 +9037,37 @@ Item {
         property string pickTarget: ""
         property string selectedFileName: ""
         property url selectedUrl: ""
+        property bool libraryMode: true
+        property var libraryRows: []
+        property var selectedCloudEntry: null
+        property string librarySpaceId: ""
+        property string libraryParentId: ""
+        property var libraryParents: []
+        property string libraryMessage: ""
+        property string requestDocId: ""
+        property string requestScope: ""
+
+        function loadLibrary(parentId) {
+            libraryParentId = parentId
+            libraryRows = []
+            selectedCloudEntry = null
+            selectedFileName = ""
+            selectedUrl = ""
+            libraryMessage = "Consultando 10_RECURSOS con tu cuenta…"
+            CalicataCloud.listLogoLibrary(root.doc, parentId)
+        }
+        Connections {
+            target: typeof CalicataCloud !== "undefined" ? CalicataCloud : null
+            function onLogoLibraryListed(localId, spaceId, parentId, items, error) {
+                if (!resourcesPicker.opened || localId !== resourcesPicker.requestDocId
+                        || parentId !== resourcesPicker.libraryParentId) return
+                resourcesPicker.librarySpaceId = spaceId
+                resourcesPicker.libraryRows = items || []
+                resourcesPicker.libraryMessage = error.length ? error
+                    : (items.length ? "10_RECURSOS · confirma para descargar y publicar la imagen elegida."
+                                    : "Esta carpeta no contiene imágenes disponibles.")
+            }
+        }
 
         function _folderUrlForResources() {
             var p = (docsCtl.resourcesPath || "").toString().replace(/\\/g, "/")
@@ -8340,20 +9094,56 @@ Item {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: root.cMuted
-                text: (docsCtl.resourcesPath && docsCtl.resourcesPath.length)
+                text: resourcesPicker.libraryMode ? resourcesPicker.libraryMessage
+                      : (docsCtl.resourcesPath && docsCtl.resourcesPath.length)
                       ? ("Selecciona un logo dentro de:\n" + root._prettyFromUserRoot(docsCtl.resourcesPath))
                       : "No se pudo ubicar la carpeta Recursos."
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                GenDialogButton {
+                    text: "Dispositivo"
+                    Accessible.name: "Elegir una imagen de los archivos del dispositivo"
+                    Layout.fillWidth: true
+                    onClicked: {
+                        var target = resourcesPicker.pickTarget
+                        resourcesPicker.close()
+                        root._beginLogoRequest(target, true)
+                    }
+                }
+                GenDialogButton {
+                    text: resourcesPicker.libraryMode ? "Recursos locales" : "10_RECURSOS"
+                    onClicked: {
+                        resourcesPicker.libraryMode = !resourcesPicker.libraryMode
+                        resourcesPicker.selectedFileName = ""
+                        resourcesPicker.selectedUrl = ""
+                        resourcesPicker.selectedCloudEntry = null
+                        if (resourcesPicker.libraryMode) resourcesPicker.loadLibrary("")
+                    }
+                }
+            }
+            GenDialogButton {
+                visible: resourcesPicker.libraryMode && resourcesPicker.libraryParents.length > 0
+                text: "Carpeta anterior"
+                onClicked: {
+                    var parents = resourcesPicker.libraryParents.slice()
+                    var parentId = parents.pop()
+                    resourcesPicker.libraryParents = parents
+                    resourcesPicker.loadLibrary(parentId)
+                }
             }
 
             ListView {
                 id: resList
                 Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(240, resourcesPicker.height * 0.35)
+                Layout.preferredHeight: Math.min(root.dp(180), resourcesPicker.height * 0.28)
                 clip: true
-                model: resModel
+                model: resourcesPicker.libraryMode ? resourcesPicker.libraryRows : resModel
                 currentIndex: -1
 
                 delegate: Item {
+                    readonly property var cloudItem: resourcesPicker.libraryMode ? modelData : null
                     width: resList.width
                     height: 44
 
@@ -8371,7 +9161,7 @@ Item {
                         anchors.leftMargin: 10
                         anchors.right: parent.right
                         anchors.rightMargin: 10
-                        text: fileName
+                        text: parent.cloudItem ? (parent.cloudItem.node_type === "FOLDER" ? "› " : "") + parent.cloudItem.name : fileName
                         elide: Text.ElideRight
                         color: root.cText
                     }
@@ -8379,6 +9169,19 @@ Item {
                     MouseArea {
                         anchors.fill: parent
                         onClicked: {
+                            if (resourcesPicker.libraryMode) {
+                                var item = parent.cloudItem
+                                if (item.node_type === "FOLDER") {
+                                    resourcesPicker.libraryParents = resourcesPicker.libraryParents.concat([resourcesPicker.libraryParentId])
+                                    resourcesPicker.loadLibrary(item.id)
+                                    return
+                                }
+                                resList.currentIndex = index
+                                resourcesPicker.selectedCloudEntry = item
+                                resourcesPicker.selectedFileName = item.name
+                                resourcesPicker.selectedUrl = ""
+                                return
+                            }
                             resList.currentIndex = index
                             resourcesPicker.selectedFileName = fileName
                             resourcesPicker.selectedUrl = fileUrl   // ✅ role correcto
@@ -8425,14 +9228,27 @@ Item {
 
             selectedFileName = ""
             selectedUrl = ""
+            selectedCloudEntry = null
+            requestDocId = root._docInstanceId(root.doc)
+            requestScope = root.logoCloudScope
+            libraryMode = true
+            libraryParents = []
             resList.currentIndex = -1
 
             // ✅ refresca folder si resourcesPath recién se calculó
             resModel.folder = _folderUrlForResources()
+            loadLibrary("")
         }
 
         onAccepted: {
             if (!selectedFileName || !selectedFileName.length) return
+            if (requestDocId !== root._docInstanceId(root.doc) || requestScope !== root.logoCloudScope) return
+            if (selectedCloudEntry) {
+                CalicataCloud.selectLibraryLogo(root.doc, pickTarget === "mtc" ? "ENTITY" : "PROJECT",
+                    librarySpaceId, selectedCloudEntry.id, String(docsCtl.resourcesPath || ""))
+                root.logoFeedbackText = "Descargando la versión autorizada de 10_RECURSOS…"
+                return
+            }
 
             var rel = "Recursos/" + selectedFileName
             root._storeLogoRelative(pickTarget, rel)
@@ -8451,13 +9267,18 @@ Item {
         property string subtitle: ""
         property bool hasLogo: false
         property url logoSource: ""
-        // Los predeterminados son ICONO_LOGO_MTC / INGEMA_LOGO_COMPLETO (_useDefaultLogo).
-        readonly property string logoState: {
-            if (!genLogoSlot.hasLogo) return "Sin logo"
-            var s = String(genLogoSlot.logoSource)
-            return s.indexOf("ICONO_LOGO_MTC") >= 0 || s.indexOf("INGEMA_LOGO_COMPLETO") >= 0
-                    ? "Predeterminado" : "Personalizado"
-        }
+        // Recursos empaquetados antiguos son locales; no equivalen a la biblioteca Web.
+        readonly property bool isDefault: genLogoSlot.hasLogo && root._isOfficialLogoName(String(genLogoSlot.logoSource))
+        readonly property var readState: root.logoReadStates[genLogoSlot.target === "mtc" ? "ENTITY" : "PROJECT"] || {}
+        readonly property bool readFailed: readState.state === "ERROR" || readState.failed === true
+        readonly property string logoState: readFailed ? "Sin verificar" : !genLogoSlot.hasLogo ? "Sin logo"
+                                          : genLogoSlot.isDefault ? "Recurso local" : "Seleccionado"
+        readonly property var versionRows: root._logoVersionRows(genLogoSlot.target)
+        readonly property string resourceName: genLogoSlot.hasLogo
+            ? root._logoVersionName(decodeURIComponent(String(genLogoSlot.logoSource).split("/").pop())) : ""
+        // Estado REAL (outbox Media Cloud + calicata_media); nunca "sincronizado" sin confirmación.
+        readonly property string syncState: root.logoSlotSyncState(genLogoSlot.target, genLogoSlot.hasLogo)
+        property bool showVersions: false
         Layout.fillWidth: true
         implicitHeight: genLogoLayout.implicitHeight + root.dp(24)
         radius: root.dp(14)
@@ -8498,12 +9319,12 @@ Item {
                     Layout.preferredHeight: root.dp(24)
                     Layout.preferredWidth: genLogoState.implicitWidth + root.dp(16)
                     radius: height / 2
-                    color: genLogoSlot.hasLogo ? root.cGenGreenSoft : root.cGenOrangeSoft
+                    color: genLogoSlot.hasLogo && !genLogoSlot.readFailed ? root.cGenGreenSoft : root.cGenOrangeSoft
                     Text {
                         id: genLogoState
                         anchors.centerIn: parent
                         text: genLogoSlot.logoState
-                        color: genLogoSlot.hasLogo ? root.cGenGreen : root.cGenOrange
+                        color: genLogoSlot.hasLogo && !genLogoSlot.readFailed ? root.cGenGreen : root.cGenOrange
                         font.pixelSize: root.sp(11)
                         font.weight: Font.DemiBold
                     }
@@ -8561,28 +9382,43 @@ Item {
                 }
             }
 
-            // Acciones compactas: mismo tamaño, radio e iconografía.
+            Text {
+                Layout.fillWidth: true
+                text: genLogoSlot.hasLogo ? genLogoSlot.resourceName + " · " + genLogoSlot.syncState
+                                          : genLogoSlot.syncState
+                color: genLogoSlot.syncState === "Fallo de sincronización" ? (root.flow ? root.flow.theme.error : "#B4232E")
+                     : genLogoSlot.syncState.indexOf("Sincronizado") === 0 ? root.cGenGreen
+                     : genLogoSlot.syncState === "Sin logo" ? root.cMuted : root.cGenOrange
+                font.pixelSize: root.fsLabel
+                wrapMode: Text.WordWrap
+            }
+
+            // Acciones (contrato Web): Elegir · Anteriores · Restablecer · Vaciar.
             RowLayout {
                 Layout.fillWidth: true
                 spacing: root.dp(8)
                 Repeater {
                     model: [
-                        { label: "Adjuntar", full: "Adjuntar", icon: "calgen.attach", action: "attach" },
-                        { label: "Predeterminado", full: "Usar predeterminado", icon: "calgen.default", action: "default" },
-                        { label: "Dejar vacío", full: "Dejar vacío", icon: "calgen.clear", action: "clear" }
+                        { label: "Elegir", full: "Elegir imagen", icon: "calgen.attach", action: "attach" },
+                        { label: "Anteriores", full: "Ver versiones anteriores", icon: "calgen.history", action: "versions" },
+                        { label: "Restablecer", full: "Elegir recurso institucional de la biblioteca compartida", icon: "calgen.default", action: "default" },
+                        { label: "Vaciar", full: "Dejar vacío", icon: "calgen.clear", action: "clear" }
                     ]
                     delegate: GenDialogButton {
                         required property var modelData
+                        Layout.fillWidth: true
                         Layout.preferredWidth: 1
-                        visible: modelData.action !== "clear" || genLogoSlot.hasLogo
                         stacked: true
                         soft: modelData.action !== "clear"
                         text: modelData.label
                         iconName: modelData.icon
                         Accessible.name: modelData.full
                         enabled: !root._logoRequestPending
+                                 && (modelData.action !== "clear" || genLogoSlot.hasLogo)
+                                 && (modelData.action !== "versions" || genLogoSlot.versionRows.length > 0)
                         onClicked: {
                             if (modelData.action === "attach") root._beginLogoRequest(genLogoSlot.target)
+                            else if (modelData.action === "versions") genLogoSlot.showVersions = !genLogoSlot.showVersions
                             else if (modelData.action === "default") root._useDefaultLogo(genLogoSlot.target)
                             else root._deleteLogo(genLogoSlot.target)
                         }
@@ -8590,9 +9426,12 @@ Item {
                 }
             }
 
+            // Versiones anteriores (nube y locales): nunca se borran al cambiar.
             LogoHistoryStrip {
                 Layout.fillWidth: true
                 target: genLogoSlot.target
+                visible: genLogoSlot.showVersions && rows.length > 0
+                expanded: true
             }
         }
     }
@@ -8611,7 +9450,8 @@ Item {
 
             GenDialogHeader {
                 title: "Identidad del reporte"
-                subtitle: "Código, proyecto y logos usados al exportar"
+                subtitle: "Logos utilizados en la exportación"
+                badgeText: "3D Touch"
                 onCloseRequested: root._closeIdentityPopup()
             }
 
@@ -8626,54 +9466,6 @@ Item {
                     id: mobileIdentitySection
                     width: identityScroll.availableWidth
                     spacing: root.dp(12)
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: identityInfoColumn.implicitHeight + root.dp(20)
-                        radius: root.dp(12)
-                        color: "transparent"
-                        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: "tinted" }
-                        ColumnLayout {
-                            id: identityInfoColumn
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            anchors.margins: root.dp(10)
-                            spacing: root.dp(4)
-                            Repeater {
-                                model: [
-                                    { label: "Código", value: txtCodigo.text || "Sin definir" },
-                                    { label: "Proyecto", value: txtProjectFullName.text || "Sin definir" }
-                                ]
-                                delegate: RowLayout {
-                                    required property var modelData
-                                    Layout.fillWidth: true
-                                    spacing: root.dp(8)
-                                    Text {
-                                        Layout.preferredWidth: root.dp(70)
-                                        text: modelData.label
-                                        color: root.cMuted
-                                        font.pixelSize: root.fsLabel
-                                    }
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: modelData.value
-                                        color: root.cText
-                                        font.pixelSize: root.fsLabel
-                                        font.weight: Font.DemiBold
-                                        wrapMode: Text.WordWrap
-                                    }
-                                }
-                            }
-                            Text {
-                                Layout.fillWidth: true
-                                text: "Puedes editarlos en Datos generales."
-                                color: root.cGenBlue
-                                font.pixelSize: root.fsLabel
-                                wrapMode: Text.WordWrap
-                            }
-                        }
-                    }
 
                     Text {
                         Layout.fillWidth: true
@@ -8715,9 +9507,11 @@ Item {
         }
     }
 
-    // Fondo de la ficha.
+    // Fondo de la ficha: el mismo color lo pinta CalicatasEditorPage junto con las
+    // auras de Estado de Calicatas; aquí queda transparente para no taparlas.
     PhotoAmbient {
         anchors.fill: parent
+        color: "transparent"
     }
 
     // Visor de fotografía: fondo oscuro, zoom con pellizco/doble toque, acciones claras.
@@ -9995,7 +10789,7 @@ Item {
                         Text {
                             anchors.centerIn: parent
                             text: dayCell.model.day
-                            color: dayCell.isSelected ? (root.darkMode ? root.brand.ingemaDeep : "#FFFFFF")
+                            color: dayCell.isSelected ? (root.darkMode ? "#0A0A0A" : "#FFFFFF")
                                  : dayCell.model.today ? root.cGenBlue : root.cText
                             opacity: dayCell.inMonth ? 1 : 0.35
                             font.pixelSize: root.fsField
@@ -10062,6 +10856,7 @@ Item {
             spacing: root.dp(12)
 
             Column {
+                id: stageHeaderColumn
                 width: parent.width
                 spacing: root.dp(7)
                 // Una sola cabecera para TODAS las etapas (General … Revisión): código,
@@ -10072,6 +10867,7 @@ Item {
                     projectText: root._projectDisplayName()
                     projectAssigned: !!(root.doc && root.doc.header.projectId)
                     stageText: root.sectionNavigation[root.stageIndex].shortLabel
+                    showContext: root.stageIndex !== 0
                     stageIcon: root.stageIndex === 5 ? root.iconNotesName : root.stageIndex === 4 ? root.iconPhotosName
                              : root.stageIndex === 3 ? root.iconSamplesName : root.stageIndex === 2 ? root.iconStrataName
                              : root.stageIndex === 1 ? "map.location" : "calgen.code"
@@ -10107,338 +10903,124 @@ Item {
             MobileStageBody {
                 id: mobileGeneralSection
                 sectionNumber: 1
+                glassPanel: false
 
-                // ---- Identificación ----
-                GenGroupHeader { title: "IDENTIFICACIÓN"; accent: root.cGenBlue }
-
-                GenHeaderField {
-                    label: "Código"
-                    labelCaps: true
-                    iconName: "calgen.code"
-                    boundText: txtCodigo.text
-                    inputPlaceholder: "Sin registrar"
-                    commitHandler: function(t) {
-                        root._setCanonicalCalicataCode(t)
-                        // Un código que termina en progresiva válida la refleja.
-                        var pkFromCode = Rules.progresivaFromCode(t)
-                        if (pkFromCode.length && pkFromCode !== txtPk.text.trim())
-                            root._setProgresiva(pkFromCode, false)
-                    }
-                }
-
-                // Proyecto = projects.name (contrato Web: una sola fuente para la
-                // ficha, el rótulo de fotos y la exportación). Ni nombre largo ni
-                // nombre corto se editan por ficha; los valores antiguos
-                // (project_full_name / project_short_name) se conservan en el
-                // documento y solo se muestran si la ficha aún no tiene proyecto.
-                GenFieldShell {
-                    label: "Proyecto"
-                    caption: "Nombre del proyecto en InGe+. Elegirlo define dónde se guarda y sincroniza la ficha."
-                    iconName: "calgen.project"
-                    tappable: true
-                    emphasized: true
-                    valueText: root._projectDisplayName()
-                    onActivated: root._openProjectPicker()
-                }
-                Text {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: root.dp(4)
-                    Layout.topMargin: -root.dp(6)
-                    text: root.doc ? String(root.doc.header.projectCode || "") : ""
-                    visible: text.length > 0
-                    color: root.cMuted
-                    font.pixelSize: root.fsLabel
-                    wrapMode: Text.WordWrap
-                }
-                // Denominación oficial completa (header.project_full_name; dato de la
-                // ficha, independiente de projects.name y del nombre corto).
-                GenHeaderField {
-                    label: "Nombre del proyecto"
-                    labelCaps: true
-                    iconName: "calgen.project"
-                    headerKey: "project_full_name"
-                    inputPlaceholder: "Denominación oficial completa del proyecto"
-                    inputMaximumLength: 600
-                }
-                // Nombre corto (rótulo de fotografías y vistas compactas).
-                GenHeaderField {
-                    label: "Nombre corto del proyecto"
-                    labelCaps: true
-                    iconName: "calgen.project"
-                    headerKey: "project_short_name"
-                    inputPlaceholder: "Ej.: Lechemayo"
-                    inputMaximumLength: 80
-                }
-
-                // ---- Fechas y responsable ----
-                GenGroupHeader { title: "FECHAS Y RESPONSABLE"; accent: root.cGenOrange }
-
-                GenFieldShell {
-                    label: "Fecha inicio"
-                    iconName: "calgen.date"
-                    accent: root.cGenOrange
-                    accentSoft: root.cGenOrangeSoft
-                    tappable: true
-                    valueText: btnFechaInicio.text === "Seleccionar fecha" ? "" : btnFechaInicio.text
-                    placeholder: "Seleccionar fecha"
-                    onActivated: root._openDatePicker(btnFechaInicio, "FECHA INICIO")
-                }
-                // Hora de la ficha (opcional, HH:mm:ss): rótulo de las fotografías.
-                // Vacía = cada foto conserva la hora del sistema fijada al tomarla.
-                GenHeaderField {
-                    id: horaInicioField
-                    label: "Hora (opcional)"
-                    iconName: "calgen.date"
-                    accent: root.cGenOrange
-                    accentSoft: root.cGenOrangeSoft
-                    headerKey: "hora_inicio"
-                    inputPlaceholder: "HH:mm:ss"
-                    inputMaximumLength: 8
-                    commitHandler: function(t) {
-                        var normalized = Rules.normalizeOptionalTime(t)
-                        if (normalized === null) {
-                            horaInicioField.inputValidationError = "Usa el formato HH:mm:ss (por ejemplo 20:06:33) o déjala vacía."
-                            return false
+                // Medir hasta el Dock real, que flota sobre el formulario. La reserva
+                // del contentHeight sirve al scroll: no se vuelve a restar aquí.
+                Item {
+                    id: generalMosaic
+                    readonly property Item contextualDock: {
+                        for (var host = root.parent; host; host = host.parent) {
+                            if ("dockAnchor" in host)
+                                return host.dockAnchor
                         }
-                        var h = Object.assign({}, root.doc.header)
-                        h.hora_inicio = normalized
-                        h.start_time = normalized   // columna remota (cross-device)
-                        root.doc.header = h
+                        return null
                     }
-                }
-                GenFieldShell {
-                    label: "Fecha fin"
-                    iconName: "calgen.date"
-                    accent: root.cGenOrange
-                    accentSoft: root.cGenOrangeSoft
-                    tappable: true
-                    valueText: btnFechaFin.text === "Seleccionar fecha" ? "" : btnFechaFin.text
-                    placeholder: "Seleccionar fecha"
-                    onActivated: root._openDatePicker(btnFechaFin, "FECHA FIN")
-                }
-                Text {
+                    readonly property real viewportBottom: contextualDock
+                        ? Math.min(vFlick.height, contextualDock.parent.mapToItem(vFlick, contextualDock.x, contextualDock.y).y)
+                        : vFlick.height
+                    readonly property real usableHeight: Math.max(0, viewportBottom - root.dp(12)
+                        - finalPageCol.y - mobileGeneralSection.y - generalMosaic.y)
+                    readonly property real naturalHeight: identityGroup.implicitHeight + identityTile.implicitHeight
+                        + Math.max(sheetTypeTile.implicitHeight, datesTile.implicitHeight)
+                        + fieldGroup.implicitHeight + root.dp(4)
+                        + Math.max(machineTile.implicitHeight, excavationTile.implicitHeight)
+                        + 4 * mosaicColumn.spacing
+                    readonly property real extraHeight: Math.max(0, usableHeight - naturalHeight)
                     Layout.fillWidth: true
-                    visible: text.length > 0
-                    text: Rules.validateFieldDates(root.doc ? String(root.doc.header.fecha_inicio || "") : "",
-                                                   root.doc ? String(root.doc.header.fecha_fin || "") : "")
-                    color: root.flow ? root.flow.theme.error : "#B4232E"
-                    font.pixelSize: root.fsLabel
-                    wrapMode: Text.WordWrap
-                }
+                    implicitHeight: Math.max(naturalHeight, usableHeight)
+                    ColumnLayout {
+                        id: mosaicColumn
+                        anchors.fill: parent
+                        spacing: root.dp(8)
+                        // ---- IDENTIDAD: tres boxes en mosaico (preview aprobado) ----
+                        GenGroupHeader { id: identityGroup; title: "IDENTIDAD"; accent: root.cGenBlue; Layout.topMargin: 0 }
 
-                GenHeaderField {
-                    label: "Supervisor"
-                    labelCaps: true
-                    iconName: "calgen.supervisor"
-                    accent: root.cGenViolet
-                    accentSoft: root.cGenVioletSoft
-                    boundText: txtSupervisor.text
-                    inputMaximumLength: Rules.SUPERVISOR_MAX_LENGTH
-                    inputPlaceholder: "Sin registrar"
-                    commitHandler: function(t) { txtSupervisor.text = t }
-                }
-
-                GenFieldShell {
-                    readonly property int machineIndex: root._catalogIndex(txtMaquina.text, Rules.MACHINE_OPTIONS, root.machineHistorical)
-                    label: "Maquinaria"
-                    iconName: "calgen.machine"
-                    accent: root.cGenTeal
-                    accentSoft: root.cGenTealSoft
-                    tappable: true
-                    valueText: machineIndex > 0 ? String(root.machineModel[machineIndex]) : ""
-                    placeholder: String(root.machineModel[0])
-                    onActivated: root._openMachinePicker()
-                }
-
-                // ---- Ficha ----
-                // `description` es el "Título de la ficha / testificación" de Web.
-                // `title` solo se fija al crear (Web: "Título" del alta) y no se
-                // edita en el detalle; su valor se conserva y viaja tal cual.
-                GenGroupHeader { title: "FICHA"; accent: root.cGenBlue }
-
-                // Tipo de ficha = calicatas.description (Web: "Título de la ficha /
-                // testificación"). Solo dos valores; un texto antiguo se muestra tal cual.
-                GenFieldShell {
-                    readonly property var sheetTypes: ["FICHA DE CALICATA", "FICHA DE CANTERA"]
-                    readonly property string current: root.doc ? String(root.doc.header.description || "") : ""
-                    label: "Título / Testificación"
-                    iconName: "calgen.code"
-                    tappable: true
-                    valueText: current
-                    placeholder: "Seleccionar tipo de ficha"
-                    onActivated: root._openOptionPicker("Título / Testificación", sheetTypes,
-                                                        Math.max(0, sheetTypes.indexOf(current)), "calgen.code",
-                                                        root.cGenBlue, root.cGenBlueSoft,
-                                                        function(i) {
-                                                            if (!root.doc || i < 0 || i >= sheetTypes.length) return
-                                                            var h = Object.assign({}, root.doc.header)
-                                                            h.description = sheetTypes[i]
-                                                            root.doc.header = h
-                                                            root._markDirty()
-                                                        })
-                }
-
-                // ---- Excavación ----
-                GenGroupHeader { title: "EXCAVACIÓN"; accent: root.cGenGreen }
-
-                GridLayout {
-                    Layout.fillWidth: true
-                    columns: width >= root.dp(300) ? 2 : 1
-                    columnSpacing: root.dp(10)
-                    rowSpacing: root.dp(10)
-                    GenHeaderField {
-                        Layout.preferredWidth: 1
-                        Layout.alignment: Qt.AlignTop
-                        label: "Largo de excavación (m)"
-                        iconName: "calgen.length"
-                        accent: root.cGenGreen
-                        accentSoft: root.cGenGreenSoft
-                        headerKey: "length_m"
-                        numeric: true
-                        hint: "Ej. 2.5"
-                    }
-                    GenHeaderField {
-                        Layout.preferredWidth: 1
-                        Layout.alignment: Qt.AlignTop
-                        label: "Ancho de excavación (m)"
-                        iconName: "calgen.width"
-                        accent: root.cGenGreen
-                        accentSoft: root.cGenGreenSoft
-                        headerKey: "width_m"
-                        numeric: true
-                        hint: "Ej. 1.8"
-                    }
-                }
-
-                GenHeaderField {
-                    label: "Descripción técnica (solo Android)"
-                    iconName: "calgen.description"
-                    accent: root.cGenGreen
-                    accentSoft: root.cGenGreenSoft
-                    headerKey: "technical_description"
-                }
-
-                GridLayout {
-                    Layout.fillWidth: true
-                    columns: width >= root.dp(300) ? 2 : 1
-                    columnSpacing: root.dp(10)
-                    rowSpacing: root.dp(10)
-                    GenFieldShell {
-                        Layout.preferredWidth: 1
-                        Layout.alignment: Qt.AlignTop
-                        label: "Profundidad (m)"
-                        labelCaps: false
-                        caption: "Derivada de los cortes"
-                        iconName: "calgen.depth"
-                        accent: root.cGenGreen
-                        accentSoft: root.cGenGreenSoft
-                        readOnly: true
-                        valueText: root.derivedDepthText
-                        placeholder: "Sin cortes completos"
-                    }
-                    GenFieldShell {
-                        Layout.preferredWidth: 1
-                        Layout.alignment: Qt.AlignTop
-                        label: "Nivel freático (m)"
-                        labelCaps: false
-                        caption: root.groundwaterCustom ? "Personalizado" : "Primer corte con AGUA"
-                        iconName: "calgen.water"
-                        accent: root.cGenGreen
-                        accentSoft: root.cGenGreenSoft
-                        readOnly: true
-                        valueText: root.effectiveGroundwaterText
-                        placeholder: "No registrado"
-                    }
-                }
-
-                // ---- Identidad del reporte ----
-                Button {
-                    id: genIdentityEntry
-                    Layout.fillWidth: true
-                    Layout.topMargin: root.dp(10)
-                    implicitHeight: Math.max(root.dp(76), genIdentityRow.implicitHeight + topPadding + bottomPadding)
-                    padding: root.dp(12)
-                    onClicked: identityPopup.open()
-                    scale: down ? 0.985 : 1
-                    Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-                    background: CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; radius: root.dp(14); tone: "tinted"; selected: true; pressed: genIdentityEntry.down }
-                    contentItem: RowLayout {
-                        id: genIdentityRow
-                        spacing: root.dp(12)
-                        GenIconBadge {
-                            Layout.preferredWidth: root.dp(44)
-                            Layout.preferredHeight: root.dp(44)
-                            Layout.alignment: Qt.AlignVCenter
-                            radius: root.dp(12)
-                            iconName: "calgen.identity"
-                            accentSoft: root.cField
+                        GenTile {
+                            id: identityTile
+                            objectName: "generalBoxIdentity"
+                            Layout.preferredHeight: implicitHeight + generalMosaic.extraHeight * 0.30
+                            wide: true
+                            title: "Código / Proyecto / Supervisor"
+                            subtitle: root._generalIdentitySummary()
+                            iconName: "calgen.project"
+                            accent: root.cGenBlue
+                            accentSoft: root.cGenBlueSoft
+                            onClicked: root._openGeneralPanel(generalIdentityPopup)
+                            onPressAndHold: root._openGeneralPanel(generalIdentityPopup)
                         }
-                        ColumnLayout {
+                        RowLayout {
                             Layout.fillWidth: true
-                            spacing: root.dp(3)
-                            Text {
-                                Layout.fillWidth: true
-                                text: "Identidad del reporte"
-                                color: root.cText
-                                font.bold: true
-                                font.pixelSize: root.fsField + 1
-                                elide: Text.ElideRight
+                            Layout.preferredHeight: Math.max(sheetTypeTile.implicitHeight, datesTile.implicitHeight) + generalMosaic.extraHeight * 0.34
+                            spacing: root.dp(8)
+                            GenTile {
+                                id: sheetTypeTile
+                                objectName: "generalBoxSheetType"
+                                Layout.preferredWidth: (parent.width - parent.spacing) * 0.46
+                                readonly property string current: root.doc ? String(root.doc.header.description || "") : ""
+                                title: "Tipo de ficha"
+                                subtitle: current.length ? current : "Seleccionar y configurar"
+                                iconName: "calgen.code"
+                                accent: root.cGenGreen
+                                accentSoft: root.cGenGreenSoft
+                                surfaceColor: Qt.hsla(root.brand.ingemaGreen.hslHue, 0.72, 0.28, 1)
+                                onClicked: root._openSheetTypePicker()
+                                onPressAndHold: root._openSheetTypePicker()
                             }
-                            Text {
-                                Layout.fillWidth: true
-                                text: "Configura logos e información del reporte"
-                                color: root.cMuted
-                                font.pixelSize: root.fsLabel
-                                wrapMode: Text.WordWrap
-                            }
-                            Flow {
-                                Layout.fillWidth: true
-                                Layout.topMargin: root.dp(3)
-                                spacing: root.dp(6)
-                                Repeater {
-                                    model: [
-                                        { ok: root.hasLogoProyecto, text: root.hasLogoProyecto ? "Proyecto listo" : "Proyecto pendiente" },
-                                        { ok: root.hasLogoMtc, text: root.hasLogoMtc ? "MTC / entidad listo" : "MTC / entidad pendiente" }
-                                    ]
-                                    delegate: Rectangle {
-                                        required property var modelData
-                                        width: identityChipRow.implicitWidth + root.dp(16)
-                                        height: root.dp(24)
-                                        radius: height / 2
-                                        color: "transparent"
-                                        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
-                                        Row {
-                                            id: identityChipRow
-                                            anchors.centerIn: parent
-                                            spacing: root.dp(5)
-                                            Rectangle {
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                width: root.dp(6)
-                                                height: width
-                                                radius: width / 2
-                                                color: modelData.ok ? root.cGenGreen : root.cGenOrange
-                                            }
-                                            Text {
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                text: modelData.text
-                                                color: root.cText
-                                                font.pixelSize: root.sp(11)
-                                            }
-                                        }
-                                    }
-                                }
+                            GenTile {
+                                id: datesTile
+                                objectName: "generalBoxDatesLogos"
+                                Layout.preferredWidth: (parent.width - parent.spacing) * 0.54
+                                title: "Fechas / Logos"
+                                subtitle: "Periodo e identidad"
+                                iconName: "calgen.date"
+                                accent: root.cGenOrange
+                                accentSoft: root.cGenOrangeSoft
+                                surfaceColor: "#F28A18"
+                                foreground: root.brand.ingemaDeep
+                                onClicked: root._openGeneralPanel(generalDatesPopup)
+                                onPressAndHold: root._openGeneralPanel(generalDatesPopup)
                             }
                         }
-                        Components.FlowIcon {
-                            Layout.preferredWidth: root.dp(18)
-                            Layout.preferredHeight: root.dp(18)
-                            Layout.alignment: Qt.AlignVCenter
-                            name: "calgen.chevron"
-                            flow: root.flow
-                            tintColor: root.cGenBlue
-                            activeTintColor: root.cGenBlue
-                            inactiveOpacity: 1
+
+                        // ---- TRABAJO DE CAMPO: dos boxes horizontales ----
+                        GenGroupHeader { id: fieldGroup; title: "TRABAJO DE CAMPO"; accent: root.cGenBlue; Layout.topMargin: root.dp(4) }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: Math.max(machineTile.implicitHeight, excavationTile.implicitHeight) + generalMosaic.extraHeight * 0.36
+                            spacing: root.dp(8)
+                            GenTile {
+                                id: machineTile
+                                objectName: "generalBoxMachine"
+                                Layout.preferredWidth: (parent.width - parent.spacing) * 0.54
+                                readonly property int machineIndex: root._catalogIndex(txtMaquina.text, Rules.MACHINE_OPTIONS, root.machineHistorical)
+                                title: "Maquinaria"
+                                subtitle: machineIndex > 0 ? String(root.machineModel[machineIndex]) : "Elegir equipo"
+                                iconName: "calgen.machine"
+                                accent: root.cGenBlue
+                                accentSoft: root.cGenBlueSoft
+                                surfaceColor: Qt.hsla(root.brand.ingemaBlue.hslHue, 0.88, 0.35, 1)
+                                badgeText: "3D Touch"
+                                onClicked: root._openMachinePicker()
+                                onPressAndHold: root._openMachinePicker()
+                            }
+                            GenTile {
+                                id: excavationTile
+                                objectName: "generalBoxExcavation"
+                                Layout.preferredWidth: (parent.width - parent.spacing) * 0.46
+                                title: "Excavación"
+                                subtitle: "Datos de campo"
+                                iconName: "calgen.depth"
+                                accent: root.cGenGreen
+                                accentSoft: root.cGenGreenSoft
+                                surfaceColor: Qt.hsla(root.brand.ingemaGreen.hslHue, 0.82, 0.25, 1)
+                                badgeText: "3D Touch"
+                                onClicked: root._openGeneralPanel(generalExcavationPopup)
+                                onPressAndHold: root._openGeneralPanel(generalExcavationPopup)
+                            }
                         }
+
                     }
                 }
             }
@@ -10528,9 +11110,9 @@ Item {
                         Rectangle {
                             anchors.fill: parent
                             radius: root.dp(14)
-                            color: Mobile.InGeCoreFlow.darkMode ? "#171D29" : "#FFFFFF"
+                            color: root.darkMode ? "#16233F" : "#FFFFFF"
                             border.width: 1
-                            border.color: Mobile.InGeCoreFlow.darkMode ? "#3A4456" : "#D5DBE3"
+                            border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.10) : "#D5DBE3"
                         }
                         Rectangle {
                             anchors.fill: parent
@@ -10596,9 +11178,9 @@ Item {
                         Rectangle {
                             anchors.fill: parent
                             radius: height / 2
-                            color: Mobile.InGeCoreFlow.darkMode ? "#171D29" : "#FFFFFF"
+                            color: root.darkMode ? "#16233F" : "#FFFFFF"
                             border.width: 1
-                            border.color: Mobile.InGeCoreFlow.darkMode ? "#3A4456" : "#D5DBE3"
+                            border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.10) : "#D5DBE3"
                         }
                         Rectangle {
                             anchors.fill: parent

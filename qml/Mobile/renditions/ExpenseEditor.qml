@@ -115,6 +115,9 @@ Item {
     property bool restored: false
     property bool waitingPhoto: false
     property bool localSaved: false           // copia local del formulario persistida
+    // Revisión de edición (paridad Web PR #11, ADR-023/052): un guardado sólo
+    // acredita la instantánea que envió, nunca lo escrito mientras estaba en curso.
+    property int editRevision: 0
     property string replacingSource: ""      // sustento a reemplazar tras elegir archivo
     // Resultado del registro: "" | "pending" (guardado, falta confirmación) | "confirmed"
     property string resultKind: ""
@@ -219,6 +222,7 @@ Item {
 
     function changed() {
         if (applying) return
+        editRevision++
         error = ""
         if (Object.keys(fieldErrors).length) fieldErrors = ({})
         localSaved = false
@@ -231,8 +235,9 @@ Item {
         draft.pendingAttachments = pending
         draft.renditionLocalId = renditionLocalId
         draft.section = section
+        var revision = editRevision
         app.call("saveEditorDraft", { key: draftKey, draft: draft }, "", function(ok) {
-            if (ok && page.life.alive) page.localSaved = true
+            if (ok && page.life.alive && page.editRevision === revision) page.localSaved = true
         })
     }
     Timer {
@@ -258,6 +263,8 @@ Item {
         if (!writable) return
         var args = { localId: renditionLocalId, workingId: workingId, form: workingForm(),
                      files: workingFiles(explicitSave === true), final: explicitSave === true }
+        // Sustentos enviados en ESTE guardado: los añadidos mientras está en curso se conservan.
+        var sentUris = explicitSave === true ? pending.map(function(a) { return a.localUri }) : []
         if (!workingId.length && expenseLocalId.length && expense && String(expense.remoteId || "").length)
             args.expenseLocalId = expenseLocalId
         var life = page.life
@@ -272,7 +279,8 @@ Item {
                 page.app.call("saveEditorDraft", { key: previousKey, draft: {} }, "")
                 page.persistLocal()
             }
-            if (explicitSave === true) page.pending = []
+            if (explicitSave === true)
+                page.pending = page.pending.filter(function(a) { return sentUris.indexOf(a.localUri) < 0 })
             if (done) done(true)
         })
     }
@@ -611,9 +619,9 @@ Item {
                 page.changed()
                 return
             }
-            var list = page.pending.slice()
-            var done = list.shift()
-            page.pending = list
+            // Se retira el sustento confirmado por su identidad, no por su posición.
+            var done = a
+            page.pending = page.pending.filter(function(p) { return p.localUri !== a.localUri })
             if (done.sourceKind !== "file" && typeof Perms !== "undefined" && Perms)
                 Perms.releaseImportedPhoto(done.importedUrl)
             page.attachNext(life)
@@ -951,7 +959,7 @@ Item {
         radius: 24 * ui.u
         color: S.cardGlass
         border.width: 1
-        border.color: Qt.rgba(1, 1, 1, 0.9)
+        border.color: S.edge(0.9)
         Rectangle {                                   // sombra muy suave (estática)
             z: -1
             anchors.fill: parent
@@ -1159,13 +1167,40 @@ Item {
                         ui: page.ui; heading: "Comprobante"; subtitle: "Información del comprobante de pago."
                         OperationLine { ui: page.ui; owner: page }
                         FormLine { ui: page.ui; owner: page; forSection: 1 }
-                        RSelect {
-                            width: parent.width; ui: page.ui; formStyle: true; glyph: 0xE0CC
-                            label: "Tipo de comprobante *"; placeholder: "Seleccionar tipo"; readOnly: !page.writable
-                            options: { page.app.st; return page.catalogOptions("SUPPORT_TYPE") }
-                            value: page.supportTypeCode; error: page.fieldError("supportType")
-                            onPicked: function(v) { page.supportTypeCode = v; page.changed() }
+                        // Tipo de comprobante (imagen 4): selector compacto con los tipos REALES del catálogo.
+                        Text { text: "Tipo de comprobante *"; color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u; font.weight: Font.DemiBold }
+                        Flow {
+                            id: supportTypeFlow
+                            objectName: "supportTypeChips"
+                            width: parent.width
+                            spacing: 8 * page.ui.u
+                            Repeater {
+                                model: { page.app.st; return page.catalogOptions("SUPPORT_TYPE") }
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    readonly property bool selected: page.supportTypeCode === modelData.value
+                                    height: 44 * page.ui.u
+                                    width: Math.max(84 * page.ui.u, typeText.implicitWidth + 30 * page.ui.u)
+                                    radius: 14 * page.ui.u
+                                    color: selected ? Qt.rgba(6 / 255, 84 / 255, 162 / 255, 0.10) : (typeTap.pressed ? S.ink(0.08) : S.glass(0.78))
+                                    border.width: selected ? 1.5 : 1
+                                    border.color: selected ? S.accent : S.fieldBorder
+                                    opacity: page.writable ? 1 : 0.5
+                                    Behavior on color { ColorAnimation { duration: page.reduced ? 0 : 140 } }
+                                    Text { id: typeText; anchors.centerIn: parent; text: modelData.label
+                                           color: parent.selected ? S.accent : S.text
+                                           font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u
+                                           font.weight: parent.selected ? Font.DemiBold : Font.Normal }
+                                    MouseArea { id: typeTap; anchors.fill: parent; enabled: page.writable
+                                                onClicked: { page.supportTypeCode = modelData.value; page.app.haptic("selection"); page.changed() } }
+                                    Accessible.role: Accessible.Button
+                                    Accessible.name: modelData.label
+                                    Accessible.checked: selected
+                                }
+                            }
                         }
+                        Text { visible: page.fieldError("supportType").length > 0; width: parent.width; text: page.fieldError("supportType")
+                               color: S.danger; wrapMode: Text.WordWrap; font.family: page.ui.fontFamily; font.pixelSize: 13 * page.ui.u }
                         RField { id: supportNumberField; width: parent.width; ui: page.ui; formStyle: true; glyph: 0xE0EF
                                  label: "Número de comprobante"; placeholder: "Ingrese número…"; readOnly: !page.writable; onEdited: page.changed() }
                         RField { id: supportDetailField; width: parent.width; ui: page.ui; formStyle: true; glyph: 0xE0CC
@@ -1189,13 +1224,57 @@ Item {
                         ui: page.ui; heading: "Pago e importe"; subtitle: "Cómo se realizó el pago."
                         OperationLine { ui: page.ui; owner: page }
                         FormLine { ui: page.ui; owner: page; forSection: 2 }
-                        RSelect {
-                            width: parent.width; ui: page.ui; formStyle: true; glyph: 0xE0AA
-                            label: "Medio de pago *"; placeholder: "Seleccionar medio de pago"; readOnly: !page.writable
-                            options: { page.app.st; return page.catalogOptions("PAYMENT_METHOD") }
-                            value: page.paymentMethodCode; error: page.fieldError("payment")
-                            onPicked: function(v) { page.paymentMethodCode = v; page.changed() }
+                        // Medio de pago (imagen 4): mosaicos con los medios REALES del catálogo
+                        // (sin códigos nuevos); el icono se elige por el nombre del medio.
+                        Text { text: "Medio de pago *"; color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u; font.weight: Font.DemiBold }
+                        Grid {
+                            id: payGrid
+                            objectName: "paymentTiles"
+                            width: parent.width
+                            columns: 4
+                            spacing: 8 * page.ui.u
+                            Repeater {
+                                model: { page.app.st; return page.catalogOptions("PAYMENT_METHOD") }
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    readonly property bool selected: page.paymentMethodCode === modelData.value
+                                    readonly property string key: (modelData.label + " " + modelData.value).toLowerCase()
+                                    width: (payGrid.width - 3 * payGrid.spacing) / 4
+                                    height: 84 * page.ui.u
+                                    radius: 16 * page.ui.u
+                                    color: selected ? S.accent : (payTap.pressed ? S.ink(0.08) : S.glass(0.78))
+                                    border.width: 1
+                                    border.color: selected ? S.accent : S.fieldBorder
+                                    opacity: page.writable ? 1 : 0.5
+                                    scale: payTap.pressed && !page.reduced ? 0.97 : 1
+                                    Behavior on scale { NumberAnimation { duration: 120 } }
+                                    Column {
+                                        anchors.centerIn: parent
+                                        width: parent.width - 8 * page.ui.u
+                                        spacing: 6 * page.ui.u
+                                        Text {
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            // banknote · smartphone · repeat (transferencia) · credit-card (Lucide verificados)
+                                            text: String.fromCharCode(parent.parent.key.indexOf("efectivo") >= 0 || parent.parent.key.indexOf("cash") >= 0 ? 0xE052
+                                                  : parent.parent.key.indexOf("yape") >= 0 || parent.parent.key.indexOf("plin") >= 0 ? 0xE163
+                                                  : parent.parent.key.indexOf("transfer") >= 0 || parent.parent.key.indexOf("depósito") >= 0 ? 0xE146 : 0xE0AA)
+                                            color: parent.parent.selected ? S.onAccent : S.navy
+                                            font.family: page.ui.iconFamily; font.pixelSize: 24 * page.ui.u
+                                        }
+                                        Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: modelData.label
+                                               color: parent.parent.selected ? S.onAccent : S.text; elide: Text.ElideRight
+                                               font.family: page.ui.fontFamily; font.pixelSize: 12 * page.ui.u }
+                                    }
+                                    MouseArea { id: payTap; anchors.fill: parent; enabled: page.writable
+                                                onClicked: { page.paymentMethodCode = modelData.value; page.app.haptic("selection"); page.changed() } }
+                                    Accessible.role: Accessible.Button
+                                    Accessible.name: modelData.label
+                                    Accessible.checked: selected
+                                }
+                            }
                         }
+                        Text { visible: page.fieldError("payment").length > 0; width: parent.width; text: page.fieldError("payment")
+                               color: S.danger; wrapMode: Text.WordWrap; font.family: page.ui.fontFamily; font.pixelSize: 13 * page.ui.u }
                         RField { id: paymentDetailField; width: parent.width; ui: page.ui; formStyle: true; glyph: 0xE0CC
                                  label: "Detalle de pago (opcional)"; placeholder: "Banco, tarjeta, operación, etc…"; readOnly: !page.writable; onEdited: page.changed() }
                     }
@@ -1309,7 +1388,7 @@ Item {
                                 width: supportsColumn.width - 40 * page.ui.u
                                 height: 76 * page.ui.u
                                 radius: 18 * page.ui.u
-                                color: Qt.rgba(1, 1, 1, 0.72)
+                                color: S.glass(0.72)
                                 border.width: 1; border.color: S.fieldBorder
                                 Rectangle {
                                     id: thumb
@@ -1384,7 +1463,7 @@ Item {
                             topPadding: 14 * page.ui.u; bottomPadding: 14 * page.ui.u
                             background: Rectangle {
                                 radius: 16 * page.ui.u
-                                color: Qt.rgba(1, 1, 1, 0.78)
+                                color: S.glass(0.78)
                                 border.width: 1
                                 border.color: page.fieldError("justification").length ? S.danger
                                             : justificationField.activeFocus ? S.accentSoft : S.fieldBorder
@@ -1505,8 +1584,8 @@ Item {
             height: resultColumn.implicitHeight + 48 * page.ui.u
             anchors.centerIn: parent
             radius: 28 * page.ui.u
-            color: Qt.rgba(1, 1, 1, 0.98)
-            border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.95)
+            color: S.glass(0.98)
+            border.width: 1; border.color: S.edge(0.95)
             scale: resultLayer.visible ? 1 : 0.94
             Behavior on scale { enabled: !page.reduced; NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
             Rectangle {                                // cerrar (vuelve a mis gastos)

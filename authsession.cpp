@@ -15,6 +15,8 @@
 #include <QImageReader>
 #include <QBuffer>
 #include <QFile>
+#include <QSaveFile>
+#include <QSignalBlocker>
 #include <QFileInfo>
 #include <QStandardPaths>
 #include <QDir>
@@ -26,6 +28,7 @@
 #include <QTimer>
 #include <QPointer>
 #include <QThreadPool>
+#include <QUuid>
 #include <algorithm>
 
 #ifdef Q_OS_ANDROID
@@ -93,9 +96,9 @@ static QByteArray readAndroidContentUriBytes(const QString& uriString)
 
     QJniEnvironment env;
     jbyteArray buffer = env->NewByteArray(64 * 1024);
-    constexpr qsizetype maxBytes = 32 * 1024 * 1024; // evita cargar fotos descontroladamente grandes
+    constexpr qsizetype maxBytes = 5 * 1024 * 1024;
 
-    while (data.size() < maxBytes) {
+    while (data.size() <= maxBytes) {
         const jint n = input.callMethod<jint>("read", "([B)I", buffer);
         if (env->ExceptionCheck()) {
             env->ExceptionClear();
@@ -109,6 +112,8 @@ static QByteArray readAndroidContentUriBytes(const QString& uriString)
         env->GetByteArrayRegion(buffer, 0, n, reinterpret_cast<jbyte*>(chunk.data()));
         data.append(chunk);
     }
+    if (data.size() > maxBytes)
+        data.clear();
 
     env->DeleteLocalRef(buffer);
     input.callMethod<void>("close", "()V");
@@ -125,6 +130,10 @@ static QByteArray readAndroidContentUriBytes(const QString& uriString)
 // rotation applied afterwards.
 static QImage readAvatarImage(QImageReader& reader)
 {
+    const QByteArray format = reader.format().toLower();
+    if (format != QByteArrayLiteral("png") && format != QByteArrayLiteral("jpeg")
+        && format != QByteArrayLiteral("jpg"))
+        return {};
     reader.setAutoTransform(true);
     const QSize size = reader.size();
     if (size.isValid() && !size.isEmpty()) {
@@ -143,6 +152,8 @@ static QImage readImageFromUrl(const QUrl& url)
         return {};
 
     if (url.isLocalFile()) {
+        if (QFileInfo(url.toLocalFile()).size() > 5 * 1024 * 1024)
+            return {};
         QImageReader reader(url.toLocalFile());
         return readAvatarImage(reader);
     }
@@ -197,17 +208,26 @@ static QString localAvatarDirectory(const QString& userId)
 static QString newLocalAvatarCachePath(const QString& userId)
 {
     return localAvatarDirectory(userId)
-        + QStringLiteral("/avatar_%1.png").arg(QDateTime::currentMSecsSinceEpoch());
+        + QStringLiteral("/avatar_%1.jpg").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
 }
 
 static QString latestLocalAvatarCachePath(const QString& userId)
 {
     QDir dir(localAvatarDirectory(userId));
     const QFileInfoList candidates = dir.entryInfoList(
-        QStringList{QStringLiteral("avatar_*.png"), QStringLiteral("avatar.png")},
+        QStringList{QStringLiteral("avatar_*.png"), QStringLiteral("avatar.png"), QStringLiteral("avatar_*.jpg")},
         QDir::Files | QDir::Readable,
         QDir::Time);
     return candidates.isEmpty() ? QString() : candidates.constFirst().absoluteFilePath();
+}
+
+static bool ownsAvatarPath(const QString& userId, const QString& path)
+{
+    if (!path.startsWith(userId + QLatin1Char('/'))) return false;
+    const QString tail = path.mid(userId.size() + 1);
+    static const QRegularExpression filename(QStringLiteral("^[A-Za-z0-9_-]+\\.(jpg|jpeg|png)$"));
+    return filename.match(tail).hasMatch() || tail == QStringLiteral("avatar/avatar.png")
+        || tail == QStringLiteral("avatar/avatar.jpg") || tail == QStringLiteral("avatar/avatar.jpeg");
 }
 
 static QImage squareAvatarImage(const QImage& original)
@@ -267,6 +287,8 @@ AuthSession* AuthSession::instance()
     return s_instance;
 }
 
+
+static QString verifiedTotpFactor(const QJsonObject& user);   // definida junto a setUserFromJson
 
 static QString parseSupabaseError(const QByteArray& body, const QString& fallback)
 {
@@ -447,6 +469,9 @@ AuthSession::AuthSession(SupabaseClient* api, QObject* parent)
     , m_api(api)   // ✅ CORRECTO
 {
     s_instance = this;
+    m_avatarUrlTimer = new QTimer(this);
+    m_avatarUrlTimer->setSingleShot(true);
+    connect(m_avatarUrlTimer, &QTimer::timeout, this, &AuthSession::refreshPrivateAvatarUrl);
 }
 
 
@@ -633,6 +658,15 @@ void AuthSession::startPasswordLoginRequest(const QString& email,
         else
             m_rememberUntilUtc = QDateTime();
 
+        const QString mfaFactor = verifiedTotpFactor(o.value(QStringLiteral("user")).toObject());
+        if (!mfaFactor.isEmpty()) {
+            qInfo().noquote() << "[Auth] LOGIN_MFA_REQUIRED";
+            m_mfaPendingSession = o;
+            m_mfaPendingFactor = mfaFactor;
+            emit mfaChanged();
+            emit mfaRequired();
+            return;
+        }
         finishAuthSuccess(o, /*emitLoginSignal=*/true);
     });
 }
@@ -1018,6 +1052,9 @@ bool AuthSession::hasRestorableSession() const
 quint64 AuthSession::beginAuthOperation(const char* kind, bool cancelPasswordLogin)
 {
     const quint64 generation = ++m_authGeneration;
+    ++m_avatarGeneration;
+    m_avatarJobRunning = false;
+    m_avatarUrlTimer->stop();
     if (cancelPasswordLogin) {
         // Una respuesta de login por contraseña aún en vuelo queda huérfana:
         // su requestId deja de coincidir y el callback se descarta.
@@ -1359,9 +1396,25 @@ void AuthSession::loadFromDisk()
     }
 }
 
+static QString verifiedTotpFactor(const QJsonObject& user)
+{
+    const QJsonArray factors = user.value(QStringLiteral("factors")).toArray();
+    for (const QJsonValue& v : factors) {
+        const QJsonObject f = v.toObject();
+        if (f.value(QStringLiteral("factor_type")).toString() == QStringLiteral("totp")
+                && f.value(QStringLiteral("status")).toString() == QStringLiteral("verified"))
+            return f.value(QStringLiteral("id")).toString();
+    }
+    return QString();
+}
+
 void AuthSession::setUserFromJson(const QJsonObject& user)
 {
     if (user.isEmpty()) return;
+    if (user.contains(QStringLiteral("factors"))) {
+        const QString factor = verifiedTotpFactor(user);
+        if (factor != m_mfaFactorId) { m_mfaFactorId = factor; emit mfaChanged(); }
+    }
 
     const QString uid = user.value("id").toString();
     if (!uid.isEmpty()) m_userId = uid;
@@ -1379,10 +1432,16 @@ void AuthSession::setUserFromJson(const QJsonObject& user)
 
     if (!nom.isEmpty()) m_nombre = nom;
     if (!ape.isEmpty()) m_apellido = ape;
-    if (!pho.isEmpty()) m_phone = pho;
+    if (meta.contains(QStringLiteral("phone"))) m_phone = pho;
+    if (meta.contains(QStringLiteral("full_name")))
+        m_fullName = meta.value(QStringLiteral("full_name")).toString();
 
-    const QString apath = meta.value("avatar_path").toString().trimmed();
-    if (!apath.isEmpty()) m_avatarPath = apath;
+    if (meta.contains(QStringLiteral("avatar_url"))) {
+        const QString reference = meta.value(QStringLiteral("avatar_url")).toString();
+        m_avatarPath = reference.startsWith(QStringLiteral("storage://avatars/")) ? reference.mid(18) : QString();
+    } else if (meta.contains(QStringLiteral("avatar_path"))) {
+        m_avatarPath = meta.value(QStringLiteral("avatar_path")).toString();
+    }
 
     // ✅ Prioriza cache local si existe
     const QString local = m_avatarLocalFile;
@@ -1433,11 +1492,16 @@ void AuthSession::updateUserProfile(const QString& nombre,
 
     auto* reply = m_api->nam()->put(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    const QString userId = m_userId;
+    const quint64 generation = m_authGeneration;
+    const quint64 accountGeneration = m_accountGeneration;
+    connect(reply, &QNetworkReply::finished, this, [this, reply, userId, generation, accountGeneration]() {
         const QByteArray raw = reply->readAll();
         const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const auto err = reply->error();
         reply->deleteLater();
+        if (userId != m_userId || generation != m_authGeneration || accountGeneration != m_accountGeneration)
+            return;
 
         if (err != QNetworkReply::NoError || http < 200 || http >= 300) {
             emit profileUpdatedFail(parseSupabaseError(
@@ -1455,9 +1519,24 @@ void AuthSession::updateUserProfile(const QString& nombre,
             return;
         }
 
-        setUserFromJson(doc.object());
+        const QString exactEmail = m_email;
+        {
+            const QSignalBlocker userSignalBlocker(this);
+            // A personal-field PUT returns the full Auth user snapshot. It
+            // must never overwrite a concurrent avatar update or removal.
+            QJsonObject personalUser = doc.object();
+            QJsonObject personalMetadata = personalUser.value(QStringLiteral("user_metadata")).toObject();
+            personalMetadata.remove(QStringLiteral("avatar_url"));
+            personalMetadata.remove(QStringLiteral("avatar_path"));
+            personalUser.insert(QStringLiteral("user_metadata"),personalMetadata);
+            personalUser.remove(QStringLiteral("raw_user_meta_data"));
+            setUserFromJson(personalUser);
+            m_email = exactEmail;
+        }
+        refreshPrivateAvatarUrl();
         saveToDisk();
         emit userInfoChanged();
+        emit backendProfileChanged();
         emit profileUpdatedOk();
     });
 }
@@ -1507,223 +1586,261 @@ QString AuthSession::guessAvatarPath() const
 
 void AuthSession::updateUserAvatar(const QUrl& fileUrl)
 {
-    if (!m_api) { emit profileUpdatedFail("SupabaseClient no inicializado."); return; }
-    if (m_accessToken.isEmpty() || m_userId.isEmpty()) { emit profileUpdatedFail("No hay sesión activa."); return; }
+    if (!m_api) { emit profileAvatarSyncWarning("SupabaseClient no inicializado."); return; }
+    if (m_accessToken.isEmpty() || m_userId.isEmpty()) { emit profileAvatarSyncWarning("No hay sesión activa."); return; }
     if (m_avatarJobRunning) {
-        emit profileUpdatedFail("Ya se está procesando una foto de perfil.");
+        emit profileAvatarSyncWarning("Ya se está procesando una foto de perfil.");
         return;
     }
 
-    // Decode, crop, scale and PNG-encode off the GUI thread: on a 2-4 GB phone
+    // Decode, crop, scale and JPEG-encode off the GUI thread: on a 2-4 GB phone
     // this used to block Qt for seconds. content:// is read through JNI, and
     // QJniEnvironment attaches the pool thread. Local save, upload and signals
     // stay on the GUI thread (finishAvatarUpdate).
     m_avatarJobRunning = true;
+    const quint64 avatarGeneration = ++m_avatarGeneration;
     const QString userId = m_userId;
     QPointer<AuthSession> guard(this);
-    QThreadPool::globalInstance()->start([guard, fileUrl, userId]() {
+    QThreadPool::globalInstance()->start([guard, fileUrl, userId, avatarGeneration]() {
         const QImage avatarImage = squareAvatarImage(readImageFromUrl(fileUrl));
         QByteArray bytes;
         QString error;
         if (avatarImage.isNull()) {
-            error = QStringLiteral("No se pudo leer la imagen seleccionada. Elige una foto JPG o PNG e inténtalo otra vez.");
+            error = QStringLiteral("Elige una foto JPG o PNG de hasta 5 MB e inténtalo otra vez.");
         } else {
             QBuffer buffer(&bytes);
-            if (!buffer.open(QIODevice::WriteOnly) || !avatarImage.save(&buffer, "PNG"))
+            if (!buffer.open(QIODevice::WriteOnly) || !avatarImage.save(&buffer, "JPG", 85))
                 error = QStringLiteral("No se pudo preparar la imagen de perfil.");
             buffer.close();
+            if (bytes.size() > 5 * 1024 * 1024)
+                error = QStringLiteral("La foto preparada supera el límite de 5 MB.");
         }
         if (!guard)
             return;
-        QMetaObject::invokeMethod(guard.data(), [guard, userId, bytes, error]() {
+        QMetaObject::invokeMethod(guard.data(), [guard, userId, avatarGeneration, bytes, error]() {
             if (guard)
-                guard->finishAvatarUpdate(userId, bytes, error);
+                guard->finishAvatarUpdate(userId, avatarGeneration, bytes, error);
         }, Qt::QueuedConnection);
     });
 }
 
-void AuthSession::finishAvatarUpdate(const QString& userId, const QByteArray& bytes,
+void AuthSession::finishAvatarUpdate(const QString& userId, quint64 avatarGeneration, const QByteArray& bytes,
                                      const QString& error)
 {
-    m_avatarJobRunning = false;
-    // The account changed while the photo was processed: never write it into
-    // another account's profile.
-    if (userId != m_userId || m_accessToken.isEmpty()) {
-        qInfo() << "INGE_AVATAR_DISCARDED reason=account_changed";
+    if (userId != m_userId || m_accessToken.isEmpty() || avatarGeneration != m_avatarGeneration)
         return;
-    }
     if (!error.isEmpty()) {
-        emit profileUpdatedFail(error);
+        m_avatarJobRunning = false;
+        emit profileAvatarSyncWarning(error);
         return;
     }
-
-    // Primero guardamos la copia local. Así el avatar cambia de inmediato incluso
-    // si Storage está lento, sin políticas RLS o temporalmente sin conexión.
-    const QString previousLocalPath = QUrl(m_avatarLocalFile).toLocalFile();
-    const QString cachePath = newLocalAvatarCachePath(m_userId);
-    QFile out(cachePath);
-    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)
-        || out.write(bytes) != bytes.size()) {
-        emit profileUpdatedFail("No se pudo guardar el avatar en el almacenamiento interno.");
+    // Stage locally; publish the preview only after Storage AND Auth confirm.
+    const QString cachePath = newLocalAvatarCachePath(userId) + QStringLiteral(".pending");
+    QSaveFile output(cachePath);
+    if (!output.open(QIODevice::WriteOnly) || output.write(bytes) != bytes.size() || !output.commit()) {
+        m_avatarJobRunning = false;
+        emit profileAvatarSyncWarning(QStringLiteral("No se pudo guardar la foto en este dispositivo."));
         return;
     }
-    out.close();
-
-    // Un nombre distinto en cada actualización evita que el caché de QML
-    // conserve la foto anterior aunque el archivo haya cambiado.
-    if (!previousLocalPath.isEmpty() && previousLocalPath != cachePath)
-        QFile::remove(previousLocalPath);
-
-    m_avatarLocalFile = QUrl::fromLocalFile(cachePath).toString();
-    m_avatarUrl = m_avatarLocalFile;
-    saveToDisk();
-    emit userInfoChanged();
-    emit savedAccountsChanged();
-    emit profileUpdatedOk();
-
-    // Sincronización remota en segundo plano. El fallo de nube no debe deshacer
-    // la foto local que el usuario ya seleccionó.
-    const QString objectPath = m_userId + QStringLiteral("/avatar/avatar.png");
-    QSettings settings;
-    QString bucket = settings.value(QStringLiteral("supabase/bucket")).toString().trimmed();
-    if (bucket.isEmpty())
-        bucket = QStringLiteral("IngePlus");
-
-    QUrl upUrl = buildStorageObjectUrl(m_api->projectUrl(), bucket, objectPath, false);
-    QNetworkRequest req = m_api->makeRequest(upUrl);
-    req.setRawHeader("Authorization", QByteArray("Bearer ") + m_accessToken.toUtf8());
-    req.setRawHeader("apikey", m_api->anonKey().toUtf8());
-    req.setRawHeader("x-upsert", "true");
-    req.setRawHeader("cache-control", "no-cache");
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("image/png"));
-#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-    req.setTransferTimeout(25000);
-#endif
-
-    auto* reply = m_api->nam()->post(req, bytes);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, objectPath]() {
-        const QByteArray raw = reply->readAll();
+    const QString objectPath = userId + QStringLiteral("/avatar.jpg");
+    const QString previousRemotePath = m_avatarPath;
+    auto request = m_api->makeRequest(buildStorageObjectUrl(m_api->projectUrl(), QStringLiteral("avatars"), objectPath, false),
+                                      m_accessToken, 25000);
+    request.setRawHeader("x-upsert", "true");
+    request.setRawHeader("cache-control", "no-cache");
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("image/jpeg"));
+    auto *reply = m_api->nam()->post(request, bytes);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, objectPath, previousRemotePath, cachePath, userId, avatarGeneration] {
         const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QString errStr = reply->errorString();
-        const auto err = reply->error();
-        reply->deleteLater();
-
-        if (err != QNetworkReply::NoError || http < 200 || http >= 300) {
-            emit profileAvatarSyncWarning(parseSupabaseError(
-                raw,
-                QString("La foto quedó guardada en el dispositivo, pero no se sincronizó con la nube (HTTP %1): %2")
-                    .arg(http).arg(errStr)));
+        const bool ok = reply->error() == QNetworkReply::NoError && http >= 200 && http < 300;
+        reply->readAll(); reply->deleteLater();
+        if (userId != m_userId || avatarGeneration != m_avatarGeneration) { QFile::remove(cachePath); return; }
+        if (!ok) {
+            QFile::remove(cachePath);
+            m_avatarJobRunning = false;
+            emit profileAvatarSyncWarning(QStringLiteral("No se pudo subir la foto a la nube (HTTP %1). Inténtalo otra vez.").arg(http));
             return;
         }
-
-        m_avatarPath = objectPath;
-        saveToDisk();
-        emit userInfoChanged();
-        emit savedAccountsChanged();
-
-        QUrl url = m_api->authUrl("user");
-        QNetworkRequest req2 = m_api->makeRequest(url);
-        req2.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-        req2.setRawHeader("Authorization", QByteArray("Bearer ") + m_accessToken.toUtf8());
-        req2.setRawHeader("apikey", m_api->anonKey().toUtf8());
-#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-        req2.setTransferTimeout(20000);
-#endif
-
-        QJsonObject data{
-            {"avatar_path", objectPath},
-            {"avatar_updated_at", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)}
-        };
-        QJsonObject body{{"data", data}};
-        auto* reply2 = m_api->nam()->put(req2, QJsonDocument(body).toJson(QJsonDocument::Compact));
-
-        connect(reply2, &QNetworkReply::finished, this, [this, reply2]() {
-            const QByteArray raw2 = reply2->readAll();
-            const int http2 = reply2->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            const QString errStr2 = reply2->errorString();
-            const auto err2 = reply2->error();
-            reply2->deleteLater();
-
-            if (err2 != QNetworkReply::NoError || http2 < 200 || http2 >= 300) {
-                emit profileAvatarSyncWarning(parseSupabaseError(
-                    raw2,
-                    QString("La foto quedó guardada, pero no se pudo actualizar su metadata (HTTP %1): %2")
-                        .arg(http2).arg(errStr2)));
+        const QString reference = QStringLiteral("storage://avatars/") + objectPath;
+        const QJsonObject data{{"avatar_path", objectPath}, {"avatar_url", reference},
+            {"avatar_updated_at", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)}};
+        auto *metadata = m_api->nam()->put(m_api->makeRequest(m_api->authUrl(QStringLiteral("user")), m_accessToken),
+            QJsonDocument(QJsonObject{{"data",data}}).toJson(QJsonDocument::Compact));
+        connect(metadata, &QNetworkReply::finished, this,
+                [this, metadata, objectPath, previousRemotePath, reference, cachePath, userId, avatarGeneration] {
+            const int status = metadata->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const bool accepted = metadata->error() == QNetworkReply::NoError && status >= 200 && status < 300;
+            const QJsonObject response = QJsonDocument::fromJson(metadata->readAll()).object();
+            metadata->deleteLater();
+            if (userId != m_userId || avatarGeneration != m_avatarGeneration) { QFile::remove(cachePath); return; }
+            if (!accepted || response.value("id").toString() != userId
+                || response.value("user_metadata").toObject().value("avatar_url").toString() != reference) {
+                QFile::remove(cachePath);
+                m_avatarJobRunning = false;
+                emit profileAvatarSyncWarning(QStringLiteral("La foto se subió, pero no se confirmó su referencia en el perfil (HTTP %1). Vuelve a guardar la foto.").arg(status));
                 return;
             }
+            const QString confirmedCachePath = cachePath.chopped(8); // .pending
+            if (!QFile::rename(cachePath, confirmedCachePath)) {
+                QFile::remove(cachePath);
+                m_avatarJobRunning = false;
+                emit profileAvatarSyncWarning(QStringLiteral("La foto se guardó en la nube, pero no se pudo activar su copia local. Vuelve a iniciar sesión."));
+                return;
+            }
+            const QString previous = QUrl(m_avatarLocalFile).toLocalFile();
+            ++m_avatarReferenceRevision;
+            m_avatarPath = objectPath;
+            m_avatarLocalFile = QUrl::fromLocalFile(confirmedCachePath).toString();
+            m_avatarUrl = m_avatarLocalFile;
+            if (!previous.isEmpty() && previous != confirmedCachePath) QFile::remove(previous);
+            saveToDisk(); emit userInfoChanged(); emit savedAccountsChanged();
+            // Remove known legacy variants only after the new reference commits.
+            QUrl url(m_api->projectUrl()); url.setPath(QStringLiteral("/storage/v1/object/avatars"));
+            QJsonArray legacy{userId + "/avatar/avatar.png", userId + "/avatar/avatar.jpg", userId + "/avatar/avatar.jpeg"};
+            if (previousRemotePath != objectPath && ownsAvatarPath(userId,previousRemotePath) && !legacy.contains(previousRemotePath))
+                legacy.append(previousRemotePath);
+            auto *cleanup = m_api->nam()->sendCustomRequest(m_api->makeRequest(url,m_accessToken), "DELETE",
+                QJsonDocument(QJsonObject{{"prefixes",legacy}}).toJson(QJsonDocument::Compact));
+            connect(cleanup,&QNetworkReply::finished,this,[this,cleanup,userId,avatarGeneration] {
+                const int status = cleanup->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                const bool ok = cleanup->error()==QNetworkReply::NoError && status>=200 && status<300;
+                cleanup->readAll(); cleanup->deleteLater();
+                if(userId!=m_userId || avatarGeneration!=m_avatarGeneration) return;
+                m_avatarJobRunning=false;
+                if(!ok) {
+                    emit profileAvatarSyncWarning(QStringLiteral("La foto se guardó, pero no se pudieron limpiar las copias antiguas (HTTP %1). Vuelve a guardarla.").arg(status));
+                    return;
+                }
+                emit profileAvatarSynced();
+                refreshPrivateAvatarUrl();
+            });
+        });
+    });
+}
 
-            saveToDisk();
-            emit userInfoChanged();
-            emit savedAccountsChanged();
-            emit profileAvatarSynced();
+void AuthSession::refreshPrivateAvatarUrl()
+{
+    if (!m_api || m_accessToken.isEmpty() || m_userId.isEmpty() || m_avatarPath.isEmpty())
+        return;
+    const QString userId = m_userId;
+    const QString path = m_avatarPath;
+    if (!ownsAvatarPath(userId, path)) {
+        emit profileAvatarSyncWarning(QStringLiteral("La referencia de la foto no pertenece a esta cuenta."));
+        return;
+    }
+    const quint64 generation = m_authGeneration;
+    const quint64 avatarGeneration = m_avatarGeneration;
+    const quint64 fetchGeneration = ++m_avatarFetchGeneration;
+    QUrl url(m_api->projectUrl());
+    url.setPath(QStringLiteral("/storage/v1/object/sign/avatars/") + path);
+    auto *reply = m_api->nam()->post(m_api->makeRequest(url, m_accessToken), QByteArrayLiteral("{\"expiresIn\":300}"));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, userId, path, generation, avatarGeneration, fetchGeneration]() {
+        const QByteArray raw = reply->readAll();
+        const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const bool ok = reply->error() == QNetworkReply::NoError && http >= 200 && http < 300;
+        reply->deleteLater();
+        if (userId != m_userId || path != m_avatarPath || generation != m_authGeneration || avatarGeneration != m_avatarGeneration || fetchGeneration != m_avatarFetchGeneration)
+            return;
+        const QString signedPath = QJsonDocument::fromJson(raw).object().value(QStringLiteral("signedURL")).toString();
+        QUrl signedUrl(signedPath);
+        if (signedPath.startsWith(QStringLiteral("/object/sign/")))
+            signedUrl = QUrl(m_api->projectUrl() + QStringLiteral("/storage/v1") + signedPath);
+        else if (signedPath.startsWith(QStringLiteral("/storage/v1/object/sign/")))
+            signedUrl = QUrl(m_api->projectUrl() + signedPath);
+        const QUrl origin(m_api->projectUrl());
+        if (!ok || signedUrl.scheme() != origin.scheme() || signedUrl.host() != origin.host()
+            || signedUrl.port() != origin.port()
+            || signedUrl.path() != QStringLiteral("/storage/v1/object/sign/avatars/") + path
+            || QUrlQuery(signedUrl).queryItemValue(QStringLiteral("token")).isEmpty()) {
+            emit profileAvatarSyncWarning(QStringLiteral("No se pudo cargar la foto privada (HTTP %1).").arg(http));
+            m_avatarUrlTimer->start(60000);
+            return;
+        }
+        // Download here so QML never receives a token-bearing URL (including
+        // in automatic Image error logs). Persist only the image bytes.
+        // A stable object path can hold a new image from another device.
+        // Always fetch after the authoritative profile loads, even with a cache.
+        auto request = m_api->makeRequest(signedUrl);
+        request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
+        request.setRawHeader("Cache-Control", "no-cache");
+        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+        auto *download = m_api->nam()->get(request);
+        connect(download,&QNetworkReply::downloadProgress,download,[download](qint64 received,qint64) {
+            if (received > 5 * 1024 * 1024) download->abort();
+        });
+        connect(download,&QNetworkReply::finished,this,[this,download,userId,path,generation,avatarGeneration,fetchGeneration] {
+            const QByteArray bytes=download->readAll();
+            const int status=download->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const bool received=download->error()==QNetworkReply::NoError && status>=200 && status<300;
+            download->deleteLater();
+            if (userId!=m_userId || path!=m_avatarPath || generation!=m_authGeneration || avatarGeneration!=m_avatarGeneration || fetchGeneration!=m_avatarFetchGeneration) return;
+            if (!received || bytes.size()>5*1024*1024) {
+                emit profileAvatarSyncWarning(QStringLiteral("No se pudo descargar la foto privada (HTTP %1).").arg(status));
+                m_avatarUrlTimer->start(60000); return;
+            }
+            QBuffer buffer; buffer.setData(bytes); buffer.open(QIODevice::ReadOnly);
+            QImageReader reader(&buffer);
+            const QImage image=readAvatarImage(reader);
+            const QString cachePath=newLocalAvatarCachePath(userId);
+            QSaveFile output(cachePath);
+            if (image.isNull() || !output.open(QIODevice::WriteOnly) || !image.save(&output,"JPG",85) || !output.commit()) {
+                emit profileAvatarSyncWarning(QStringLiteral("No se pudo guardar la foto privada en este dispositivo.")); return;
+            }
+            const QString previous = QUrl(m_avatarLocalFile).toLocalFile();
+            m_avatarLocalFile=QUrl::fromLocalFile(cachePath).toString();
+            if (!previous.isEmpty() && previous != cachePath) QFile::remove(previous);
+            m_avatarUrl=m_avatarLocalFile;
+            m_avatarUrlTimer->stop();
+            saveToDisk(); emit userInfoChanged(); emit savedAccountsChanged();
         });
     });
 }
 
 void AuthSession::clearUserAvatar()
 {
-    if (!m_api) { emit profileUpdatedFail("SupabaseClient no inicializado."); return; }
-    if (m_accessToken.isEmpty() || m_userId.isEmpty()) { emit profileUpdatedFail("No hay sesión activa."); return; }
-
-    const QString pathToDelete = m_avatarPath; // uid/avatar/avatar.ext
-
-    auto finishClearMeta = [this]() {
-        // Limpiar cache local
-        QFile::remove(QUrl(m_avatarLocalFile).toLocalFile());
-        m_avatarLocalFile.clear();
-        m_avatarUrl.clear();
-        m_avatarPath.clear();
-
-        // Limpiar metadata en Auth
-        QUrl url = m_api->authUrl("user");
-        QNetworkRequest req2 = m_api->makeRequest(url);
-        req2.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-        req2.setRawHeader("Authorization", QByteArray("Bearer ") + m_accessToken.toUtf8());
-        req2.setRawHeader("apikey", m_api->anonKey().toUtf8());
-
-        QJsonObject data{
-            {"avatar_url", QJsonValue()},
-            {"avatar_path", QJsonValue()},
-            {"avatar_updated_at", QJsonValue()}
-        };
-        QJsonObject body{{"data", data}};
-
-        auto* reply2 = m_api->nam()->put(req2, QJsonDocument(body).toJson(QJsonDocument::Compact));
-        connect(reply2, &QNetworkReply::finished, this, [this, reply2]() {
-            reply2->readAll();
-            reply2->deleteLater();
-            saveToDisk();
-            emit userInfoChanged();
-            emit savedAccountsChanged();
-            emit profileUpdatedOk();
-        });
-    };
-
-    // Si no hay nada que borrar en storage, igual limpia metadata
-    if (pathToDelete.isEmpty()) {
-        finishClearMeta();
-        return;
+    if (!m_api || m_accessToken.isEmpty() || m_userId.isEmpty()) { emit profileAvatarSyncWarning("No hay sesión activa."); return; }
+    if (m_avatarJobRunning) { emit profileAvatarSyncWarning("Espera a que termine la actualización de la foto."); return; }
+    const QString userId = m_userId;
+    if (!m_avatarPath.isEmpty() && !ownsAvatarPath(userId,m_avatarPath)) {
+        emit profileAvatarSyncWarning("La referencia de la foto no pertenece a esta cuenta."); return;
     }
-
-    const QString lf = QUrl(m_avatarLocalFile).toLocalFile();
-    if (!lf.isEmpty())
-        QFile::remove(lf);
-
-
-    // 1) Borrar del Storage
-    QUrl delUrl = buildStorageObjectUrl(m_api->projectUrl(), "IngePlus", pathToDelete, false);
-
-    QNetworkRequest req = m_api->makeRequest(delUrl);
-    req.setRawHeader("Authorization", QByteArray("Bearer ") + m_accessToken.toUtf8());
-    req.setRawHeader("apikey", m_api->anonKey().toUtf8());
-
-    auto* reply = m_api->nam()->deleteResource(req);
-
-    connect(reply, &QNetworkReply::finished, this, [this, reply, finishClearMeta]() mutable {
-        reply->readAll();
-        reply->deleteLater();
-        // aunque falle el delete (archivo no existe), limpiamos igual
-        finishClearMeta();
+    const quint64 avatarGeneration = ++m_avatarGeneration;
+    m_avatarJobRunning = true;
+    m_avatarUrlTimer->stop();
+    // Include canonical and deployed legacy keys, even after a partial failure
+    // left no local reference. Never enumerate or delete another user's files.
+    QJsonArray paths{userId+"/avatar.jpg",userId+"/avatar/avatar.png",userId+"/avatar/avatar.jpg",userId+"/avatar/avatar.jpeg"};
+    if (!m_avatarPath.isEmpty() && !paths.contains(m_avatarPath)) paths.append(m_avatarPath);
+    QUrl url(m_api->projectUrl()); url.setPath(QStringLiteral("/storage/v1/object/avatars"));
+    auto *reply = m_api->nam()->sendCustomRequest(m_api->makeRequest(url,m_accessToken), "DELETE",
+        QJsonDocument(QJsonObject{{"prefixes",paths}}).toJson(QJsonDocument::Compact));
+    connect(reply,&QNetworkReply::finished,this,[this,reply,userId,avatarGeneration] {
+        const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const bool ok = reply->error()==QNetworkReply::NoError && http>=200 && http<300;
+        reply->readAll(); reply->deleteLater();
+        if(userId!=m_userId || avatarGeneration!=m_avatarGeneration) return;
+        if(!ok) {
+            m_avatarJobRunning=false;
+            emit profileAvatarSyncWarning(QStringLiteral("No se pudo borrar la foto privada (HTTP %1).").arg(http)); return;
+        }
+        auto *metadata = m_api->nam()->put(m_api->makeRequest(m_api->authUrl(QStringLiteral("user")),m_accessToken),
+            QByteArrayLiteral("{\"data\":{\"avatar_url\":null,\"avatar_path\":null,\"avatar_updated_at\":null}}"));
+        connect(metadata,&QNetworkReply::finished,this,[this,metadata,userId,avatarGeneration] {
+            const int status = metadata->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const bool ok = metadata->error()==QNetworkReply::NoError && status>=200 && status<300;
+            const QJsonObject response = QJsonDocument::fromJson(metadata->readAll()).object();
+            metadata->deleteLater();
+            if(userId!=m_userId || avatarGeneration!=m_avatarGeneration) return;
+            m_avatarJobRunning=false;
+            const auto data=response.value("user_metadata").toObject();
+            if(!ok || response.value("id").toString()!=userId || !data.contains("avatar_url") || !data.value("avatar_url").isNull()) {
+                emit profileAvatarSyncWarning(QStringLiteral("La foto se borró, pero no se confirmó la limpieza del perfil (HTTP %1). Vuelve a quitarla.").arg(status)); return;
+            }
+            QFile::remove(QUrl(m_avatarLocalFile).toLocalFile());
+            ++m_avatarReferenceRevision;
+            m_avatarLocalFile.clear(); m_avatarUrl.clear(); m_avatarPath.clear();
+            saveToDisk(); emit userInfoChanged(); emit savedAccountsChanged(); emit profileAvatarSynced();
+        });
     });
 }
 
@@ -1781,6 +1898,10 @@ void AuthSession::setRememberFor30Days(bool enabled)
 void AuthSession::clearSessionMemory()
 {
     ++m_backendGeneration;
+    ++m_accountGeneration;
+    ++m_avatarGeneration;
+    m_avatarJobRunning = false;
+    m_avatarUrlTimer->stop();
     m_devOffline = false;
     m_accessToken.clear();
     m_refreshToken.clear();
@@ -1801,6 +1922,12 @@ void AuthSession::clearBackendState()
 {
     m_fullName.clear();
     m_position.clear();
+    m_area.clear();
+    if (!m_activeSessions.isEmpty() || m_sessionsBusy) {
+        m_activeSessions.clear();
+        m_sessionsBusy = false;
+        emit activeSessionsChanged();
+    }
     m_profileRole.clear();
     m_globalRole.clear();
     m_profileStatus.clear();
@@ -1904,17 +2031,19 @@ void AuthSession::loadBackendProfile(bool emitLoginSignal,
     QUrl url = m_api->restUrl(QStringLiteral("profiles"));
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("select"),
-                       QStringLiteral("id,email,full_name,avatar_url,phone,position,role,status,global_role"));
+                       QStringLiteral("id,email,full_name,avatar_url,phone,position,role,status,global_role,area"));
     query.addQueryItem(QStringLiteral("id"), QStringLiteral("eq.") + m_userId);
     query.addQueryItem(QStringLiteral("limit"), QStringLiteral("1"));
     url.setQuery(query);
 
     QNetworkRequest request = m_api->makeRequest(url, m_accessToken);
     request.setRawHeader("Accept", "application/json");
+    const quint64 avatarGeneration = m_avatarGeneration;
+    const quint64 avatarRevision = m_avatarReferenceRevision;
     auto *reply = m_api->nam()->get(request);
 
     connect(reply, &QNetworkReply::finished, this,
-            [this, reply, generation, emitLoginSignal, accountSwitch, autoLogin]() {
+            [this, reply, generation, avatarGeneration, avatarRevision, emitLoginSignal, accountSwitch, autoLogin]() {
         const QByteArray raw = reply->readAll();
         const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const auto error = reply->error();
@@ -1951,6 +2080,7 @@ void AuthSession::loadBackendProfile(bool emitLoginSignal,
 
         m_fullName = profile.value(QStringLiteral("full_name")).toString().trimmed();
         m_position = profile.value(QStringLiteral("position")).toString().trimmed();
+        m_area = profile.value(QStringLiteral("area")).toString().trimmed();   // asignada por administración
         m_profileRole = profile.value(QStringLiteral("role")).toString().trimmed();
         m_globalRole = profile.value(QStringLiteral("global_role")).toString().trimmed();
         m_profileStatus = profile.value(QStringLiteral("status")).toString().trimmed().toUpper();
@@ -1960,16 +2090,30 @@ void AuthSession::loadBackendProfile(bool emitLoginSignal,
         // una instalación nueva, el backend proporciona el valor inicial.
         if (m_email.isEmpty())
             m_email = profile.value(QStringLiteral("email")).toString();
-        if (!profile.value(QStringLiteral("phone")).toString().trimmed().isEmpty())
+        if (!profile.value(QStringLiteral("phone")).isNull())
             m_phone = profile.value(QStringLiteral("phone")).toString().trimmed();
 
-        const QString backendAvatar =
-            profile.value(QStringLiteral("avatar_url")).toString().trimmed();
-        const QString localAvatarPath = QUrl(m_avatarLocalFile).toLocalFile();
-        if (!localAvatarPath.isEmpty() && QFile::exists(localAvatarPath))
-            m_avatarUrl = m_avatarLocalFile;
-        else
-            m_avatarUrl = backendAvatar;
+        // Do not let a profile read begun before a local avatar confirmation
+        // restore an older reference, including reads started during upload/clear.
+        if (avatarGeneration == m_avatarGeneration && avatarRevision == m_avatarReferenceRevision) {
+            const QString backendAvatar =
+                profile.value(QStringLiteral("avatar_url")).toString().trimmed();
+            ++m_avatarFetchGeneration;
+            m_avatarUrlTimer->stop();
+            if (backendAvatar.startsWith(QStringLiteral("storage://avatars/"))) {
+                m_avatarPath = backendAvatar.mid(QStringLiteral("storage://avatars/").size());
+                const QString localAvatarPath = QUrl(m_avatarLocalFile).toLocalFile();
+                m_avatarUrl = QFile::exists(localAvatarPath) ? m_avatarLocalFile : QString();
+                refreshPrivateAvatarUrl();
+            } else {
+                QFile::remove(QUrl(m_avatarLocalFile).toLocalFile());
+                m_avatarPath.clear();
+                m_avatarLocalFile.clear();
+                m_avatarUrl.clear();
+                if (!backendAvatar.isEmpty())
+                    emit profileAvatarSyncWarning(QStringLiteral("La foto del perfil no tiene una referencia privada válida."));
+            }
+        }
 
         emit backendProfileChanged();
         emit userInfoChanged();
@@ -2510,6 +2654,9 @@ void AuthSession::requestPasswordReset(const QString& email)
     // Supabase Auth: POST /auth/v1/recover
     // Envía correo de recuperación. El redirect_to debe estar permitido en Supabase Auth > URL Configuration.
     QUrl url = m_api->authUrl(QStringLiteral("recover"));
+    QUrlQuery query(url);
+    query.addQueryItem(QStringLiteral("redirect_to"), QStringLiteral("com.ingema.ingeplus://login-callback"));
+    url.setQuery(query);
 
     QNetworkRequest req = m_api->makeRequest(url);
     req.setRawHeader("Accept", "application/json");
@@ -2518,8 +2665,7 @@ void AuthSession::requestPasswordReset(const QString& email)
     req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
 
     QJsonObject body{
-        {QStringLiteral("email"), em},
-        {QStringLiteral("redirect_to"), QStringLiteral("com.ingema.ingeplus://login-callback")}
+        {QStringLiteral("email"), em}
     };
 
     auto* reply = m_api->nam()->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
@@ -2532,9 +2678,7 @@ void AuthSession::requestPasswordReset(const QString& email)
 
         qWarning() << "[Auth] password reset finished"
                    << "http=" << http
-                   << "err=" << err
-                   << "errStr=" << errStr
-                   << "body=" << QString::fromUtf8(raw);
+                   << "err=" << err;
 
         reply->deleteLater();
 
@@ -2604,4 +2748,231 @@ void AuthSession::resendSignupConfirmation(const QString& email)
 
         emit confirmationResentOk();
     });
+}
+
+// ---------------------------------------------------------------- Sesiones
+// Lista y revoca las sesiones de la propia cuenta (Android y web) mediante
+// RPC SECURITY DEFINER que filtran por auth.uid(). Nunca se usa service_role.
+void AuthSession::refreshActiveSessions()
+{
+    if (!m_api || m_accessToken.isEmpty() || m_sessionsBusy)
+        return;
+    m_sessionsBusy = true;
+    emit activeSessionsChanged();
+    const QString userId = m_userId;
+    const quint64 generation = m_authGeneration;
+    const quint64 accountGeneration = m_accountGeneration;
+    QNetworkRequest request = m_api->makeRequest(
+        m_api->restUrl(QStringLiteral("rpc/list_my_auth_sessions_v01")), m_accessToken);
+    request.setRawHeader("Accept", "application/json");
+    auto *reply = m_api->nam()->post(request, QByteArrayLiteral("{}"));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, userId, generation, accountGeneration]() {
+        const QByteArray raw = reply->readAll();
+        const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const bool ok = reply->error() == QNetworkReply::NoError && http >= 200 && http < 300;
+        reply->deleteLater();
+        if (userId != m_userId || generation != m_authGeneration || accountGeneration != m_accountGeneration) {
+            return;
+        }
+        m_sessionsBusy = false;
+        if (!ok) {
+            emit activeSessionsChanged();
+            emit sessionsActionFail(parseSupabaseError(raw,
+                QStringLiteral("No se pudieron cargar las sesiones (HTTP %1).").arg(http)));
+            return;
+        }
+        const QJsonDocument doc = QJsonDocument::fromJson(raw);
+        if (!doc.isArray()) {
+            emit activeSessionsChanged();
+            emit sessionsActionFail(QStringLiteral("El servidor devolvió una lista de sesiones inválida."));
+            return;
+        }
+        m_activeSessions = doc.array().toVariantList();
+        emit activeSessionsChanged();
+    });
+}
+
+void AuthSession::revokeSession(const QString& sessionId)
+{
+    if (!m_api || m_accessToken.isEmpty() || sessionId.trimmed().isEmpty())
+        return;
+    QNetworkRequest request = m_api->makeRequest(
+        m_api->restUrl(QStringLiteral("rpc/revoke_my_auth_session_v01")), m_accessToken);
+    const QByteArray body = QJsonDocument(QJsonObject{
+        { QStringLiteral("p_session_id"), sessionId.trimmed() } }).toJson(QJsonDocument::Compact);
+    auto *reply = m_api->nam()->post(request, body);
+    const QString userId = m_userId;
+    const quint64 generation = m_authGeneration;
+    const quint64 accountGeneration = m_accountGeneration;
+    connect(reply, &QNetworkReply::finished, this, [this, reply, userId, generation, accountGeneration]() {
+        const QByteArray raw = reply->readAll();
+        const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const bool ok = reply->error() == QNetworkReply::NoError && http >= 200 && http < 300;
+        reply->deleteLater();
+        if (userId != m_userId || generation != m_authGeneration || accountGeneration != m_accountGeneration)
+            return;
+        if (ok)
+            emit sessionsActionOk(QStringLiteral("Se cerró la sesión en ese dispositivo."));
+        else
+            emit sessionsActionFail(parseSupabaseError(raw,
+                QStringLiteral("No se pudo cerrar esa sesión (HTTP %1).").arg(http)));
+        refreshActiveSessions();
+    });
+}
+
+// Cierra todas las demás sesiones de la cuenta; este dispositivo sigue dentro.
+void AuthSession::signOutOtherSessions()
+{
+    if (!m_api || m_accessToken.isEmpty())
+        return;
+    QUrl url = m_api->authUrl(QStringLiteral("logout"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("scope"), QStringLiteral("others"));
+    url.setQuery(query);
+    auto *reply = m_api->nam()->post(m_api->makeRequest(url, m_accessToken), QByteArrayLiteral("{}"));
+    const QString userId = m_userId;
+    const quint64 generation = m_authGeneration;
+    const quint64 accountGeneration = m_accountGeneration;
+    connect(reply, &QNetworkReply::finished, this, [this, reply, userId, generation, accountGeneration]() {
+        const QByteArray raw = reply->readAll();
+        const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const bool ok = reply->error() == QNetworkReply::NoError && http >= 200 && http < 300;
+        reply->deleteLater();
+        if (userId != m_userId || generation != m_authGeneration || accountGeneration != m_accountGeneration)
+            return;
+        if (ok)
+            emit sessionsActionOk(QStringLiteral("Cerramos la sesión en tus otros dispositivos."));
+        else
+            emit sessionsActionFail(parseSupabaseError(raw,
+                QStringLiteral("No se pudieron cerrar las otras sesiones (HTTP %1).").arg(http)));
+        refreshActiveSessions();
+    });
+}
+
+// ------------------------------------------------- Verificación en dos pasos
+// challenge + verify sobre un factor TOTP; Auth devuelve una sesión aal2.
+void AuthSession::mfaChallengeVerify(const QString& factorId, const QString& code, const QString& token,
+                                     std::function<void(bool, const QJsonObject&, const QString&)> done)
+{
+    if (!m_api || token.isEmpty() || factorId.isEmpty()) { done(false, {}, QStringLiteral("Sesión no disponible.")); return; }
+    QNetworkRequest req = m_api->makeRequest(m_api->authUrl(QStringLiteral("factors/%1/challenge").arg(factorId)), token);
+    auto *reply = m_api->nam()->post(req, QByteArrayLiteral("{}"));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, factorId, code, token, done]() {
+        const QByteArray raw = reply->readAll();
+        const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        reply->deleteLater();
+        const QString challengeId = QJsonDocument::fromJson(raw).object().value(QStringLiteral("id")).toString();
+        if (http < 200 || http >= 300 || challengeId.isEmpty()) {
+            done(false, {}, parseSupabaseError(raw, QStringLiteral("No se pudo iniciar la verificación (HTTP %1).").arg(http)));
+            return;
+        }
+        QNetworkRequest vreq = m_api->makeRequest(m_api->authUrl(QStringLiteral("factors/%1/verify").arg(factorId)), token);
+        const QByteArray body = QJsonDocument(QJsonObject{ { QStringLiteral("challenge_id"), challengeId },
+                                                           { QStringLiteral("code"), code.trimmed() } }).toJson(QJsonDocument::Compact);
+        auto *vreply = m_api->nam()->post(vreq, body);
+        connect(vreply, &QNetworkReply::finished, this, [vreply, done]() {
+            const QByteArray vraw = vreply->readAll();
+            const int vhttp = vreply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            vreply->deleteLater();
+            if (vhttp < 200 || vhttp >= 300) {
+                done(false, {}, vhttp == 422 || vhttp == 400 ? QStringLiteral("El código no es válido o ya venció.")
+                                                              : parseSupabaseError(vraw, QStringLiteral("No se pudo verificar el código (HTTP %1).").arg(vhttp)));
+                return;
+            }
+            done(true, QJsonDocument::fromJson(vraw).object(), QString());
+        });
+    });
+}
+
+void AuthSession::enrollTotp()
+{
+    if (!m_api || m_accessToken.isEmpty()) { emit mfaFail(QStringLiteral("Inicia sesión para activar la verificación.")); return; }
+    QNetworkRequest req = m_api->makeRequest(m_api->authUrl(QStringLiteral("factors")), m_accessToken);
+    const QByteArray body = QJsonDocument(QJsonObject{
+        { QStringLiteral("factor_type"), QStringLiteral("totp") },
+        { QStringLiteral("friendly_name"), QStringLiteral("InGe+ %1").arg(QDateTime::currentSecsSinceEpoch()) } })
+        .toJson(QJsonDocument::Compact);
+    auto *reply = m_api->nam()->post(req, body);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const QByteArray raw = reply->readAll();
+        const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        reply->deleteLater();
+        const QJsonObject o = QJsonDocument::fromJson(raw).object();
+        const QJsonObject totp = o.value(QStringLiteral("totp")).toObject();
+        if (http < 200 || http >= 300 || o.value(QStringLiteral("id")).toString().isEmpty()) {
+            emit mfaFail(parseSupabaseError(raw, QStringLiteral("No se pudo preparar la verificación (HTTP %1).").arg(http)));
+            return;
+        }
+        // El QR llega como SVG; se entrega en base64 para mostrarlo como imagen.
+        QString qr = totp.value(QStringLiteral("qr_code")).toString();
+        const int comma = qr.indexOf(QLatin1Char(','));
+        if (qr.startsWith(QStringLiteral("data:image/svg+xml")) && comma > 0 && !qr.contains(QStringLiteral(";base64,")))
+            qr = QStringLiteral("data:image/svg+xml;base64,")
+                 + QString::fromLatin1(qr.mid(comma + 1).toUtf8().toBase64());
+        emit mfaEnrollReady(o.value(QStringLiteral("id")).toString(), qr,
+                            totp.value(QStringLiteral("secret")).toString(), totp.value(QStringLiteral("uri")).toString());
+    });
+}
+
+void AuthSession::confirmTotpEnrollment(const QString& factorId, const QString& code)
+{
+    mfaChallengeVerify(factorId, code, m_accessToken, [this, factorId](bool ok, const QJsonObject& session, const QString& err) {
+        if (!ok) { emit mfaFail(err); return; }
+        // La sesión pasa a aal2: se guardan los tokens nuevos.
+        if (!session.value(QStringLiteral("access_token")).toString().isEmpty()) {
+            m_accessToken = session.value(QStringLiteral("access_token")).toString();
+            m_refreshToken = session.value(QStringLiteral("refresh_token")).toString();
+            m_expiresAtUtc = QDateTime::currentDateTimeUtc().addSecs(session.value(QStringLiteral("expires_in")).toInt());
+            saveToDisk();
+        }
+        m_mfaFactorId = factorId;
+        emit mfaChanged();
+        emit mfaOk(QStringLiteral("Verificación en dos pasos activada."));
+    });
+}
+
+void AuthSession::disableTotp()
+{
+    if (!m_api || m_accessToken.isEmpty() || m_mfaFactorId.isEmpty()) return;
+    QNetworkRequest req = m_api->makeRequest(m_api->authUrl(QStringLiteral("factors/%1").arg(m_mfaFactorId)), m_accessToken);
+    auto *reply = m_api->nam()->deleteResource(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const QByteArray raw = reply->readAll();
+        const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        reply->deleteLater();
+        if (http < 200 || http >= 300) {
+            emit mfaFail(http == 403 || http == 401
+                         ? QStringLiteral("Para desactivarla, cierra sesión y vuelve a entrar con tu código.")
+                         : parseSupabaseError(raw, QStringLiteral("No se pudo desactivar (HTTP %1).").arg(http)));
+            return;
+        }
+        m_mfaFactorId.clear();
+        emit mfaChanged();
+        emit mfaOk(QStringLiteral("Verificación en dos pasos desactivada."));
+    });
+}
+
+void AuthSession::verifyLoginTotp(const QString& code)
+{
+    if (m_mfaPendingSession.isEmpty()) return;
+    const QString token = m_mfaPendingSession.value(QStringLiteral("access_token")).toString();
+    mfaChallengeVerify(m_mfaPendingFactor, code, token, [this](bool ok, const QJsonObject& session, const QString& err) {
+        if (m_mfaPendingSession.isEmpty()) return;          // se canceló mientras tanto
+        if (!ok) { emit mfaFail(err); return; }
+        QJsonObject full = session;
+        if (!full.contains(QStringLiteral("user")))
+            full.insert(QStringLiteral("user"), m_mfaPendingSession.value(QStringLiteral("user")));
+        m_mfaPendingSession = QJsonObject();
+        m_mfaPendingFactor.clear();
+        emit mfaChanged();
+        finishAuthSuccess(full, /*emitLoginSignal=*/true);
+    });
+}
+
+void AuthSession::cancelMfaLogin()
+{
+    if (m_mfaPendingSession.isEmpty()) return;
+    m_mfaPendingSession = QJsonObject();
+    m_mfaPendingFactor.clear();
+    emit mfaChanged();
 }

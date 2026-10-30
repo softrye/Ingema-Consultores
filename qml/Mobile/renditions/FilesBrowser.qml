@@ -13,6 +13,34 @@ Item {
     objectName: "filesBrowser"
     property var app
     property string mode: "archive"                       // archive | trash
+    property bool compact: false                          // popup 3D Touch del Dock (filas finas)
+    property string expandedId: ""                        // fila desplegada con sus acciones
+    // Nombre visible de los documentos inteligentes (.rend → nombre de la rendición),
+    // recibido en ambos listados; el contexto resuelve listados anteriores del Archivero.
+    property var displayNames: ({})
+    function displayName(item) {
+        if (item.kind === "SMART_DOCUMENT" && String(item.display_name || "").length)
+            return String(item.display_name)
+        var id = String(item.id)
+        if (displayNames[id] !== undefined) return displayNames[id]
+        if (item.kind !== "SMART_DOCUMENT") return String(item.name || "Sin nombre")
+        if (archive) {
+            displayNames[id] = "Rendición…"
+            var life = page.life
+            app.call("filesArchivedContext", { nodeId: item.id }, "filesName:" + id, function(ok, result) {
+                if (!life.alive) return
+                var c = ok ? ((result.rows || [])[0] || {}) : {}
+                var copy = Object.assign({}, page.displayNames)
+                copy[id] = String(c.display_name || c.name || "").length
+                         ? String(c.display_name || c.name) : "Rendición archivada"
+                page.displayNames = copy
+            })
+            return displayNames[id]
+        }
+        return String(item.name || "Sin nombre").replace(/\.rend$/i, "")
+    }
+    // Alto del popup: lo que ocupa la lista; la recuperación usa todo el espacio.
+    readonly property real compactHeight: recovering ? 440 * ui.u : column.height + 8 * ui.u
     readonly property var ui: app.ui
     readonly property var ctl: app.ctl
     readonly property var life: ({ alive: true })
@@ -174,7 +202,6 @@ Item {
             if (r.success !== true || r.id !== target.id) { page.planError = "El servidor no confirmó la recuperación."; return }
             page.items = page.items.filter(function(i) { return i.id !== target.id })
             page.closeRecovery()
-            page.app.toast((page.archive ? "Reactivado: " : "Restaurado: ") + target.name, "success")
         })
     }
     // Destino alternativo (origen movido o inexistente): proyecto -> espacio -> carpeta,
@@ -229,12 +256,22 @@ Item {
         clip: true
         Column {
             id: column
-            x: page.ui.gutter
-            y: 8 * page.ui.u
-            width: parent.width - 2 * page.ui.gutter
-            spacing: 12 * page.ui.u
+            x: page.compact ? 0 : page.ui.gutter
+            y: page.compact ? 0 : 8 * page.ui.u
+            width: parent.width - 2 * x
+            spacing: (page.compact ? 2 : 12) * page.ui.u
 
+            Item {                                            // encabezado del popup
+                visible: page.compact
+                width: parent.width; height: 34 * page.ui.u
+                Text { x: 10 * page.ui.u; anchors.verticalCenter: parent.verticalCenter; text: page.title; color: S.text
+                       font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u; font.weight: Font.ExtraBold }
+                Text { anchors.right: parent.right; anchors.rightMargin: 10 * page.ui.u; anchors.verticalCenter: parent.verticalCenter
+                       text: page.items.length + (page.hasMore ? "+" : "") + " elementos"; color: S.muted
+                       font.family: page.ui.fontFamily; font.pixelSize: 12.5 * page.ui.u }
+            }
             Text {
+                visible: !page.compact
                 width: parent.width
                 text: page.archive ? "Elementos archivados para consulta y descarga. Para editarlos, primero reactívalos."
                                    : "Elementos retirados de todas las ubicaciones autorizadas. Cada uno conserva su origen y sus permisos."
@@ -263,6 +300,7 @@ Item {
             Text {
                 width: parent.width
                 visible: page.contractState === "CHECKING" || (page.loading && page.items.length === 0)
+                leftPadding: page.compact ? 10 * page.ui.u : 0
                 text: "Consultando…"
                 color: S.muted
                 font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u
@@ -277,12 +315,80 @@ Item {
             Text {
                 width: parent.width
                 visible: page.contractState === "READY" && !page.loading && page.loadError.length === 0 && page.items.length === 0
-                text: page.archive ? "No hay elementos archivados en esta ubicación." : "La Papelera está vacía en esta ubicación."
+                leftPadding: page.compact ? 10 * page.ui.u : 0
+                text: page.compact ? "Vacío" : page.archive ? "No hay elementos archivados en esta ubicación." : "La Papelera está vacía en esta ubicación."
                 color: S.muted; wrapMode: Text.WordWrap
                 font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u
             }
+            // Filas finas del popup: tocar despliega «Reactivar/Restaurar» y «Ver».
             Repeater {
-                model: page.items
+                model: page.compact ? page.items : []
+                delegate: Rectangle {
+                    id: row
+                    required property var modelData
+                    readonly property bool open: page.expandedId === String(modelData.id)
+                    width: column.width
+                    height: rowBody.implicitHeight
+                    radius: 14 * page.ui.u
+                    color: open ? Qt.rgba(6 / 255, 84 / 255, 162 / 255, 0.06) : (rowTap.pressed ? S.ink(0.05) : "transparent")
+                    Behavior on height { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                    Column {
+                        id: rowBody
+                        width: parent.width
+                        Item {
+                            width: parent.width; height: 56 * page.ui.u
+                            Rectangle {                       // icono del tipo (sin códigos DOC/DIR)
+                                id: kindTile
+                                x: 8 * page.ui.u; anchors.verticalCenter: parent.verticalCenter
+                                width: 38 * page.ui.u; height: width; radius: 11 * page.ui.u
+                                readonly property color tone: page.archive ? "#D08A12" : "#D64550"
+                                color: Qt.rgba(tone.r, tone.g, tone.b, 0.12)
+                                Text { anchors.centerIn: parent; color: kindTile.tone; font.family: page.ui.iconFamily; font.pixelSize: 18 * page.ui.u
+                                       text: String.fromCharCode(({ FOLDER: 0xE0D7, SMART_DOCUMENT: 0xE3D3 })[row.modelData.kind] || 0xE0C0) }
+                            }
+                            Column {
+                                x: kindTile.x + kindTile.width + 12 * page.ui.u; width: parent.width - x - (restoreQuick.visible ? 54 : 12) * page.ui.u
+                                anchors.verticalCenter: parent.verticalCenter; spacing: 1 * page.ui.u
+                                Text { width: parent.width; text: page.displayName(row.modelData); elide: Text.ElideRight; color: S.text
+                                       font.family: page.ui.fontFamily; font.pixelSize: 14.5 * page.ui.u; font.weight: row.open ? Font.Bold : Font.DemiBold }
+                                Text { width: parent.width; elide: Text.ElideRight; color: S.muted
+                                       text: ({ FOLDER: "Carpeta", SMART_DOCUMENT: "Rendición", BINARY_DOCUMENT: "Archivo" })[row.modelData.kind] || "Elemento"
+                                       font.family: page.ui.fontFamily; font.pixelSize: 12 * page.ui.u }
+                            }
+                            MouseArea { id: rowTap; anchors.fill: parent
+                                        onClicked: page.expandedId = row.open ? "" : String(row.modelData.id) }
+                            RButton {                         // Papelera: restaurar directo (botón circular)
+                                id: restoreQuick
+                                visible: !page.archive && page.canRecover(row.modelData)
+                                anchors.right: parent.right; anchors.rightMargin: 6 * page.ui.u; anchors.verticalCenter: parent.verticalCenter
+                                width: 40 * page.ui.u; height: width; radius: width / 2
+                                ui: page.ui; glyph: 0xE148; color: Qt.rgba(31 / 255, 111 / 255, 214 / 255, 0.12)
+                                Accessible.name: "Restaurar " + String(row.modelData.name || "")
+                                onActivated: page.startRecovery(row.modelData)
+                            }
+                            Text { visible: !page.archive && !page.canRecover(row.modelData)
+                                   anchors.right: parent.right; anchors.rightMargin: 12 * page.ui.u; anchors.verticalCenter: parent.verticalCenter
+                                   text: "Sin destino"; color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 11.5 * page.ui.u }
+                        }
+                        Row {
+                            visible: row.open
+                            x: 8 * page.ui.u; width: parent.width - 16 * page.ui.u; height: visible ? 48 * page.ui.u : 0
+                            spacing: 6 * page.ui.u
+                            RButton { width: (parent.width - parent.spacing) / 2; height: 40 * page.ui.u; radius: 11 * page.ui.u
+                                      ui: page.ui; primary: true; label: page.verb
+                                      enabledButton: page.canRecover(row.modelData)
+                                      onActivated: page.startRecovery(row.modelData) }
+                            RButton { width: (parent.width - parent.spacing) / 2; height: 40 * page.ui.u; radius: 11 * page.ui.u
+                                      ui: page.ui; label: row.modelData.can_browse === true ? "Abrir" : "Ver"; color: S.glass(1)
+                                      enabledButton: row.modelData.can_browse === true || row.modelData.kind === "BINARY_DOCUMENT"
+                                      busy: page.app.busy("filesOpen:" + row.modelData.id)
+                                      onActivated: page.openItem(row.modelData) }
+                        }
+                    }
+                }
+            }
+            Repeater {
+                model: page.compact ? [] : page.items
                 delegate: RCard {
                     required property var modelData
                     width: column.width
@@ -336,80 +442,108 @@ Item {
     }
 
     // ------------------------------------------------ Hoja de recuperación
+    // Tarjeta de vidrio centrada (mismo lenguaje que RConfirm): icono, nombre
+    // visible, ruta corta de destino y dos botones anchos.
+    function shortPath(label) {
+        var parts = String(label || "").split("/").map(function(x) { return x.trim() }).filter(function(x) { return x.length })
+        return parts.slice(-2).join(" › ")
+    }
     Item {
         id: sheet
         objectName: "recoverySheet"
         anchors.fill: parent
-        visible: page.recovering !== null
+        visible: opacity > 0.01
+        opacity: page.recovering !== null ? 1 : 0
         z: 20
+        Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+        Rectangle { anchors.fill: parent; radius: 24 * page.ui.u; color: Qt.rgba(14 / 255, 24 / 255, 44 / 255, 0.22) }
         MouseArea { anchors.fill: parent; onClicked: page.closeRecovery() }
         Rectangle {
             width: parent.width - 20 * page.ui.u
             x: 10 * page.ui.u
-            height: Math.min(parent.height * 0.82, sheetColumn.implicitHeight + 48 * page.ui.u)
-            y: parent.height - height - page.ui.dockArea + 8 * page.ui.u
-            radius: 30 * page.ui.u
-            color: Qt.rgba(1, 1, 1, 0.97)
+            height: Math.min(parent.height - 20 * page.ui.u, sheetColumn.implicitHeight + 44 * page.ui.u)
+            y: (parent.height - height) / 2
+            radius: 26 * page.ui.u
+            color: S.dark ? Qt.rgba(18 / 255, 22 / 255, 32 / 255, 0.97) : S.glass(0.94)
             border.width: 1
-            border.color: S.border
+            border.color: S.edge(1)
+            scale: page.recovering !== null ? 1 : 0.92
+            Behavior on scale { NumberAnimation { duration: 340; easing.type: Easing.OutBack; easing.overshoot: 1.15 } }
+            Rectangle {                                   // brillo superior del vidrio
+                anchors.fill: parent; anchors.margins: 1; radius: parent.radius - 1
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: S.glass(0.6) }
+                    GradientStop { position: 0.3; color: S.glass(0.0) }
+                }
+            }
             MouseArea { anchors.fill: parent }
             Flickable {
                 anchors.fill: parent
                 anchors.margins: 22 * page.ui.u
                 contentHeight: sheetColumn.implicitHeight
+                boundsBehavior: Flickable.StopAtBounds
                 clip: true
                 Column {
                     id: sheetColumn
                     width: parent.width
-                    spacing: 10 * page.ui.u
-                    Text {
-                        width: parent.width
-                        text: page.verb + " desde " + (page.archive ? "el Archivero" : "la Papelera")
-                        color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 21 * page.ui.u; font.weight: Font.DemiBold
+                    spacing: 8 * page.ui.u
+                    Rectangle {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: 52 * page.ui.u; height: width; radius: width / 2
+                        color: Qt.rgba(31 / 255, 111 / 255, 214 / 255, 0.12)
+                        Text { anchors.centerIn: parent; text: String.fromCharCode(0xE148); color: "#1F6FD6"
+                               font.family: page.ui.iconFamily; font.pixelSize: 24 * page.ui.u }
                     }
                     Text {
-                        width: parent.width
-                        text: page.recovering ? String(page.recovering.name) : ""
-                        color: S.text; wrapMode: Text.WordWrap
-                        font.family: page.ui.fontFamily; font.pixelSize: 16 * page.ui.u
+                        width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+                        text: "¿" + page.verb + "?"
+                        color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 19 * page.ui.u; font.weight: Font.Bold
                     }
                     Text {
-                        width: parent.width
-                        text: "Se conservan la identidad, los datos y los permisos originales."
-                        color: S.muted; wrapMode: Text.WordWrap
-                        font.family: page.ui.fontFamily; font.pixelSize: 13 * page.ui.u
+                        width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+                        maximumLineCount: 2; elide: Text.ElideRight
+                        text: page.recovering ? page.displayName(page.recovering) : ""
+                        color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 15.5 * page.ui.u; font.weight: Font.DemiBold
                     }
                     Text {
-                        width: parent.width
-                        visible: !page.plan && !page.planError.length
-                        text: "Comprobando la ubicación y los permisos…"
-                        color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 14 * page.ui.u
+                        width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+                        text: "Conserva sus datos y permisos."
+                        color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 13 * page.ui.u
                     }
-                    Text {
-                        width: parent.width
-                        visible: !!page.plan
-                        text: page.plan ? "Ubicación original: " + String((page.plan.origin || {}).label || "") : ""
-                        color: S.text; wrapMode: Text.WordWrap
-                        font.family: page.ui.fontFamily; font.pixelSize: 14 * page.ui.u
+                    Item { width: 1; height: 2 * page.ui.u }
+                    Rectangle {                               // a dónde vuelve (ruta corta)
+                        width: parent.width; height: 52 * page.ui.u; radius: 14 * page.ui.u
+                        color: Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.05)
+                        Text { id: destIcon; x: 12 * page.ui.u; anchors.verticalCenter: parent.verticalCenter; text: String.fromCharCode(0xE0D7)
+                               color: "#1F6FD6"; font.family: page.ui.iconFamily; font.pixelSize: 18 * page.ui.u }
+                        Column {
+                            x: destIcon.x + destIcon.width + 10 * page.ui.u; width: parent.width - x - 12 * page.ui.u
+                            anchors.verticalCenter: parent.verticalCenter; spacing: 1 * page.ui.u
+                            Text { text: "Vuelve a"; color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 11.5 * page.ui.u }
+                            Text {
+                                width: parent.width; elide: Text.ElideLeft; color: S.text
+                                font.family: page.ui.fontFamily; font.pixelSize: 14 * page.ui.u; font.weight: Font.DemiBold
+                                text: !page.plan ? (page.planError.length ? "—" : "Comprobando…")
+                                      : (page.shortPath((page.plan.destination || page.plan.origin || {}).label) || "Elige un destino")
+                                SequentialAnimation on opacity {
+                                    running: !page.plan && !page.planError.length && sheet.visible; loops: Animation.Infinite
+                                    NumberAnimation { to: 0.4; duration: 600 }
+                                    NumberAnimation { to: 1; duration: 600 }
+                                }
+                            }
+                        }
                     }
                     Text {
                         width: parent.width
                         visible: !!page.plan && (page.plan.origin || {}).state !== "AVAILABLE"
                         text: page.plan && (page.plan.origin || {}).state === "UNKNOWN"
                               ? "No se puede confirmar la ubicación original. Elige dónde se guardará."
-                              : "Su ubicación original ya no existe, fue movida o está en la Papelera. Elige dónde se guardará."
-                        color: S.warning; wrapMode: Text.WordWrap
-                        font.family: page.ui.fontFamily; font.pixelSize: 14 * page.ui.u
+                              : "Su ubicación original ya no existe. Elige dónde se guardará."
+                        color: S.warning; wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter
+                        font.family: page.ui.fontFamily; font.pixelSize: 13 * page.ui.u
                     }
                     Text {
-                        width: parent.width
-                        visible: !!page.plan && !!page.plan.destination
-                        text: page.plan && page.plan.destination ? "Destino: " + String(page.plan.destination.label || "") : ""
-                        color: S.corporateBlue; wrapMode: Text.WordWrap
-                        font.family: page.ui.fontFamily; font.pixelSize: 14 * page.ui.u
-                    }
-                    Text {
-                        width: parent.width
+                        width: parent.width; horizontalAlignment: Text.AlignHCenter
                         visible: !!page.plan && (page.plan.nodes || []).length > 1
                         text: page.plan ? (page.plan.nodes || []).length + " elementos incluidos" : ""
                         color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 13 * page.ui.u
@@ -458,12 +592,17 @@ Item {
                         color: S.danger; wrapMode: Text.WordWrap
                         font.family: page.ui.fontFamily; font.pixelSize: 14 * page.ui.u
                     }
-                    Flow {
+                    Item { width: 1; height: 6 * page.ui.u }
+                    Row {
+                        id: sheetActions
                         width: parent.width
-                        spacing: 8 * page.ui.u
-                        RButton { ui: page.ui; label: "Cerrar"; onActivated: page.closeRecovery() }
+                        spacing: 10 * page.ui.u
+                        RButton { ui: page.ui; label: "Cancelar"; width: (sheetActions.width - sheetActions.spacing) / 2; height: 48 * page.ui.u
+                                  radius: height / 2; color: Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.07)
+                                  onActivated: page.closeRecovery() }
                         RButton {
                             objectName: "recoverButton"
+                            width: (sheetActions.width - sheetActions.spacing) / 2; height: 48 * page.ui.u; radius: height / 2
                             ui: page.ui; primary: true; label: page.verb
                             enabledButton: !!page.plan && page.plan.requires_destination !== true && String(page.plan.token || "").length > 0
                             busy: page.app.busy("filesRecover")

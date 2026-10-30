@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Window
 import QtQuick.Shapes
+import QtCore
 import InGe 1.0
 import InGe.CoreFlow 3.0 as CoreFlowModule
 import "lib/AccountText.js" as AccountText
@@ -25,7 +26,7 @@ import "lib/AccountText.js" as AccountText
 Window {
     id: root
     visible: true
-    color: root.navy
+    color: root.auroraBase
     title: "InGe+"
     // The real window owns the viewport; Android adjustResize is already
     // reflected in this height before CoreFlow computes keyboard overlap.
@@ -42,6 +43,14 @@ Window {
     readonly property color brandGreen: "#486426"
     readonly property color errorRed: "#D9483B"     // color de error existente
     readonly property color white: "#FFFFFF"
+    // Tema oscuro (Configuración › Apariencia, preferencia leída por HomeScreen):
+    // el Login mantiene sus auras con la paleta Ingema invertida sobre negro.
+    readonly property bool darkTheme: authenticatedLayer.darkTheme
+    readonly property color auroraBase: darkTheme ? "#0A0A0A" : navy
+    readonly property color auroraDeep: darkTheme ? "#101A2E" : navy2
+    readonly property color auroraPrimary: darkTheme ? "#8AB8FF" : brandBlue
+    readonly property color auroraAccent: darkTheme ? "#8DB85A" : brandGreen
+    readonly property color ctaColor: darkTheme ? brandGreen : brandBlue        // botón principal
 
     // ------------------------------------------------------- Dependencias
     readonly property bool authReady: typeof auth !== "undefined" && auth !== null
@@ -51,12 +60,20 @@ Window {
                                      || GraphicsCore.deviceTier === "ULTRA_LOW"
 
     // -------------------------------------------------------------- Estado
-    property string step: "USER"            // USER | PASSWORD
+    property string step: "USER"            // USER | PASSWORD | MFA (código de la app autenticadora)
     property bool submitting: false
     property string attemptEmail: ""        // correo exacto en curso
     property string serviceMessage: ""      // fallos que no son credenciales
     property string announcement: ""        // lectores de pantalla
     property bool leavingWelcome: false
+    property string focusHandoff: ""        // USER | PASSWORD durante el traspaso de foco
+    function moveFocusTo(next) {
+        focusHandoff = next
+        if (next === "PASSWORD") passwordField.input.forceActiveFocus()
+        else userField.input.forceActiveFocus()
+        step = next
+        focusHandoff = ""
+    }
 
     readonly property bool returningUser: onboardingReady && onboarding.returningUser
     // Gracia de 60 s vencida: solo contraseña del usuario recordado.
@@ -92,6 +109,16 @@ Window {
 
     onScreenStateChanged: console.info("INGE_ACCESS_STATE " + screenState)
 
+    property real stableHeight: height
+    onHeightChanged: stableHeight = Math.max(stableHeight, height)
+    onWidthChanged: stableHeight = height              // rotación: nueva referencia
+    // Al salir del acceso el teclado se cierra y ningún campo oculto retiene el foco.
+    onLoginVisibleChanged: if (!loginVisible) {
+        userField.input.focus = false
+        passwordField.input.focus = false
+        Qt.inputMethod.hide()
+    }
+
     // ----------------------------------------------------------- Acciones
     function verifiedProfileName() {
         if (!authReady || !auth.logged)
@@ -121,8 +148,7 @@ Window {
         serviceMessage = ""
         announcement = ""
         if (reducedMotion) {
-            step = "PASSWORD"
-            passwordField.input.forceActiveFocus()
+            moveFocusTo("PASSWORD")
         } else {
             continueFlow.restart()
         }
@@ -138,11 +164,32 @@ Window {
         serviceMessage = ""
         announcement = ""
         submitting = true
+        Qt.inputMethod.hide()
         // Persistencia segura existente (refresh token de AuthSession); el acceso
         // sin contraseña lo limita la gracia de 60 s de OnboardingState.
         auth.setRememberFor30Days(true)
         console.info("INGE_ACCESS_LOGIN submit")
         auth.signInWithPassword(attemptEmail, password)
+    }
+
+    // Verificación en dos pasos: el código de 6 dígitos completa el inicio de sesión.
+    function submitMfa() {
+        if (!authReady || submitting || step !== "MFA")
+            return
+        var code = mfaField.input.text.replace(/\s+/g, "")
+        if (code.length < 6)
+            return
+        serviceMessage = ""
+        announcement = ""
+        submitting = true
+        Qt.inputMethod.hide()
+        auth.verifyLoginTotp(code)
+    }
+    function cancelMfa() {
+        auth.cancelMfaLogin()
+        mfaField.input.text = ""
+        submitting = false
+        step = "PASSWORD"
     }
 
     // Correo verificado del último usuario (cuenta actual de AuthSession).
@@ -189,7 +236,7 @@ Window {
             signOutToLogin()
         } else {
             passwordField.input.text = ""
-            step = "USER"
+            moveFocusTo("USER")
         }
         userField.input.text = ""
         userField.input.forceActiveFocus()
@@ -225,8 +272,7 @@ Window {
             return
         passwordField.input.text = ""
         serviceMessage = ""
-        step = "USER"
-        userField.input.forceActiveFocus()
+        moveFocusTo("USER")
     }
 
     function signOutToLogin() {
@@ -264,6 +310,21 @@ Window {
 
     Connections {
         target: root.authReady ? auth : null
+        function onMfaRequired() {
+            root.submitting = false
+            root.announcement = "Ingresa el código de tu app autenticadora."
+            root.step = "MFA"
+            mfaField.input.text = ""
+            Qt.callLater(function() { mfaField.input.forceActiveFocus() })
+        }
+        function onMfaFail(message) {
+            if (root.step !== "MFA")
+                return
+            root.submitting = false
+            mfaField.input.text = ""
+            root.announcement = message
+            if (root.reducedMotion) errorTintOnly.restart(); else credentialError.restart()
+        }
         function onLoginOk() {
             root.submitting = false
             root.serviceMessage = ""
@@ -315,8 +376,31 @@ Window {
     Connections {
         target: root.onboardingReady ? onboarding : null
         function onSessionLockChanged() {
-            if (onboarding.sessionLocked)
+            if (onboarding.sessionLocked) {
                 root.enterLockedPassword()
+                root.tryBiometricUnlock()
+            }
+        }
+    }
+
+    // ---- Desbloqueo con huella o rostro (Configuración › Privacidad y seguridad).
+    // Sólo abre la sesión ya autenticada y bloqueada por la gracia; nunca reemplaza
+    // la contraseña de un inicio de sesión nuevo.
+    Settings { id: securityPrefs; category: "security"; property bool biometricUnlock: false }
+    readonly property bool biometricReady: securityPrefs.biometricUnlock
+                                           && typeof biometric !== "undefined" && biometric !== null && biometric.available
+                                           && sessionLocked && authReady && auth.logged
+    function tryBiometricUnlock() {
+        if (biometricReady && !biometric.busy) biometric.authenticate()
+    }
+    Connections {
+        target: typeof biometric !== "undefined" ? biometric : null
+        ignoreUnknownSignals: true
+        function onFinished(ok) {
+            if (!ok || !root.sessionLocked || !root.authReady || !auth.logged) return
+            console.info("INGE_ACCESS_BIOMETRIC_UNLOCK ok")
+            onboarding.unlockSession()
+            onboarding.setSessionTracked(true)
         }
     }
 
@@ -327,6 +411,7 @@ Window {
             auth.tryAutoLogin()
         } else if (prefillRememberedUser()) {
             console.info("INGE_ACCESS_SESSION_RESTORE password_required")
+            Qt.callLater(tryBiometricUnlock)
         } else {
             console.info("INGE_ACCESS_SESSION_RESTORE none")
         }
@@ -336,12 +421,15 @@ Window {
     // ===================================================== Aurora del Login
     AuroraField {
         id: loginAurora
-        anchors.fill: parent
+        width: parent.width
+        height: Math.max(parent.height, root.stableHeight)
         mode: 0
         motion: !root.reducedMotion
         lowPower: root.lowPower
-        primaryColor: root.brandBlue
-        accentColor: root.brandGreen
+        baseColor: root.auroraBase
+        deepColor: root.auroraDeep
+        primaryColor: root.auroraPrimary
+        accentColor: root.auroraAccent
         tintColor: root.errorRed
         // Se detiene cuando el Home (opaco) ya cubre la pantalla.
         visible: (!root.welcomeVisible || welcomeLayer.opacity < 1)
@@ -351,22 +439,16 @@ Window {
     // ---------------------------------------------- Continue: luz verde
     SequentialAnimation {
         id: continueFlow
-        NumberAnimation { target: loginAurora; property: "boost"; to: 1.0; duration: 340; easing.type: Easing.InOutQuad }
-        ScriptAction {
-            script: {
-                root.step = "PASSWORD"
-                passwordField.input.forceActiveFocus()
-            }
-        }
-        PauseAnimation { duration: 60 }
-        NumberAnimation { target: loginAurora; property: "boost"; to: 0.0; duration: 400; easing.type: Easing.OutCubic }
+        NumberAnimation { target: loginAurora; property: "boost"; to: 0.3; duration: 260; easing.type: Easing.InOutSine }
+        ScriptAction { script: root.moveFocusTo("PASSWORD") }
+        NumberAnimation { target: loginAurora; property: "boost"; to: 0.0; duration: 420; easing.type: Easing.OutCubic }
     }
 
     // ------------------------------- Credenciales inválidas (sin mensaje)
     SequentialAnimation {
         id: credentialError
-        ColorAnimation { target: loginAurora; property: "primaryColor"; to: root.brandGreen; duration: 150; easing.type: Easing.InOutSine }
-        ColorAnimation { target: loginAurora; property: "primaryColor"; to: root.brandBlue; duration: 150; easing.type: Easing.InOutSine }
+        ColorAnimation { target: loginAurora; property: "primaryColor"; to: root.auroraAccent; duration: 150; easing.type: Easing.InOutSine }
+        ColorAnimation { target: loginAurora; property: "primaryColor"; to: root.auroraPrimary; duration: 150; easing.type: Easing.InOutSine }
         ParallelAnimation {
             NumberAnimation { target: loginAurora; property: "tintAmount"; to: 1.0; duration: 120; easing.type: Easing.OutQuad }
             SequentialAnimation {
@@ -403,11 +485,15 @@ Window {
         interactive: contentHeight > height
         opacity: root.loginVisible ? 1 : 0
         visible: opacity > 0
-        Behavior on opacity { OpacityAnimator { duration: root.reducedMotion ? 0 : 280 } }
+        Behavior on opacity { NumberAnimation { duration: root.reducedMotion ? 0 : 520; easing.type: Easing.InOutCubic } }
+        scale: 1 + (1 - opacity) * 0.05
 
         // Paso contraseña: Back vuelve al usuario sin salir de la app.
         Keys.onBackPressed: function(event) {
-            if (root.step === "PASSWORD" && !root.submitting && !root.sessionLocked) {
+            if (root.step === "MFA" && !root.submitting) {
+                root.cancelMfa()
+                event.accepted = true
+            } else if (root.step === "PASSWORD" && !root.submitting && !root.sessionLocked) {
                 root.backToUser()
                 event.accepted = true
             } else {
@@ -490,12 +576,12 @@ Window {
                         id: userField
                         anchors.fill: parent
                         placeholder: "usuario"
-                        shown: root.step === "USER"
+                        shown: root.step === "USER" || root.focusHandoff === "USER"
                         unit: root.u
                         fontFamily: rubik.font.family
                         accent: root.brandGreen
                         input.inputMethodHints: Qt.ImhEmailCharactersOnly | Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
-                        input.enabled: root.step === "USER" && !root.submitting
+                        input.enabled: (root.step === "USER" || root.focusHandoff === "USER") && !root.submitting
                         Accessible.name: "usuario"
                         onAccepted: root.continueToPassword()
                     }
@@ -503,15 +589,29 @@ Window {
                         id: passwordField
                         anchors.fill: parent
                         placeholder: "contraseña"
-                        shown: root.step === "PASSWORD"
+                        shown: root.step === "PASSWORD" || root.focusHandoff === "PASSWORD"
                         unit: root.u
                         fontFamily: rubik.font.family
                         accent: root.brandGreen
                         input.echoMode: TextInput.Password
                         input.inputMethodHints: Qt.ImhHiddenText | Qt.ImhSensitiveData | Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
-                        input.enabled: root.step === "PASSWORD" && !root.submitting
+                        input.enabled: (root.step === "PASSWORD" || root.focusHandoff === "PASSWORD") && !root.submitting
                         Accessible.name: "contraseña"
                         onAccepted: root.submitPassword()
+                    }
+                    LineField {
+                        id: mfaField
+                        anchors.fill: parent
+                        placeholder: "código de 6 dígitos"
+                        shown: root.step === "MFA"
+                        unit: root.u
+                        fontFamily: rubik.font.family
+                        accent: root.brandGreen
+                        input.inputMethodHints: Qt.ImhDigitsOnly | Qt.ImhNoPredictiveText
+                        input.maximumLength: 6
+                        input.enabled: root.step === "MFA" && !root.submitting
+                        Accessible.name: "código de verificación"
+                        onAccepted: root.submitMfa()
                     }
                 }
 
@@ -521,6 +621,30 @@ Window {
                     width: loginForm.width
                     height: 112 * root.u
                     visible: fieldSlot.visible
+                    Text {   // Usar huella o rostro (sesión bloqueada con desbloqueo activado)
+                        y: 58 * root.u
+                        visible: root.biometricReady && !root.submitting
+                        text: "Usar huella o rostro"
+                        color: Qt.rgba(1, 1, 1, 0.9)
+                        font.family: rubik.font.family
+                        font.pixelSize: 15 * root.u
+                        font.underline: true
+                        MouseArea { anchors.fill: parent; anchors.margins: -10 * root.u; onClicked: root.tryBiometricUnlock() }
+                        Accessible.role: Accessible.Button
+                        Accessible.name: "Usar huella o rostro"
+                    }
+                    Text {   // Volver: cancela el código y regresa a la contraseña
+                        y: 18 * root.u
+                        visible: root.step === "MFA" && !root.submitting
+                        text: "Volver"
+                        color: Qt.rgba(1, 1, 1, 0.78)
+                        font.family: rubik.font.family
+                        font.pixelSize: 15 * root.u
+                        font.underline: true
+                        MouseArea { anchors.fill: parent; anchors.margins: -10 * root.u; onClicked: root.cancelMfa() }
+                        Accessible.role: Accessible.Button
+                        Accessible.name: "Volver a la contraseña"
+                    }
                     Text {   // Cambiar de cuenta: solo en el paso contraseña
                         y: 18 * root.u
                         visible: root.step === "PASSWORD" && !root.submitting
@@ -544,11 +668,11 @@ Window {
                     visible: fieldSlot.visible
                     opacity: root.submitting ? 0.7 : (tap.pressed ? 0.88 : 1)
                     border.width: 1
-                    border.color: Qt.rgba(0.55, 0.78, 1.0, 0.75)
+                    border.color: root.darkTheme ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(0.55, 0.78, 1.0, 0.75)
                     gradient: Gradient {
-                        GradientStop { position: 0.0; color: Qt.tint(root.brandBlue, Qt.rgba(1, 1, 1, 0.06)) }
-                        GradientStop { position: 0.62; color: root.brandBlue }
-                        GradientStop { position: 1.0; color: Qt.tint(root.brandBlue, Qt.rgba(0.62, 0.86, 1.0, 0.55)) }
+                        GradientStop { position: 0.0; color: root.darkTheme ? root.ctaColor : Qt.tint(root.ctaColor, Qt.rgba(1, 1, 1, 0.06)) }
+                        GradientStop { position: 0.62; color: root.ctaColor }
+                        GradientStop { position: 1.0; color: root.darkTheme ? root.ctaColor : Qt.tint(root.ctaColor, Qt.rgba(0.62, 0.86, 1.0, 0.55)) }
                     }
                     Text {
                         anchors.centerIn: parent
@@ -561,12 +685,14 @@ Window {
                         id: tap
                         anchors.fill: parent
                         enabled: !root.submitting && !continueFlow.running
-                        onClicked: root.step === "PASSWORD" ? root.submitPassword()
+                        onClicked: root.step === "MFA" ? root.submitMfa()
+                                   : root.step === "PASSWORD" ? root.submitPassword()
                                                             : root.continueToPassword()
                     }
                     Accessible.role: Accessible.Button
                     Accessible.name: root.step === "PASSWORD" ? "Let's Go" : "Continue"
-                    Accessible.onPressAction: root.step === "PASSWORD" ? root.submitPassword()
+                    Accessible.onPressAction: root.step === "MFA" ? root.submitMfa()
+                                            : root.step === "PASSWORD" ? root.submitPassword()
                                                                       : root.continueToPassword()
                 }
 
@@ -600,15 +726,18 @@ Window {
         anchors.fill: parent
         opacity: root.welcomeVisible && !root.leavingWelcome ? 1 : 0
         visible: opacity > 0
-        Behavior on opacity { OpacityAnimator { duration: root.reducedMotion ? 0 : 420; easing.type: Easing.InOutSine } }
+        Behavior on opacity { NumberAnimation { duration: root.reducedMotion ? 0 : 560; easing.type: Easing.InOutCubic } }
+        scale: 1 + (1 - opacity) * 0.06                 // se aleja hacia el usuario al salir
 
         AuroraField {
             anchors.fill: parent
             mode: 1
             motion: !root.reducedMotion
             lowPower: root.lowPower
-            primaryColor: root.brandBlue
-            accentColor: root.brandGreen
+            baseColor: root.auroraBase
+            deepColor: root.auroraDeep
+            primaryColor: root.auroraPrimary
+            accentColor: root.auroraAccent
             visible: welcomeLayer.visible
         }
 
@@ -705,7 +834,7 @@ Window {
     SequentialAnimation {
         id: getStartedFlow
         ScriptAction { script: root.leavingWelcome = true }
-        PauseAnimation { duration: root.reducedMotion ? 0 : 420 }
+        PauseAnimation { duration: root.reducedMotion ? 0 : 380 }
         ScriptAction {
             script: {
                 if (root.onboardingReady)
@@ -716,25 +845,37 @@ Window {
     }
 
     // ===================================================== AUTENTICADO
-    // Home V1 (HomeScreen.qml). Entrada: la misma luz de la aurora del Login
-    // (boost) crece desde la esquina superior derecha y, en su pico, aparece
-    // el Home; luego la luz se desvanece y la aurora se detiene.
+    // Home V1 (HomeScreen.qml). El primer dibujado del Home es pesado (~1 s en el
+    // A12): si el fundido empezaba a la vez, terminaba antes del primer cuadro y el
+    // Home aparecía de golpe tras un fondo vacío. Ahora el Home se prepara de forma
+    // invisible (1 % de opacidad, sin recibir toques) mientras se autentica o se
+    // muestra la bienvenida, y el fundido empieza cuando ya dibujó sus cuadros.
     property bool homeRevealed: false
+    property int revealFrames: 0
+    readonly property bool homeWarming: authReady && (submitting || welcomeVisible || authenticatedVisible)
+    function revealHome() {
+        revealFrames = 0
+        revealFallback.stop()
+        homeRevealed = true
+        authenticatedLayer.forceActiveFocus()
+    }
     onAuthenticatedVisibleChanged: {
         if (authenticatedVisible) {
-            if (reducedMotion) { homeRevealed = true } else { homeEntry.restart() }
+            if (reducedMotion) { revealHome() }
+            else { revealFrames = 3; revealFallback.restart() }
         } else {
-            homeEntry.stop()
+            revealFrames = 0
+            revealFallback.stop()
             homeRevealed = false
             loginAurora.boost = 0
         }
     }
-    SequentialAnimation {
-        id: homeEntry
-        NumberAnimation { target: loginAurora; property: "boost"; to: 0.8; duration: 280; easing.type: Easing.InQuad }
-        ScriptAction { script: root.homeRevealed = true }
-        NumberAnimation { target: loginAurora; property: "boost"; to: 0.0; duration: 320; easing.type: Easing.OutCubic }
+    Connections {
+        target: root
+        enabled: root.revealFrames > 0
+        function onFrameSwapped() { if (--root.revealFrames <= 0) root.revealHome() }
     }
+    Timer { id: revealFallback; interval: 900; onTriggered: root.revealHome() }
 
     HomeScreen {
         id: authenticatedLayer
@@ -742,11 +883,13 @@ Window {
         u: root.u
         fontFamily: rubik.font.family
         iconFamily: lucide.font.family
-        reducedMotion: root.reducedMotion
-        opacity: root.authenticatedVisible && root.homeRevealed ? 1 : 0
+        systemReducedMotion: root.reducedMotion
+        opacity: root.authenticatedVisible && root.homeRevealed ? 1 : (root.homeWarming ? 0.011 : 0)
         visible: opacity > 0
-        Behavior on opacity { OpacityAnimator { duration: root.reducedMotion ? 0 : 300 } }
-        onVisibleChanged: if (visible) forceActiveFocus()
+        enabled: root.authenticatedVisible && root.homeRevealed
+        Behavior on opacity { NumberAnimation { duration: root.reducedMotion ? 0 : 750; easing.type: Easing.InOutCubic } }
+        scale: root.authenticatedVisible && root.homeRevealed ? 1 : 1.08
+        Behavior on scale { NumberAnimation { duration: root.reducedMotion ? 0 : 1100; easing.type: Easing.OutQuint } }
         onSignOutRequested: root.signOutToLogin()
     }
 
@@ -780,7 +923,7 @@ Window {
         signal accepted()
 
         opacity: shown ? 1 : 0
-        visible: opacity > 0
+        visible: shown || opacity > 0
         Behavior on opacity { OpacityAnimator { duration: 160 } }
 
         TextInput {

@@ -26,6 +26,8 @@ Item {
     }
     property real rasterScale: sourceScaledByQt ? 1.0 : Math.max(1, Screen.devicePixelRatio)
     property color tintColor: flow.theme.textSecondary
+    // Sobre fondos oscuros (tema oscuro de la app) los trazos se aclaran antes del tinte.
+    property bool onDark: false
     property color activeTintColor: flow.theme.accent
     property color disabledTintColor: flow.theme.textMuted
     property real inactiveOpacity: flow.opacityTokens.secondary
@@ -95,7 +97,7 @@ Item {
             // Los SVG oficiales usan trazos oscuros. En Oscuro y Liquid Glass
             // elevamos su luminancia antes de aplicar el tinte semántico para
             // conservar contraste sin mantener variantes paralelas de iconos.
-            brightness: root.flow.theme.isDark ? 0.55 : 0.0
+            brightness: (root.onDark || root.flow.theme.isDark) ? 0.55 : 0.0
             colorization: 1.0
             colorizationColor: {
                 if (!root.enabled

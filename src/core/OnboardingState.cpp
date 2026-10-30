@@ -1,5 +1,6 @@
 #include "OnboardingState.h"
 
+#include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
 #include <QSettings>
@@ -163,6 +164,8 @@ void OnboardingState::handleApplicationState(Qt::ApplicationState state)
             return;
         m_backgroundClock.start();
         m_backgroundExternal = m_externalActivity;
+        QCoreApplication::instance()->setProperty("ingeDriveAuthBackground",
+            QCoreApplication::instance()->property("ingeExternalActivity").toBool());
         QSettings settings;
         settings.setValue(kBackgroundAtKey, QDateTime::currentMSecsSinceEpoch());
         settings.setValue(kBackgroundExternalKey, m_backgroundExternal);
@@ -173,7 +176,11 @@ void OnboardingState::handleApplicationState(Qt::ApplicationState state)
     if (state != Qt::ApplicationActive || !m_backgroundClock.isValid())
         return;
     const qint64 elapsed = m_backgroundClock.elapsed();
-    const qint64 limit = m_backgroundExternal ? kExternalGraceMs : kGraceMs;
+    // La autorización de Google Drive (cuenta + carpeta) la abre la propia app y
+    // puede tardar más de un minuto; su límite explícito es de 5 minutos.
+    const bool driveAuth = QCoreApplication::instance()->property("ingeDriveAuthBackground").toBool();
+    QCoreApplication::instance()->setProperty("ingeDriveAuthBackground", false);
+    const qint64 limit = driveAuth ? 5 * 60 * 1000 : (m_backgroundExternal ? kExternalGraceMs : kGraceMs);
     m_backgroundClock.invalidate();
     clearBackgroundRecord();
     if (m_sessionTracked && elapsed >= limit)

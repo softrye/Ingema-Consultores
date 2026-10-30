@@ -4,6 +4,7 @@
 #include <QtQml/qqml.h>
 #include <QtQml>
 #include <QSslSocket>
+#include "biometricgate.h"
 #include <QLoggingCategory>
 #include <QCoreApplication>
 #include <QUrl>
@@ -183,6 +184,9 @@ int main(int argc, char *argv[])
     // Editor original de Calicatas (Qt Quick Controls): estilo Basic, como antes.
     qputenv("QT_QUICK_CONTROLS_STYLE", "Basic");
     QGuiApplication app(argc, argv);
+    // Android IME may be initialized from a Java callback thread. Pre-create the
+    // lazy QInputMethod on Qt GUI thread before any keyboard event arrives.
+    (void)QGuiApplication::inputMethod();
     QQuickStyle::setStyle("Basic");
 
     QCoreApplication::setOrganizationName("InGePlus");
@@ -344,6 +348,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("EarthNative", &earthNative);
     engine.rootContext()->setContextProperty("appCtx", ctx);
     engine.rootContext()->setContextProperty("auth", static_cast<QObject*>(ctx->auth()));
+    engine.rootContext()->setContextProperty("biometric", new BiometricGate(&app));
     engine.rootContext()->setContextProperty("onboarding", &onboarding);
     engine.rootContext()->setContextProperty("renditions", renditions);
     engine.rootContext()->setContextProperty("renditionLocalStore", renditionLocalStore);

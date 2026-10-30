@@ -62,6 +62,11 @@ public:
     Q_INVOKABLE void capturePhoto(int targetIdx);
     Q_INVOKABLE void pickPhoto(int targetIdx);
     Q_INVOKABLE void releaseImportedPhoto(const QUrl &localUrl);
+    // Home de Calicatas › Abrir: selector de documentos del sistema (Storage
+    // Access Framework). Muestra los proveedores instalados (Google Drive incluido
+    // si está instalado y habilitado). El archivo se copia a caché privada y se
+    // valida (.xlsx = ZIP de Office, .json = ficha) antes de llegar a QML.
+    Q_INVOKABLE void pickCalicataDocument();
     // Android puede matar el proceso mientras la camara externa esta delante
     // (habitual en equipos de 2-4 GB). La captura pendiente se guarda en
     // QSettings con la ficha que la pidio; al reabrir esa ficha se recupera
@@ -98,6 +103,11 @@ signals:
     // Android sustituye temporalmente la Surface de Qt por Cámara/Galería.
     void externalPhotoActivityStarted();
     void externalPhotoActivityFinished();
+    // kind: "xlsx" | "json"; provider: "Google Drive" o autoridad del proveedor.
+    void calicataDocumentPicked(const QUrl &localUrl, const QString &kind,
+                                const QString &displayName, const QString &provider);
+    void calicataDocumentPickCanceled();
+    void calicataDocumentPickError(const QString &code, const QString &message);
 
 private:
     bool ensurePositionSource();
@@ -114,6 +124,7 @@ private:
     void finishPhotoActivity(int targetIdx, const QString &sourceKind,
                              int resultCode, const QString &contentUri);
     void persistPendingCapture(int targetIdx);
+    void finishDocumentActivity(int resultCode, const QString &contentUri);
     void clearPersistedPendingCapture();
 
     QGeoPositionInfoSource *m_positionSource = nullptr;
@@ -136,6 +147,7 @@ private:
     QString m_nativeLocationStatus = QStringLiteral("idle");
     QString m_nativeLocationError;
     bool m_photoRequestInFlight = false;
+    bool m_documentRequestInFlight = false;
     QString m_pendingCameraUri;
     QString m_pendingCameraFilePath;
     QString m_photoCaptureContext;

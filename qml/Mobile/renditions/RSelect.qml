@@ -17,6 +17,7 @@ Column {
     property bool formStyle: false
     property int glyph: 0
     signal picked(string value)
+    function openSheet() { if (!readOnly && options.length > 0) { select.forceActiveFocus(); Qt.inputMethod.hide(); sheet.open() } }
 
     spacing: 6 * ui.u
 
@@ -46,7 +47,7 @@ Column {
         width: parent.width
         height: (select.formStyle ? (select.selectedDetail.length ? 62 : 56) : 48) * select.ui.u
         radius: (select.formStyle ? 16 : 12) * select.ui.u
-        color: select.formStyle ? Qt.rgba(1, 1, 1, select.readOnly ? 0.45 : (fieldTap.pressed ? 0.6 : 0.78))
+        color: select.formStyle ? S.glass(select.readOnly ? 0.45 : (fieldTap.pressed ? 0.6 : 0.78))
                                 : S.ink(select.readOnly ? 0.03 : (fieldTap.pressed ? 0.14 : 0.08))
         border.width: 1
         border.color: select.error.length > 0 ? S.danger : (select.formStyle ? S.fieldBorder : S.border)
@@ -100,7 +101,7 @@ Column {
             id: fieldTap
             anchors.fill: parent
             enabled: !select.readOnly && select.options.length > 0
-            onClicked: sheet.open()
+            onClicked: select.openSheet()
         }
         Accessible.role: Accessible.ComboBox
         Accessible.name: select.label
@@ -116,6 +117,10 @@ Column {
     }
 
     Popup {
+        // Entrada/salida suaves (fundido + leve escala), como el resto de hojas.
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
+                            NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 220; easing.type: Easing.OutCubic } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 140; easing.type: Easing.InCubic } }
         id: sheet
         parent: Overlay.overlay
         modal: true

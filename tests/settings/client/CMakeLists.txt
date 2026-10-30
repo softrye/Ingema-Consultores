@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.24)
+project(AccountClientChecks LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_AUTOMOC ON)
+find_package(Qt6 6.9 REQUIRED COMPONENTS Core Network Gui)
+add_executable(account_client_checks request_checks.cpp auth_checks.cpp ../../../supabaseclient.cpp ../../../supabaseclient.h
+  ../../../authsession.cpp ../../../authsession.h)
+target_link_libraries(account_client_checks PRIVATE Qt6::Core Qt6::Network Qt6::Gui)
+enable_testing()
+add_test(NAME account_client_requests COMMAND account_client_checks)

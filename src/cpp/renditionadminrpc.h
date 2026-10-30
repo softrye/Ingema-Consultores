@@ -18,7 +18,6 @@ inline bool requiresReviewReason(const QString &operation, const QVariantMap &ar
     return operation == QLatin1String("reviewRequest") || operation == QLatin1String("reviewDecide");
 }
 
-
 inline QVariant nullable(const QString &value)
 {
     return value.trimmed().isEmpty() ? QVariant() : QVariant(value.trimmed());
@@ -37,6 +36,10 @@ inline bool call(const QString &operation, const QVariantMap &arguments,
     } else if (operation == QLatin1String("reviewContext")) {
         // Revisión y permisos efectivos de la Web (RenditionReviewPanel).
         *rpc = QStringLiteral("get_rendition_review_context_v03");
+        *params = {{QStringLiteral("p_rendition_id"), arg("renditionId")}};
+    } else if (operation == QLatin1String("reviewObservations")) {
+        // Historial de observaciones del revisor (DocumentReviewObservation de la Web).
+        *rpc = QStringLiteral("list_rendition_review_observations_v08");
         *params = {{QStringLiteral("p_rendition_id"), arg("renditionId")}};
     } else if (operation == QLatin1String("reviewTransition")) {
         *rpc = QStringLiteral("transition_rendition_review_v03");

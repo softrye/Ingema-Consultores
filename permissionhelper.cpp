@@ -54,6 +54,8 @@ constexpr double kMaximumDeadbandMeters = 8.0;
 constexpr double kMaximumPlausibleSpeedMetersPerSecond = 70.0;
 constexpr int kCameraActivityRequestCode = 48101;
 constexpr int kGalleryActivityRequestCode = 48102;
+constexpr int kDocumentActivityRequestCode = 48103;
+constexpr qsizetype kMaximumImportedDocumentBytes = 64 * 1024 * 1024;
 constexpr int kAndroidResultOk = -1;
 constexpr qsizetype kMaximumImportedPhotoBytes = 64 * 1024 * 1024;
 
@@ -343,6 +345,112 @@ QJniObject androidLocationManager()
     return context.callObjectMethod("getSystemService",
                                     "(Ljava/lang/String;)Ljava/lang/Object;",
                                     serviceName.object<jstring>());
+}
+
+// Nombre visible del documento (OpenableColumns.DISPLAY_NAME), vacío si no hay.
+QString contentUriDisplayName(const QString &uriText)
+{
+    const QJniObject resolver = androidContentResolver();
+    const QJniObject uri = uriFromString(uriText);
+    if (!resolver.isValid() || !uri.isValid())
+        return {};
+    const QJniObject cursor = resolver.callObjectMethod(
+                "query",
+                "(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;",
+                uri.object<jobject>(), nullptr, nullptr, nullptr, nullptr);
+    if (clearJniException("ContentResolver.query(document)") || !cursor.isValid())
+        return {};
+    QString name;
+    if (cursor.callMethod<jboolean>("moveToFirst", "()Z")) {
+        const QJniObject column = QJniObject::fromString(QStringLiteral("_display_name"));
+        const jint index = cursor.callMethod<jint>("getColumnIndex", "(Ljava/lang/String;)I",
+                                                   column.object<jstring>());
+        if (index >= 0)
+            name = cursor.callObjectMethod("getString", "(I)Ljava/lang/String;", index).toString();
+    }
+    clearJniException("Cursor(document)");
+    cursor.callMethod<void>("close", "()V");
+    clearJniException("Cursor.close(document)");
+    return name;
+}
+
+// Copia un content:// elegido en el selector del sistema a caché privada y
+// valida su contenido real. kind = "xlsx" (ZIP de Office) | "json" (ficha).
+QUrl copyDocumentUriToPrivateCache(const QString &uriText, QString *kind, QString *error)
+{
+    const QJniObject resolver = androidContentResolver();
+    const QJniObject uri = uriFromString(uriText);
+    if (!resolver.isValid() || !uri.isValid()) {
+        if (error) *error = QStringLiteral("Android devolvió un documento sin acceso válido.");
+        return {};
+    }
+    const QJniObject input = resolver.callObjectMethod(
+                "openInputStream", "(Landroid/net/Uri;)Ljava/io/InputStream;",
+                uri.object<jobject>());
+    if (clearJniException("ContentResolver.openInputStream(document)") || !input.isValid()) {
+        if (error) *error = QStringLiteral("No se pudo leer el documento seleccionado.");
+        return {};
+    }
+    const QString root = QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation))
+                             .filePath(QStringLiteral("calicata_documents"));
+    if (!QDir().mkpath(root)) {
+        input.callMethod<void>("close", "()V");
+        if (error) *error = QStringLiteral("No se pudo preparar la caché privada de documentos.");
+        return {};
+    }
+    const QString tmpPath = QDir(root).filePath(
+                QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".part"));
+    QSaveFile output(tmpPath);
+    if (!output.open(QIODevice::WriteOnly)) {
+        input.callMethod<void>("close", "()V");
+        if (error) *error = QStringLiteral("No se pudo crear la copia temporal del documento.");
+        return {};
+    }
+    bool ok = true;
+    qsizetype total = 0;
+    QByteArray head;
+    QJniEnvironment env;
+    jbyteArray buffer = env->NewByteArray(64 * 1024);
+    while (ok) {
+        const jint count = input.callMethod<jint>("read", "([B)I", buffer);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); ok = false; break; }
+        if (count <= 0) break;
+        total += count;
+        if (total > kMaximumImportedDocumentBytes) {
+            ok = false;
+            if (error) *error = QStringLiteral("El documento supera el límite permitido de 64 MB.");
+            break;
+        }
+        QByteArray chunk(count, Qt::Uninitialized);
+        env->GetByteArrayRegion(buffer, 0, count, reinterpret_cast<jbyte *>(chunk.data()));
+        if (head.size() < 16) head.append(chunk.left(16 - head.size()));
+        if (output.write(chunk) != chunk.size()) ok = false;
+    }
+    env->DeleteLocalRef(buffer);
+    input.callMethod<void>("close", "()V");
+    if (!ok || total <= 0 || !output.commit()) {
+        output.cancelWriting();
+        QFile::remove(tmpPath);
+        if (error && error->isEmpty()) *error = QStringLiteral("No se pudo copiar completamente el documento.");
+        return {};
+    }
+    // Firma real del contenido (no se confía solo en la extensión ni en el MIME).
+    QString detected;
+    if (head.startsWith(QByteArray("PK\x03\x04", 4))) detected = QStringLiteral("xlsx");
+    else if (head.trimmed().startsWith('{')) detected = QStringLiteral("json");
+    if (detected.isEmpty()) {
+        QFile::remove(tmpPath);
+        if (error) *error = QStringLiteral("Elige un Excel de calicata (.xlsx) o una ficha .calicata.json.");
+        return {};
+    }
+    const QString finalPath = tmpPath.left(tmpPath.size() - 5) + QLatin1Char('.') + detected;
+    if (!QFile::rename(tmpPath, finalPath)) {
+        QFile::remove(tmpPath);
+        if (error) *error = QStringLiteral("No se pudo preparar el documento seleccionado.");
+        return {};
+    }
+    if (kind) *kind = detected;
+    return QUrl::fromLocalFile(finalPath);
 }
 #endif
 
@@ -782,6 +890,81 @@ void PermissionHelper::launchGallery(int targetIdx)
     m_photoRequestInFlight = false;
     emit photoSelectionError(targetIdx, QStringLiteral("gallery_unavailable"),
                              QStringLiteral("El selector de imágenes solo está disponible en Android."));
+#endif
+}
+
+void PermissionHelper::pickCalicataDocument()
+{
+    if (m_documentRequestInFlight) {
+        emit calicataDocumentPickError(QStringLiteral("document_request_busy"),
+                                       QStringLiteral("Ya hay una selección de documento en curso."));
+        return;
+    }
+#ifdef Q_OS_ANDROID
+    const QJniObject action = QJniObject::fromString(QStringLiteral("android.intent.action.OPEN_DOCUMENT"));
+    QJniObject intent("android/content/Intent", "(Ljava/lang/String;)V", action.object<jstring>());
+    const QJniObject category = QJniObject::fromString(QStringLiteral("android.intent.category.OPENABLE"));
+    const QJniObject mime = QJniObject::fromString(QStringLiteral("*/*"));
+    intent.callObjectMethod("addCategory", "(Ljava/lang/String;)Landroid/content/Intent;",
+                            category.object<jstring>());
+    intent.callObjectMethod("setType", "(Ljava/lang/String;)Landroid/content/Intent;",
+                            mime.object<jstring>());
+    intent.callObjectMethod("addFlags", "(I)Landroid/content/Intent;", 1);   // FLAG_GRANT_READ_URI_PERMISSION
+    if (clearJniException("Intent(OPEN_DOCUMENT, document)")) {
+        emit calicataDocumentPickError(QStringLiteral("picker_unavailable"),
+                                       QStringLiteral("Android no pudo preparar el selector de documentos."));
+        return;
+    }
+    m_documentRequestInFlight = true;
+    QPointer<PermissionHelper> guard(this);
+    emit externalPhotoActivityStarted();
+    QtAndroidPrivate::startActivity(
+                intent, kDocumentActivityRequestCode,
+                [guard](int, int resultCode, const QJniObject &data) {
+        QString uriText;
+        if (data.isValid()) {
+            const QJniObject uri = data.callObjectMethod("getData", "()Landroid/net/Uri;");
+            if (uri.isValid()) uriText = uri.toString();
+        }
+        if (!guard) return;
+        QMetaObject::invokeMethod(guard.data(), [guard, resultCode, uriText]() {
+            if (guard) guard->finishDocumentActivity(resultCode, uriText);
+        }, Qt::QueuedConnection);
+    });
+#else
+    emit calicataDocumentPickError(QStringLiteral("picker_unavailable"),
+                                   QStringLiteral("El selector de documentos solo está disponible en Android."));
+#endif
+}
+
+void PermissionHelper::finishDocumentActivity(int resultCode, const QString &contentUri)
+{
+    m_documentRequestInFlight = false;
+    emit externalPhotoActivityFinished();
+    if (resultCode != kAndroidResultOk) {
+        emit calicataDocumentPickCanceled();
+        return;
+    }
+    if (contentUri.isEmpty()) {
+        emit calicataDocumentPickError(QStringLiteral("empty_document_result"),
+                                       QStringLiteral("Android no devolvió ningún documento."));
+        return;
+    }
+#ifdef Q_OS_ANDROID
+    QString kind, error;
+    const QString displayName = contentUriDisplayName(contentUri);
+    const QUrl localUrl = copyDocumentUriToPrivateCache(contentUri, &kind, &error);
+    if (!localUrl.isValid()) {
+        emit calicataDocumentPickError(QStringLiteral("document_import_error"), error);
+        return;
+    }
+    const QString authority = QUrl(contentUri).host();
+    const QString provider = authority.startsWith(QLatin1String("com.google.android.apps.docs"))
+            ? QStringLiteral("Google Drive") : authority;
+    emit calicataDocumentPicked(localUrl, kind, displayName, provider);
+#else
+    emit calicataDocumentPickError(QStringLiteral("document_import_error"),
+                                   QStringLiteral("No se pudo importar el documento."));
 #endif
 }
 

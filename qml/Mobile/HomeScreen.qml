@@ -4,8 +4,11 @@ import QtQuick.Shapes
 import QtCore
 import InGe 1.0
 import "lib/AccountText.js" as AccountText
+import "renditions/RStyle.js" as RStyle
 import "renditions" as Renditions
 import "assistant" as Assistant
+import "settings" as AppSettings
+import InGe.Mobile as MobileBackend
 import InGe.CoreFlow 3.0 as CoreFlowModule
 
 // Home V1 de InGe+ (2026-10-12; Preview 1). Fondo fotográfico real
@@ -20,7 +23,29 @@ Item {
     property real u: 1
     property string fontFamily: ""
     property string iconFamily: ""
-    property bool reducedMotion: false
+    // Movimiento: el del sistema (Main) o la preferencia «Reducir movimiento».
+    property bool systemReducedMotion: false
+    readonly property bool reducedMotion: systemReducedMotion || appearancePrefs.reduceMotion
+    // Apariencia (Configuración › Apariencia). El tema oscuro aplica por ahora a Configuración.
+    readonly property bool liquidGlass: appearancePrefs.liquidGlass
+    readonly property string appSkin: appearancePrefs.skin            // none | galaxias | ingema
+    readonly property bool darkTheme: appearancePrefs.skin === "halloween" || appearancePrefs.theme === "dark"
+                                      || (appearancePrefs.theme === "auto" && Application.styleHints.colorScheme === Qt.ColorScheme.Dark)
+    // El tema oscuro se aplica a la paleta de Rendiciones antes de crearla; al
+    // cambiar de tema la subapp se recrea (si no está en pantalla) con la nueva paleta.
+    onAppSkinChanged: {
+        RStyle.setSkin(appSkin)
+        if (page !== "rendiciones") renditionsEverLoaded = false
+        if (page !== "calicatas") calicatasEditorEverLoaded = false
+    }
+    onDarkThemeChanged: {
+        RStyle.setDark(darkTheme)
+        if (page !== "rendiciones") renditionsEverLoaded = false
+        if (page !== "calicatas") calicatasEditorEverLoaded = false
+    }
+    Settings { id: appearancePrefs; category: "appearance"
+               property bool reduceMotion: false; property bool liquidGlass: true; property string theme: "light"
+               property string skin: "none" }
     signal signOutRequested()
 
     // ------------------------------------------------------------ Paleta
@@ -28,8 +53,8 @@ Item {
     readonly property color navy2: "#1C2D50"
     readonly property color brandBlue: "#0654A2"
     readonly property color brandGreen: "#486426"
-    readonly property color glassFill: Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.50)
-    readonly property color glassBorder: Qt.rgba(1, 1, 1, 0.22)
+    readonly property color glassFill: darkTheme ? Qt.rgba(8 / 255, 10 / 255, 16 / 255, 0.62) : Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.50)
+    readonly property color glassBorder: darkTheme ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(1, 1, 1, 0.22)
 
     // Material glass: textura desenfocada COMPARTIDA de la fotografía
     // (GlassSurface.qml + shaders/glass.frag). glassTick avisa a cada
@@ -62,6 +87,10 @@ Item {
     property var selectedCalicata: null
     function navigate(target) {
         addOpen = false
+        if (target === "profile") {                         // Perfil se integró en Configuración › Mi cuenta
+            settingsApp.pendingPage = "account"
+            target = "settings"
+        }
         page = target
     }
     function openCalicatas(projectId, calicataId) {
@@ -92,6 +121,7 @@ Item {
     function handleBackStep(source) {
         console.info("INGE_NAV_BACK_SOURCE " + source + " page=" + page)
         if (assistantSheet.open) { assistantSheet.close(); return true }   // InGe IA global
+        if (page === "settings" && settingsApp.handleBack()) return true
         if (subAppEnter.running || subAppExit.running)
             return true
         if ((page === "calicatas" || page === "earth" || page === "rendiciones") && dockPath.length > 0) {   // submenú del dock
@@ -748,7 +778,7 @@ Item {
             phraseSwap.restart()
         }
     }
-    Component.onCompleted: { loadItems(); refreshGreeting(); CalicataCloud.refreshProjects(); syncReminders() }
+    Component.onCompleted: { dockDisplayedSlots = dockSlots; RStyle.setSkin(appSkin); RStyle.setDark(darkTheme); loadItems(); refreshGreeting(); CalicataCloud.refreshProjects(); syncReminders() }
 
     // Foto del día entre las fotografías originales (recorte proporcional).
     readonly property var photos: [
@@ -795,8 +825,8 @@ Item {
         Renditions.RendicionesSyncBackdrop {
             id: corporateHomeBackdrop
             anchors.fill: parent
-            visible: home.appSkin === "ingema"
-            skin: "ingema"
+            visible: home.appSkin === "ingema" || home.appSkin === "halloween"
+            skin: home.appSkin === "halloween" ? "halloween" : "ingema"
             dark: true                       // Home retains white labels over the Web's navy background.
             mode: "synced"
             running: visible && home.visible && home.page === "home"
@@ -806,7 +836,7 @@ Item {
         Image {
             id: photoImage
             anchors.fill: parent
-            visible: home.appSkin !== "ingema"
+            visible: home.appSkin !== "ingema" && home.appSkin !== "halloween"
             source: home.photo.source
             fillMode: Image.PreserveAspectCrop
             horizontalAlignment: home.photo.align
@@ -814,12 +844,17 @@ Item {
             cache: true
             sourceSize.height: Math.min(2400, Math.round(home.height * 1.5))
         }
+        Rectangle {                                    // tema oscuro: foto atenuada
+            anchors.fill: photoImage; color: "#000000"
+            opacity: home.darkTheme ? 0.45 : 0
+            Behavior on opacity { NumberAnimation { duration: 400 } }
+        }
         // Desenfoque real de la foto, una sola vez en GPU (la foto es estática)
         // y a media resolución; todas las superficies glass lo reutilizan.
         MultiEffect {
             id: photoBlur
             anchors.fill: photoImage
-            source: home.appSkin === "ingema" ? corporateHomeBackdrop : photoImage
+            source: home.appSkin === "ingema" || home.appSkin === "halloween" ? corporateHomeBackdrop : photoImage
             blurEnabled: true
             blurMax: 64
             blur: 1.0
@@ -852,8 +887,10 @@ Item {
             boundsBehavior: Flickable.StopAtBounds
             interactive: contentHeight > height && home.dragKey.length === 0 && home.menuKey.length === 0
             opacity: home.page === "home" ? 1 : 0
+            scale: home.page === "settings" ? 0.95 : 1          // Home se aleja al entrar a Configuración
             visible: opacity > 0
             Behavior on opacity { OpacityAnimator { duration: home.reducedMotion ? 0 : 260 } }
+            Behavior on scale { ScaleAnimator { duration: home.reducedMotion ? 0 : 560; easing.type: Easing.OutQuint } }
 
             Column {
                 id: homeColumn
@@ -947,54 +984,146 @@ Item {
             onActivated: home.navigate("settings")
         }
 
-        // ------------------------------------------------- Páginas básicas
-        PageFrame {
+        // Configuración (incluye la cuenta; Perfil ya no es una página aparte) (diseño claro aprobado con auras de estado).
+        Settings {                                     // QtCore: preferencias de seguridad
+            id: securityPrefs
+            category: "security"
+            property bool biometricUnlock: false
+        }
+        Loader {                                       // espacio del servidor (InGe Drive), sólo con Configuración abierta
+            id: storageProbe
+            active: settingsApp.shown
+            sourceComponent: Component { MobileBackend.NothingDocuments { Component.onCompleted: navigate("home") } }
+        }
+        AppSettings.SettingsApp {
+            id: settingsApp
+            anchors.fill: parent
             ui: home
-            shown: home.page === "profile"
-            title: "Perfil"
-            Column {
-                width: parent.width
-                spacing: 12 * home.u
-                Text {
-                    width: parent.width
-                    text: home.authReady && auth.logged
-                          ? AccountText.displayPersonName(auth.fullName.length > 0 ? auth.fullName
-                                : (auth.nombre + " " + auth.apellido), "", true) : ""
-                    visible: text.length > 0
-                    color: "white"; font.family: home.fontFamily; font.pixelSize: 21 * home.u
-                    wrapMode: Text.WordWrap
-                }
-                Text {
-                    width: parent.width
-                    text: home.authReady && auth.logged ? AccountText.displayEmailExact(auth.email, "") : ""
-                    color: Qt.rgba(1, 1, 1, 0.78); font.family: home.fontFamily; font.pixelSize: 16 * home.u
-                    wrapMode: Text.WrapAnywhere
-                }
-                Item { width: 1; height: 8 * home.u }
-                ActionButton { ui: home; width: parent.width; label: "Cerrar sesión"; onActivated: home.signOutRequested() }
+            readonly property bool shown: home.page === "settings"
+            opacity: shown ? 1 : 0
+            scale: shown ? 1 : 1.045
+            visible: opacity > 0
+            Behavior on opacity { OpacityAnimator { duration: home.reducedMotion ? 0 : 460; easing.type: Easing.OutCubic } }
+            Behavior on scale { ScaleAnimator { duration: home.reducedMotion ? 0 : 640; easing.type: Easing.OutQuint } }
+            backgroundSource: home.photo.source
+            userName: home.authReady && auth.logged
+                      ? AccountText.displayPersonName(auth.fullName.length > 0 ? auth.fullName : (auth.nombre + " " + auth.apellido), "", true) : ""
+            userEmail: home.authReady && auth.logged ? String(auth.email || "") : ""
+            avatarSource: home.authReady && auth.logged ? String(auth.avatarUrl || "") : ""
+            // Sin nombre/apellido en Auth: se separa el nombre completo del perfil.
+            readonly property var nameParts: home.authReady ? String(auth.fullName || "").trim().split(/\s+/) : []
+            firstName: home.authReady ? (String(auth.nombre || "").length ? String(auth.nombre) : (nameParts[0] || "")) : ""
+            lastName: home.authReady ? (String(auth.apellido || "").length ? String(auth.apellido) : nameParts.slice(1).join(" ")) : ""
+            userPhone: home.authReady ? String(auth.phone || "") : ""
+            userPosition: home.authReady ? String(auth.position || "") : ""
+            userArea: home.authReady ? String(auth.area || "") : ""
+            sessions: home.authReady ? (auth.activeSessions || []) : []
+            sessionsBusy: home.authReady && auth.sessionsBusy
+            savedAccounts: home.authReady ? (auth.savedAccounts || []) : []
+            currentAccountId: home.authReady ? String(auth.currentAccountId || "") : ""
+            onSessionsRefreshRequested: if (home.authReady && auth.logged) auth.refreshActiveSessions()
+            onSessionRevokeRequested: function(sessionId) { securityNotice = "Cerrando sesión…"; auth.revokeSession(sessionId) }
+            onSignOutOthersRequested: { securityNotice = "Cerrando las otras sesiones…"; auth.signOutOtherSessions() }
+            onAccountSwitchRequested: function(accountId) { auth.switchToSavedAccount(accountId) }
+            onAddAccountRequested: home.signOutRequested()      // al login; las cuentas guardadas se conservan
+            onAvatarChosen: function(file) { accountNotice = "Subiendo foto…"; auth.updateUserAvatar(file) }
+            onProfileSaveRequested: function(nombre, apellido, phone) {
+                if (!nombre.length) { accountNotice = "Escribe tu nombre."; return }
+                accountNotice = ""
+                profileSaving = true
+                auth.updateUserProfile(nombre, apellido, phone)
+            }
+            appVersion: Qt.application.version
+            reduceMotion: appearancePrefs.reduceMotion
+            liquidGlass: appearancePrefs.liquidGlass
+            theme: appearancePrefs.theme
+            onReduceMotionToggled: function(value) { appearancePrefs.reduceMotion = value }
+            onLiquidGlassToggled: function(value) { appearancePrefs.liquidGlass = value }
+            onThemeSelected: function(key) { appearancePrefs.theme = key }
+            skin: appearancePrefs.skin
+            onSkinSelected: function(key) { appearancePrefs.skin = key }
+            syncMode: renditionsLoader.item && renditionsLoader.item.syncMode !== undefined ? renditionsLoader.item.syncMode : "unknown"
+            syncText: syncMode === "synced" ? "Al día" : syncMode === "error" ? "Con errores" : syncMode === "offline" ? "Sin conexión"
+                    : syncMode === "attention" ? "Revisar" : syncMode === "syncing" ? "Sincronizando" : ""
+            notificationsText: store.remindersEnabled ? "Activadas" : "Desactivadas"
+            renditionsSync: syncMode
+            renditionsPending: renditionsLoader.item && renditionsLoader.item.pendingCount !== undefined ? renditionsLoader.item.pendingCount : 0
+            calicatasSync: calicatasEditor.item && calicatasEditor.item.healthAuraMode !== undefined ? calicatasEditor.item.healthAuraMode : "unknown"
+            syncBusy: !!renditionsLoader.item && renditionsLoader.item.phase !== undefined
+                      && (renditionsLoader.item.phase === "PUSHING" || renditionsLoader.item.phase === "PULLING")
+            mfaEnabled: home.authReady && auth.mfaEnabled === true
+            onMfaEnrollRequested: { securityNotice = "Preparando…"; auth.enrollTotp() }
+            onMfaConfirmRequested: function(factorId, code) {
+                if (code.length < 6) { securityNotice = "Escribe los 6 dígitos del código."; return }
+                securityNotice = "Verificando…"
+                auth.confirmTotpEnrollment(factorId, code)
+            }
+            onMfaDisableRequested: { securityNotice = "Desactivando…"; auth.disableTotp() }
+            onSyncNowRequested: {
+                if (renditionsLoader.item && renditionsLoader.item.synchronize) renditionsLoader.item.synchronize(true)
+                CalicataCloud.refreshProjects()
+            }
+            biometricAvailable: typeof biometric !== "undefined" && biometric !== null && biometric.available
+            biometricBusy: typeof biometric !== "undefined" && biometric !== null && biometric.busy
+            biometricEnabled: securityPrefs.biometricUnlock
+            storageStats: storageProbe.item ? storageProbe.item.stats : ({})
+            storageBusy: storageProbe.item ? storageProbe.item.busy : false
+            storageError: storageProbe.item ? String(storageProbe.item.error || "") : ""
+            onShownChanged: if (shown && typeof biometric !== "undefined" && biometric) biometric.refresh()
+            onCloseRequested: home.page = "home"
+            onSignOutRequested: home.signOutRequested()
+            onNotificationsToggled: store.remindersEnabled = !store.remindersEnabled
+            onStorageRefreshRequested: if (storageProbe.item) storageProbe.item.refresh()
+            onPasswordResetRequested: {
+                if (!home.authReady || !String(auth.email || "").length) return
+                home.passwordResetPending = true
+                securityNotice = "Enviando enlace…"
+                auth.requestPasswordReset(String(auth.email))
+            }
+            // Activar exige confirmar con la huella o el rostro; desactivar es directo.
+            onBiometricToggled: function(value) {
+                securityNotice = ""
+                if (!value) { securityPrefs.biometricUnlock = false; return }
+                home.biometricEnrollPending = true
+                biometric.authenticate()
             }
         }
-        PageFrame {
-            ui: home
-            shown: home.page === "settings"
-            title: "Ajustes"
-            Column {
-                width: parent.width
-                spacing: 12 * home.u
-                GlassRow {
-                    ui: home
-                    width: parent.width
-                    title: "Recordatorios"
-                    subtitle: store.remindersEnabled ? "Activados" : "Desactivados"
-                    trailing: store.remindersEnabled ? "ON" : "OFF"
-                    onActivated: store.remindersEnabled = !store.remindersEnabled
-                }
-                Text {
-                    width: parent.width
-                    text: "Un aviso al día como máximo (nunca entre 21:00 y 8:00), solo cuando tus calicatas tienen cambios pendientes de sincronizar. Android puede pedir permiso para mostrar notificaciones."
-                    color: Qt.rgba(1, 1, 1, 0.72); font.family: home.fontFamily; font.pixelSize: 14 * home.u
-                    wrapMode: Text.WordWrap
-                }
+        Connections {
+            target: typeof biometric !== "undefined" ? biometric : null
+            ignoreUnknownSignals: true
+            function onFinished(ok) {
+                if (!home.biometricEnrollPending) return
+                home.biometricEnrollPending = false
+                securityPrefs.biometricUnlock = ok
+                settingsApp.securityNotice = ok ? "Listo: podrás desbloquear InGe+ con tu huella o rostro."
+                                                : "No se activó: la verificación no se completó."
+            }
+        }
+        // El aviso de envío solo aparece cuando el servidor lo confirma.
+        Connections {
+            target: auth
+            ignoreUnknownSignals: true
+            function onProfileUpdatedOk() { settingsApp.profileSaving = false; settingsApp.accountNotice = "Cambios guardados." }
+            function onProfileUpdatedFail(message) { settingsApp.profileSaving = false; settingsApp.accountNotice = "No se guardó: " + message }
+            function onProfileAvatarSynced() { settingsApp.accountNotice = "Foto de perfil actualizada." }
+            function onProfileAvatarSyncWarning(message) { settingsApp.accountNotice = message }
+            function onSessionsActionOk(message) { settingsApp.securityNotice = message }
+            function onMfaEnrollReady(factorId, qrImage, secret, uri) {
+                settingsApp.securityNotice = ""
+                settingsApp.mfaEnrollment = { factorId: factorId, qr: qrImage, secret: secret, uri: uri }
+            }
+            function onMfaOk(message) { settingsApp.mfaEnrollment = null; settingsApp.securityNotice = message }
+            function onMfaFail(message) { settingsApp.securityNotice = message }
+            function onSessionsActionFail(message) { settingsApp.securityNotice = message }
+            function onPasswordResetRequestedOk(email) {
+                if (!home.passwordResetPending) return
+                home.passwordResetPending = false
+                settingsApp.securityNotice = "Te enviamos un enlace para cambiar tu contraseña a " + email + "."
+            }
+            function onPasswordResetRequestedFail(message) {
+                if (!home.passwordResetPending) return
+                home.passwordResetPending = false
+                settingsApp.securityNotice = "No se pudo enviar el enlace: " + message
             }
         }
         Loader {
@@ -1002,6 +1131,9 @@ Item {
             anchors.fill: parent
             active: home.page === "earth" && home.visible
             visible: active
+            // Entrada con fundido (antes aparecía de golpe sobre el Home).
+            opacity: active && status === Loader.Ready ? 1 : 0
+            Behavior on opacity { OpacityAnimator { duration: home.reducedMotion ? 0 : 280; easing.type: Easing.OutCubic } }
             sourceComponent: Component {
                 RetroplasmaEarthView {
                     controller: EarthNative
@@ -1047,6 +1179,7 @@ Item {
                     dockMenuVisible: dockMenuBox.visible
                     haptics: typeof FlowHaptics !== "undefined" ? FlowHaptics : null
                     dockAnchor: dock
+                    touchLayer: touchMenuHost                  // menús 3D Touch sobre el desenfoque
                     flow: CoreFlowModule.InGeCoreFlow          // motor único (geometría del teclado)
                     onRequestBack: home.page = "home"
                     onRequestOpenDrive: home.navigate("drive")
@@ -1200,20 +1333,34 @@ Item {
         onActiveChanged: if (active && status === Loader.Null) load()
         Component.onCompleted: if (active && status === Loader.Null) load()
         function load() {
+            home.calicatasMark("LOADER_START")
             setSource(Qt.resolvedUrl("pages/CalicatasEditorPage.qml"), {
                 auth: (typeof auth !== "undefined" ? auth : null),
                 flowMotionEnabled: !home.reducedMotion,
                 flowReduceMotion: home.reducedMotion,
-                gpsEnabled: false
+                gpsEnabled: false,
+                // Estado de Calicatas: mismo `ui` y anclaje de Dock que Rendiciones.
+                ui: home,
+                dockAnchor: dock
             })
         }
         onStatusChanged: {
             if (status === Loader.Ready) {
+                home.calicatasMark("LOADER_READY")
                 home.calicatasEditorEverLoaded = true
+                item.darkMode = Qt.binding(function() { return home.darkTheme })
                 item.forceActiveFocus()
+                if (home.calicatasEnterPendingFrom.length && home.page === "calicatas") {
+                    var from = home.calicatasEnterPendingFrom
+                    home.calicatasEnterPendingFrom = ""
+                    Qt.callLater(function() { home.runSubAppTransition(true, from, "calicatas") })
+                }
             } else if (status === Loader.Error) {
                 console.error("INGE_CALICATAS_EDITOR_LOAD_ERROR pages/CalicatasEditorPage.qml")
-                home.page = "home"
+                home.calicatasEnterPendingFrom = ""
+                // Diferido: el error llega dentro de onActiveChanged -> setSource; cambiar
+                // page ahí reevalúa `active` en plena notificación (binding loop).
+                Qt.callLater(function() { home.page = "home" })
                 home.notify("No se pudo abrir el editor de Calicatas. Revisa el registro de la aplicación.")
             }
         }
@@ -1243,10 +1390,26 @@ Item {
     // Home con desplazamiento corto y opacidad; al volver, sale y el Home se
     // recupera. El editor no se destruye: su estado y borradores se conservan.
     property real subAppProgress: 0
+    property string calicatasEnterPendingFrom: ""      // primera apertura: espera al Loader listo
+    // Marcas de apertura de Calicatas: ms desde INGE_CALICATAS_ENTER_REQUEST.
+    property double calicatasEnterAt: 0
+    property bool calicatasAwaitFirstFrame: false
+    function calicatasMark(eventName) {
+        console.info("INGE_CALICATAS_" + eventName + " t=" + (calicatasEnterAt > 0 ? Date.now() - calicatasEnterAt : -1))
+    }
+    Connections {
+        target: home.Window.window
+        enabled: home.calicatasAwaitFirstFrame
+        ignoreUnknownSignals: true
+        function onFrameSwapped() { home.calicatasAwaitFirstFrame = false; home.calicatasMark("FIRST_VISIBLE") }
+    }
     property string previousPage: "home"
+    property bool biometricEnrollPending: false
+    property bool passwordResetPending: false
     readonly property var subAppPages: ["calicatas"]
     function runSubAppTransition(entering, from, to) {
         console.info("INGE_NAV_TRANSITION_START from=" + from + " to=" + to)
+        if (entering && to === "calicatas") { home.calicatasMark("ANIMATION_START"); home.calicatasAwaitFirstFrame = true }
         subAppEnter.stop()
         subAppExit.stop()
         if (reducedMotion) {
@@ -1260,6 +1423,7 @@ Item {
     }
     function finishSubAppTransition(entering) {
         console.info("INGE_NAV_TRANSITION_END page=" + page)
+        if (entering && page === "calicatas") home.calicatasMark("ANIMATION_END")
         if (entering && calicatasEditor.item)
             calicatasEditor.item.forceActiveFocus()   // ya habilitado al terminar
         else if (!entering)
@@ -1285,8 +1449,15 @@ Item {
             console.info("INGE_NAV_FROM " + from + " INGE_NAV_TO " + home.page)
             var wasSub = home.subAppPages.indexOf(from) >= 0
             var isSub = home.subAppPages.indexOf(home.page) >= 0
-            if (isSub && !wasSub)
-                home.runSubAppTransition(true, from, home.page)
+            if (isSub && !wasSub) {
+                home.calicatasEnterAt = Date.now()
+                home.calicatasMark("ENTER_REQUEST loaded=" + (calicatasEditor.status === Loader.Ready))
+                // Como Rendiciones: la entrada empieza con la página ya cargada. La
+                // primera carga del editor es síncrona; animar antes la dejaría
+                // saltar al final en el primer fotograma visible.
+                if (calicatasEditor.status === Loader.Ready) home.runSubAppTransition(true, from, home.page)
+                else home.calicatasEnterPendingFrom = from
+            }
             else if (wasSub && !isSub)
                 home.runSubAppTransition(false, from, home.page)
             else if (home.page === "home")
@@ -1448,7 +1619,6 @@ Item {
     readonly property var homeDockPreset: [
         { key: "home", glyph: 0xE0F5, page: "home", name: "Inicio" },
         { key: "addTools", glyph: 0xE173, name: "Agregar herramientas" },
-        { key: "profile", glyph: 0xE19F, page: "profile", name: "Perfil" },
         { key: "settings", glyph: 0xE154, page: "settings", name: "Ajustes" }
     ]
     readonly property string dockOwner: page === "earth" ? "earth" : (page === "rendiciones" ? "rendiciones" : "calicatas")
@@ -1508,8 +1678,18 @@ Item {
               enabled: dockSecondary.length > 0, branch: true, rotate: 0, action: dockMoreNode }
         ]
     }
-    readonly property real dockCellWidth: dockSlots.length >= 4 ? (232 * u - 3) / 4 : 76 * u
-    readonly property real dockIconSize: dockSlots.length >= 4 ? 26 * u : 30 * u
+    // No cambiar el modelo del Repeater durante un press: incluso asignarle
+    // un snapshot idéntico puede recrear el delegado y perder onClicked.
+    // Las acciones reales siguen validándose en dockDispatch (incluido Deep Press).
+    property bool dockPressActive: false
+    // Sin binding: QML no debe recomputar este modelo durante una pulsación,
+    // porque destruiría el delegado MouseArea antes de recibir onClicked.
+    property var dockDisplayedSlots: []
+    onDockSlotsChanged: if (!dockPressActive) dockDisplayedSlots = dockSlots
+    onDockPressActiveChanged: if (!dockPressActive) dockDisplayedSlots = dockSlots
+    function dockFinishPress() { dockPressActive = false }
+    readonly property real dockCellWidth: dockDisplayedSlots.length >= 4 ? (232 * u - 3) / 4 : 76 * u
+    readonly property real dockIconSize: dockDisplayedSlots.length >= 4 ? 26 * u : 30 * u
     onDockModeChanged: {
         dockPath = []
         console.info("INGE_DOCK_PRESET " + dockMode)
@@ -1615,7 +1795,9 @@ Item {
         // Navegación de Nuevo gasto: arrow-left, arrow-right, home, log-out, circle-x, list, refresh-cw.
         "renditions.arrowBack": 0xE048, "renditions.forward": 0xE049, "renditions.home": 0xE0F5,
         "renditions.logout": 0xE10E, "renditions.cancel": 0xE084, "renditions.list": 0xE106,
-        "renditions.recover": 0xE145
+        "renditions.recover": 0xE145,
+        // Rendición abierta: buscar (search), información (info), actividad (clock).
+        "renditions.search": 0xE151, "renditions.info": 0xE0F9, "renditions.activity": 0xE087
     })
     function dockGlyph(action) {
         var id = String(action.id || "")
@@ -1668,12 +1850,36 @@ Item {
         dockHoverIndex = -1
         dockHaptic("selection")
     }
-    function dockDispatch(action, generation) {
+    function dockActiveDetailId() {
+        var subapp = renditionsLoader.item
+        return page === "rendiciones" && subapp && subapp.detailPage
+               ? String(subapp.detailPage.localId || "") : ""
+    }
+    function dockDispatch(action, generation, pressedOwner, pressedContext, pressedDetailId) {
         if (!dockRouter || !dockCtx) {
             console.warn("INGE_DOCK_INTEGRATION_ERROR router-unavailable action=" + action.id)
             notify("Error de integración del dock: acción no disponible.")
             dockHaptic("error")
             return
+        }
+        // La ficha puede republicar sus acciones entre press/release (gastos cargados,
+        // permisos, sincronización). Sólo un tapCommand conserva su toque si sigue
+        // siendo la MISMA acción habilitada en el MISMO contexto activo.
+        // No se aplica al Deep Press ni a saltos entre páginas/propietarios.
+        if (action.tapCommand === true && generation !== dockGeneration
+                && pressedOwner !== undefined && pressedContext !== undefined
+                && !dockCtx.transitionPending
+                && dockCtx.ownerId === pressedOwner && dockCtx.contextId === pressedContext
+                && (pressedContext !== "rendiciones/detail"
+                    || (pressedDetailId && pressedDetailId === dockActiveDetailId()))) {
+            for (var i = 0; i < dockActions.length; ++i) {
+                var live = dockActions[i]
+                if (live.id === action.id && live.command === action.command
+                        && live.enabled !== false && live.visible !== false) {
+                    generation = dockGeneration
+                    break
+                }
+            }
         }
         var accepted = dockRouter.dispatch(String(action.id), generation)
         dockHaptic(accepted ? "success" : "error")
@@ -1688,7 +1894,7 @@ Item {
     }
     // Toque normal: con subfunciones abre el Quick Bubble (descubrible sin
     // Deep Press); sin subfunciones ejecuta el comando.
-    function dockSlotTap(slot, pressGeneration, anchorItem) {
+    function dockSlotTap(slot, pressGeneration, anchorItem, pressedOwner, pressedContext, pressedDetailId) {
         if (!slot.action) {
             if (!consumeEditTap()) {
                 if (slot.key === "addTools") openAdd()
@@ -1712,7 +1918,7 @@ Item {
             if (pressGeneration === dockGeneration)
                 dockOpenMenu(slot.key, anchorItem, false)
         } else if (a.command && String(a.command).length > 0) {
-            dockDispatch(a, pressGeneration)
+            dockDispatch(a, pressGeneration, pressedOwner, pressedContext, pressedDetailId)
         }
     }
     // Deep Press (380 ms): subfunciones, o la propia acción si no tiene. Nunca
@@ -1775,8 +1981,9 @@ Item {
         dockPath = []
         dockDispatch(entry, generation)
     }
-    readonly property real dockMenuHeaderHeight: 44 * u
-    readonly property real dockMenuRowHeight: 52 * u
+    // Menús 3D Touch compactos (estilo iOS): filas finas, cabecera corta.
+    readonly property real dockMenuHeaderHeight: 34 * u
+    readonly property real dockMenuRowHeight: 44 * u
 
     property real dockSwapFade: 1
     SequentialAnimation {
@@ -1828,16 +2035,21 @@ Item {
     // Preset óptico ÚNICO de la cápsula, el botón InGe IA y el Quick Bubble.
     // Cristal BLANCO transparente: tinte blanco de opacidad muy baja (la
     // transparencia la da el muestreo del fondo real), sin velo oscuro.
-    readonly property color dockGlassTint: Qt.rgba(1, 1, 1, 0.12)
+    // Legibilidad ÚNICA del Dock compartido (cápsula, InGe IA y Quick Bubble en
+    // Home, Calicatas, Rendiciones, InGeDrive y Earth): el cristal blanco puro no
+    // separaba los glifos blancos de fondos claros ni de fotos con detalle. Un
+    // velo azul marino corporativo bajo (#151A30 al 22 %) da contraste en fondos
+    // claros y apenas cambia los oscuros; sigue siendo vidrio con refracción.
+    readonly property color dockGlassTint: darkTheme ? Qt.rgba(12 / 255, 16 / 255, 26 / 255, 0.78) : Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.22)
     readonly property real dockGlassRefraction: 6 * u        // lente en el borde
     readonly property real dockGlassSpecular: 0.55           // filo y brillo superior
     readonly property real dockGlassBevel: 14 * u            // zona curva del borde
     readonly property real dockGlassContrast: 0              // sin «smoked»: era la película gris
-    readonly property color dockGlassEdge: Qt.rgba(1, 1, 1, 0.55)       // bisel luminoso blanco
-    readonly property real dockGlassShadowAlpha: 0.14                   // sombra exterior suave
+    readonly property color dockGlassEdge: darkTheme ? Qt.rgba(1, 1, 1, 0.22) : Qt.rgba(1, 1, 1, 0.55)       // bisel luminoso blanco
+    readonly property real dockGlassShadowAlpha: 0.22                   // separación del fondo
     // Legibilidad sin oscurecer el cristal: contorno muy fino de los glifos y
     // textos blancos del Dock (se dibuja con el propio texto, sin pasadas GPU).
-    readonly property color dockGlyphOutline: Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.50)
+    readonly property color dockGlyphOutline: Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.80)
     readonly property color dockSeparatorColor: Qt.rgba(130 / 255, 140 / 255, 160 / 255, 0.55)
     readonly property real dockGlassFrost: 2.5 * u           // esmerilado homogéneo
     readonly property var dockGlassUi: dockBackdropSource !== null ? dockBackdrop : home
@@ -1899,7 +2111,14 @@ Item {
         }
     }
 
-    // Tocar fuera cierra el menú sin ejecutar nada.
+    // Tocar fuera cierra el menú sin ejecutar nada; el fondo se atenúa (3D Touch).
+    Rectangle {
+        z: 60
+        anchors.fill: parent
+        color: "#0A1020"
+        opacity: 0.30 * dockMenuBox.shown
+        visible: opacity > 0.001
+    }
     MouseArea {
         z: 61
         anchors.fill: parent
@@ -2358,9 +2577,9 @@ Item {
         id: blur
         anchors.fill: homeContent
         source: homeContent
-        blurEnabled: true
-        blurMax: 48
-        blur: Math.max(home.blurAmount, 0.3 * home.overlayLevel)
+        blurEnabled: home.liquidGlass
+        blurMax: 64
+        blur: Math.max(home.blurAmount, 0.85 * home.overlayLevel)   // 3D Touch: desenfoque marcado
         visible: home.blurAmount > 0.001 || home.overlayLevel > 0.001
     }
     property real blurAmount: 0
@@ -2480,7 +2699,7 @@ Item {
         readonly property bool hiddenForInput: home.dockMode === "subapp"
             && (Qt.inputMethod.visible
                 || (calicatasEditor.item !== null && calicatasEditor.item.dockSuppressed === true))
-        property real shown: hiddenForInput ? 0 : 1
+        property real shown: hiddenForInput || home.touchFocusActive || home.page === "settings" ? 0 : 1
         Behavior on shown { NumberAnimation { duration: home.reducedMotion ? 0 : 280; easing.type: Easing.OutCubic } }
         visible: shown > 0.01
         opacity: shown
@@ -2511,7 +2730,7 @@ Item {
             anchors.centerIn: parent
             opacity: home.dockSwapFade
             Repeater {
-                model: home.dockSlots
+                model: home.dockDisplayedSlots
                 delegate: Row {
                     required property var modelData
                     required property int index
@@ -2562,7 +2781,7 @@ Item {
                             rotation: modelData.rotate || 0
                             font.family: home.iconFamily
                             font.pixelSize: home.dockIconSize
-                            color: Qt.rgba(1, 1, 1, dockCell.active ? 1.0 : 0.82)
+                            color: Qt.rgba(1, 1, 1, dockCell.active ? 1.0 : 0.92)
                             style: Text.Outline; styleColor: home.dockGlyphOutline
                         }
                         Row {   // "Más herramientas"
@@ -2573,7 +2792,7 @@ Item {
                                 model: 3
                                 Rectangle {
                                     width: 5 * home.u; height: width; radius: width / 2
-                                    color: Qt.rgba(1, 1, 1, dockCell.active ? 1.0 : 0.82)
+                                    color: Qt.rgba(1, 1, 1, dockCell.active ? 1.0 : 0.92)
                                     border.width: 1; border.color: home.dockGlyphOutline
                                 }
                             }
@@ -2589,6 +2808,9 @@ Item {
                         MouseArea {
                             id: dockCellTap
                             property int pressGeneration: -1
+                            property string pressOwner: ""
+                            property string pressContext: ""
+                            property string pressDetailId: ""
                             property bool held: false
                             property real startX: 0
                             property real startY: 0
@@ -2597,6 +2819,10 @@ Item {
                             preventStealing: held
                             onPressed: function(mouse) {
                                 pressGeneration = home.dockGeneration
+                                pressOwner = home.dockCtx ? home.dockCtx.ownerId : ""
+                                pressContext = home.dockCtx ? home.dockCtx.contextId : ""
+                                pressDetailId = home.dockActiveDetailId()
+                                home.dockPressActive = true
                                 held = false
                                 startX = mouse.x
                                 startY = mouse.y
@@ -2617,19 +2843,23 @@ Item {
                                 pressOut.restart()
                                 held = home.dockSlotHold(modelData, pressGeneration, dockCell)
                             }
-                            onClicked: home.dockSlotTap(modelData, pressGeneration, dockCell)
+                            onClicked: home.dockSlotTap(modelData, pressGeneration, dockCell, pressOwner, pressContext, pressDetailId)
                             onReleased: {
                                 pressIn.stop()
                                 pressOut.restart()
                                 if (held)
                                     home.dockReleaseHover()
                                 held = false
+                                // onClicked se emite al soltar: actualizar el modelo
+                                // antes destruiría el delegado que aún debe despachar.
+                                Qt.callLater(home.dockFinishPress)
                             }
                             onCanceled: {
                                 pressIn.stop()
                                 pressOut.restart()
                                 held = false
                                 home.dockHoverIndex = -1
+                                home.dockFinishPress()
                             }
                         }
                         Accessible.role: Accessible.Button
@@ -2646,6 +2876,10 @@ Item {
     Rectangle {
         id: iaButton
         z: home.subAppProgress > 0.001 ? 64 : 0   // permanente en todas las subapps
+        // Se oculta con el Dock mientras hay un menú 3D Touch abierto.
+        opacity: home.touchFocusActive || home.page === "settings" ? 0 : 1
+        visible: opacity > 0.01
+        Behavior on opacity { NumberAnimation { duration: home.reducedMotion ? 0 : 220; easing.type: Easing.OutCubic } }
         width: 68 * home.u
         height: width
         radius: width / 2
@@ -3283,5 +3517,54 @@ Item {
                     && renditionsLoader.item.assistantOpen(index, proposal, assistantController))
                 assistantSheet.close()
         }
+    }
+
+    // ================================================ 3D Touch (foco global)
+    // Al abrir el menú de una caja de Rendiciones: toda la pantalla se desenfoca
+    // (también encabezado, Dock e InGe IA, que además se ocultan), la caja
+    // presionada se muestra nítida y elevada, y el menú se aloja encima.
+    readonly property Item renditionsTouchTile: page === "rendiciones" && renditionsLoader.item
+                                                && renditionsLoader.item.touchFocusItem !== undefined
+                                                ? renditionsLoader.item.touchFocusItem : null
+    readonly property bool touchFocusActive: renditionsTouchTile !== null
+                                             || (menuKey.length > 0 && overlayLevel > 0.01)
+    Item {
+        id: touchFocusLayer
+        objectName: "touchFocusLayer"
+        anchors.fill: parent
+        z: 66
+        property real level: home.renditionsTouchTile !== null ? 1 : 0
+        Behavior on level { NumberAnimation { duration: home.reducedMotion ? 0 : (touchFocusLayer.level < 0.5 ? 240 : 180); easing.type: Easing.OutCubic } }
+        visible: level > 0.01 && renditionsLoader.visible
+        MultiEffect {
+            anchors.fill: parent
+            source: renditionsLoader
+            autoPaddingEnabled: false
+            blurEnabled: home.liquidGlass
+            blurMax: 64
+            blur: 0.9 * touchFocusLayer.level
+            saturation: -0.15 * touchFocusLayer.level
+        }
+        Rectangle { anchors.fill: parent; color: "#0A1020"; opacity: 0.22 * touchFocusLayer.level }
+        MouseArea { anchors.fill: parent }          // el contenido desenfocado no recibe toques
+        ShaderEffectSource {                         // copia viva y nítida de la caja presionada
+            id: liftedTile
+            readonly property Item tile: home.renditionsTouchTile
+            readonly property point origin: tile ? tile.mapToItem(touchFocusLayer, 0, 0) : Qt.point(0, 0)
+            sourceItem: tile
+            live: true
+            visible: tile !== null
+            x: origin.x; y: origin.y
+            width: tile ? tile.width : 0
+            height: tile ? tile.height : 0
+            scale: 1 + 0.04 * touchFocusLayer.level
+            opacity: touchFocusLayer.level
+        }
+    }
+    Item {                                           // anfitrión de los menús 3D Touch de las subapps
+        id: touchMenuHost
+        objectName: "touchMenuHost"
+        anchors.fill: parent
+        z: 67
     }
 }

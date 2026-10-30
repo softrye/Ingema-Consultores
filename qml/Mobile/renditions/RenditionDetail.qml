@@ -1,18 +1,10 @@
 import QtQuick
-import QtQuick.Shapes
 import "RStyle.js" as S
 
-// Rendición abierta = RESUMEN TOTAL (2026-10-15). Una sola pantalla ejecutiva
-// con datos reales: declarado/validado, conteos de gastos, estado de gastos
-// (dona), finanzas, documentos y revisión. Gastos, Finanzas, Documentos y
-// Revisión siguen existentes como secciones secundarias (se abren desde los
-// bloques y desde el Dock contextual); Atrás vuelve al resumen.
-// Sin botones de sincronización: deslizar hacia abajo ejecuta el `sync` real
-// en modo silencioso (mismo patrón que la lista principal).
-// La fuente es el estado publicado por el bridge para la selección (`select`).
+// Vista inicial aprobada: resumen compacto y gastos expandibles.
+// Finanzas, documentos y revisión conservan sus componentes y contratos.
 Item {
     id: page
-    readonly property bool renderInteractionBusy: false
     property var app
     property string localId: ""
     property int selectionToken: 0                    // apertura (select) que muestra esta página
@@ -20,6 +12,7 @@ Item {
     readonly property var ctl: app.ctl
     readonly property bool ownHeader: true              // el shell no dibuja su barra
     readonly property bool isRenditionDetail: true      // contexto de Dock «rendición abierta»
+    readonly property bool renderInteractionBusy: expensesTabItem.renderInteractionBusy
     readonly property bool selected: String(app.st.selectedLocalId || "") === localId
     readonly property var current: {
         if (selected && app.st.current && app.st.current.localId === localId) return app.st.current
@@ -43,8 +36,53 @@ Item {
     readonly property bool editable: writable && !conflict && !reconciling
     readonly property string code: S.text_(current, "visibleCode", "visible_code")
     readonly property string title: S.renditionDisplayName(S.text_(current, "displayName", "display_name"), code)
-    // "summary" o una sección secundaria: expenses | financial | documents | review
-    property string tab: "summary"
+    // Gastos es la vista inicial; las secciones existentes siguen accesibles.
+    property string tab: "expenses"
+
+    // ---- Transición entre secciones (direccional, con paralaje y profundidad).
+    // La sección nueva entra desde el lado del icono elegido (OutQuint, 460 ms)
+    // mientras la anterior retrocede, se reduce y se desvanece (OutCubic, 280 ms).
+    // Sólo transformaciones y opacidad (sin blur ni relayout): apto para el A12.
+    // Movimiento reducido: cambio directo.
+    readonly property var sectionOrder: ["expenses", "financial", "documents", "review"]
+    property string shownTab: "expenses"            // sección asentada (antes del cambio)
+    property string leavingTab: ""
+    property real sectionDir: 1
+    property real tIn: 1
+    property real tOut: 1
+    readonly property bool sectionAnimating: sectionAnim.running
+    onTabChanged: {
+        if (tab === shownTab) return
+        if (ui.reducedMotion === true) { leavingTab = ""; shownTab = tab; tIn = 1; tOut = 1; return }
+        sectionAnim.stop()
+        sectionDir = sectionOrder.indexOf(tab) >= sectionOrder.indexOf(shownTab) ? 1 : -1
+        leavingTab = shownTab
+        shownTab = tab
+        tIn = 0; tOut = 0
+        sectionAnim.start()
+    }
+    ParallelAnimation {
+        id: sectionAnim
+        NumberAnimation { target: page; property: "tIn"; from: 0; to: 1; duration: 460; easing.type: Easing.OutQuint }
+        NumberAnimation { target: page; property: "tOut"; from: 0; to: 1; duration: 280; easing.type: Easing.OutCubic }
+        onFinished: page.leavingTab = ""
+    }
+    function sectionVisible(key) { return tab === key || (leavingTab === key && tOut < 1) }
+    function sectionX(key, w) {
+        if (key === tab) return w * 0.30 * sectionDir * (1 - tIn)
+        if (key === leavingTab) return -w * 0.18 * sectionDir * tOut
+        return 0
+    }
+    function sectionOpacity(key) {
+        if (key === tab) return Math.min(1, 0.15 + tIn * 1.1)
+        if (key === leavingTab) return Math.max(0, 1 - tOut * 1.25)
+        return 1
+    }
+    function sectionScale(key) {
+        if (key === tab) return 0.97 + 0.03 * tIn
+        if (key === leavingTab) return 1 - 0.04 * tOut
+        return 1
+    }
     readonly property var sectionTitles: ({ expenses: "Gastos", financial: "Finanzas", documents: "Documentos", review: "Revisión" })
 
     // ------------------------------------------------------------- Datos reales
@@ -77,6 +115,9 @@ Item {
         if (parts.length) return parts.join("  •  ")
         return current.projectIds !== undefined ? "Sin proyecto" : "Proyecto por cargar"
     }
+
+    readonly property string clientName: S.text_(current, "clientName", "client_name") || S.text_(project, "clientName", "client_name")
+    readonly property string locationName: S.text_(current, "location", "locationName") || S.text_(project, "location", "locationName")
 
     // ----------------------------------------- Acción contextual (determinista)
     // Prioridad fija y explicable, sólo con datos reales:
@@ -128,8 +169,10 @@ Item {
     }
 
     function showSection(name) { tab = name; app.closeMenus() }
+    readonly property var expensesTab: expensesTabItem          // Buscar del Dock (filtro/orden reales)
     function handleBack() {
-        if (tab !== "summary") { tab = "summary"; replayIntro(); return true }
+        if (tab === "expenses" && expensesTabItem.handleBack()) return true
+        if (tab !== "expenses") { tab = "expenses"; return true }
         return false
     }
 
@@ -147,7 +190,7 @@ Item {
 
     // ------------------------------------------------- Deslizar para actualizar
     readonly property real pullThreshold: 76 * ui.u
-    readonly property real pull: Math.max(0, flick.originY - flick.contentY - flick.topMargin)
+    readonly property real pull: page.tab === "review" ? reviewTabItem.pull : expensesTabItem.pull
     readonly property bool syncBusy: app.busy("sync") || app.phase !== "IDLE"
     property bool refreshing: false
     readonly property var life: ({ alive: true })
@@ -234,56 +277,174 @@ Item {
     Item {
         id: header
         width: parent.width
-        height: page.ui.topInset + headerText.height + 34 * page.ui.u
-        Item {                                              // retroceso (patrón de Calicatas)
-            x: 10 * page.ui.u
+        height: page.ui.topInset + Math.max(headerText.height, 48 * page.ui.u) + 74 * page.ui.u
+        Rectangle {
+            x: page.ui.gutter
             y: page.ui.topInset + 4 * page.ui.u
-            width: 48 * page.ui.u; height: 48 * page.ui.u
+            width: 42 * page.ui.u; height: width; radius: width / 2
+            color: S.cardGlass
+            border.width: 1; border.color: S.edge(1)
             Text {
                 anchors.centerIn: parent
                 text: String.fromCharCode(0xE06E)
-                font.family: page.ui.iconFamily
-                font.pixelSize: 28 * page.ui.u
-                color: S.text
-                scale: backTap.pressed ? 0.88 : 1
-                Behavior on scale { NumberAnimation { duration: 110 } }
+                font.family: page.ui.iconFamily; font.pixelSize: 26 * page.ui.u
+                color: S.navy
             }
-            MouseArea { id: backTap; anchors.fill: parent; onClicked: if (!page.handleBack()) page.app.closePage() }
+            MouseArea { anchors.fill: parent; anchors.margins: -1 * page.ui.u; onClicked: if (!page.handleBack()) page.app.closePage() }
             Accessible.role: Accessible.Button
             Accessible.name: "Atrás"
         }
         Column {
             id: headerText
-            x: 60 * page.ui.u
-            width: parent.width - 120 * page.ui.u
-            y: page.ui.topInset + 10 * page.ui.u
-            spacing: 4 * page.ui.u
+            x: page.ui.gutter + 54 * page.ui.u
+            width: parent.width - x - page.ui.gutter
+            y: page.ui.topInset + 6 * page.ui.u
+            spacing: 6 * page.ui.u
             opacity: page.reveal(0)
             Text {
+                // Título completo: se ajusta al ancho antes de recortarse (sin «Prueba Usabilid…»).
                 width: parent.width
-                horizontalAlignment: Text.AlignHCenter
                 text: page.title
-                color: S.text
-                elide: Text.ElideRight
-                font.family: page.ui.fontFamily; font.pixelSize: 30 * page.ui.u; font.weight: Font.Bold
+                color: S.text; elide: Text.ElideRight
+                fontSizeMode: Text.HorizontalFit; minimumPixelSize: 16 * page.ui.u
+                font.family: page.ui.fontFamily; font.pixelSize: 24 * page.ui.u; font.weight: Font.Bold
             }
             Text {
                 width: parent.width
-                horizontalAlignment: Text.AlignHCenter
-                text: page.tab === "summary" ? "Período " + S.period(page.current.periodStart, page.current.periodEnd)
-                                             : page.sectionTitles[page.tab]
-                color: page.tab === "summary" ? S.muted : S.corporateBlue
-                font.family: page.ui.fontFamily; font.pixelSize: 16 * page.ui.u
-                font.weight: page.tab === "summary" ? Font.Normal : Font.DemiBold
+                text: [page.clientName.length ? "Cliente: " + page.clientName : "",
+                       page.locationName.length ? "Ubicación: " + page.locationName : ""].filter(function(v) { return v.length }).join("  |  ")
+                visible: text.length > 0
+                color: S.muted; wrapMode: Text.WordWrap
+                font.family: page.ui.fontFamily; font.pixelSize: 11 * page.ui.u
             }
             Text {
-                width: parent.width
-                visible: page.tab === "summary"
-                horizontalAlignment: Text.AlignHCenter
-                text: page.projectLine
-                color: S.muted
-                elide: Text.ElideRight
-                font.family: page.ui.fontFamily; font.pixelSize: 16 * page.ui.u
+                width: parent.width; visible: page.tab !== "expenses"
+                text: page.projectLine; color: S.muted; elide: Text.ElideRight
+                font.family: page.ui.fontFamily; font.pixelSize: 12 * page.ui.u
+            }
+            Rectangle {                               // comentario del revisor (último), como en la Web
+                readonly property var note: (page.app.reviewNotes || []).length ? page.app.reviewNotes[page.app.reviewNotes.length - 1] : null
+                visible: note !== null && String(page.current.status || "") === "OBSERVADO"
+                width: parent.width; height: visible ? noteText.implicitHeight + 16 * page.ui.u : 0
+                radius: 12 * page.ui.u; color: Qt.rgba(242 / 255, 178 / 255, 27 / 255, S.dark ? 0.18 : 0.14)
+                border.width: 1; border.color: Qt.rgba(242 / 255, 178 / 255, 27 / 255, 0.45)
+                Text { id: noteText; x: 10 * page.ui.u; width: parent.width - 20 * page.ui.u; anchors.verticalCenter: parent.verticalCenter
+                       wrapMode: Text.WordWrap; maximumLineCount: 3; elide: Text.ElideRight; color: S.text
+                       text: parent.note ? "Observación del revisor: " + String(parent.note.body || "") : ""
+                       font.family: page.ui.fontFamily; font.pixelSize: 12.5 * page.ui.u }
+                MouseArea { anchors.fill: parent; onClicked: page.app.dockCommand("renditions.review.notes") }
+            }
+            Row {                                     // en vivo: quién más tiene abierta la rendición
+                visible: (page.app.livePeers || []).length > 0
+                spacing: 8 * page.ui.u
+                Row {
+                    spacing: -6 * page.ui.u
+                    Repeater {
+                        model: (page.app.livePeers || []).slice(0, 3)
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: 24 * page.ui.u; height: width; radius: width / 2
+                            color: S.accent; border.width: 2; border.color: S.background
+                            Text { anchors.centerIn: parent; text: String(parent.modelData.initials || "?"); color: S.onAccent
+                                   font.family: page.ui.fontFamily; font.pixelSize: 9.5 * page.ui.u; font.weight: Font.Bold }
+                        }
+                    }
+                }
+                Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 7 * page.ui.u; height: width; radius: width / 2
+                            color: page.app.liveJoined ? "#3DA35D" : "#E8A21A" }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: {
+                        var p = page.app.livePeers || []
+                        var first = String((p[0] || {}).name || "").split(" ")[0]
+                        return p.length === 1 ? first + " también la tiene abierta" : p.length + " personas la tienen abierta"
+                    }
+                    color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 11.5 * page.ui.u
+                }
+            }
+        }
+        // Sin botones de cabecera: Documentos está en la barra de secciones e
+        // Información en el Dock (se evitan accesos duplicados).
+        Rectangle {
+            id: sectionBar
+            objectName: "renditionSectionBar"
+            x: page.ui.gutter; width: parent.width - 2 * x
+            anchors.bottom: parent.bottom; anchors.bottomMargin: 12 * page.ui.u
+            height: 50 * page.ui.u; radius: height / 2
+            color: "transparent"
+            Rectangle {                                  // píldora retirada: sólo brilla el icono
+                id: sectionPill
+                visible: false
+                readonly property real cell: sectionLayout.width / 4
+                readonly property int index: Math.max(0, page.sectionOrder.indexOf(page.tab))
+                property real stretch: 0
+                y: 3 * page.ui.u
+                height: parent.height - 6 * page.ui.u
+                radius: height / 2
+                x: 3 * page.ui.u + index * cell - stretch * cell * 0.10
+                width: cell + stretch * cell * 0.20
+                color: S.glass(0.92)
+                border.width: 1; border.color: Qt.rgba(6 / 255, 84 / 255, 162 / 255, 0.10)
+                Behavior on x { enabled: page.ui.reducedMotion !== true
+                                SpringAnimation { spring: 4.2; damping: 0.36; epsilon: 0.25 } }
+                onIndexChanged: if (page.ui.reducedMotion !== true) pillStretch.restart()
+                SequentialAnimation {
+                    id: pillStretch
+                    NumberAnimation { target: sectionPill; property: "stretch"; to: 1; duration: 120; easing.type: Easing.OutQuad }
+                    NumberAnimation { target: sectionPill; property: "stretch"; to: 0; duration: 340; easing.type: Easing.OutBack; easing.overshoot: 1.6 }
+                }
+                Rectangle {                              // subrayado que acompaña a la píldora
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.bottom: parent.bottom
+                    width: parent.width - 20 * page.ui.u
+                    height: 3 * page.ui.u; radius: height / 2
+                    color: S.accentSoft
+                }
+            }
+            Row {
+                id: sectionLayout
+                anchors.fill: parent; anchors.margins: 3 * page.ui.u
+                Repeater {
+                    model: ["expenses", "financial", "documents", "review"]
+                    delegate: Rectangle {
+                        id: sectionTile
+                        required property string modelData
+                        objectName: "renditionSection:" + modelData
+                        readonly property bool selected: page.tab === modelData
+                        readonly property int glyph: modelData === "expenses" ? 0xE086
+                            : modelData === "financial" ? 0xE06B : modelData === "documents" ? 0xE12D : 0xE16A
+                        width: sectionLayout.width / 4; height: sectionLayout.height; radius: height / 2
+                        color: "transparent"
+                        // Barra sólo de iconos: el nombre queda en Accessible.name (lectores de pantalla).
+                        Rectangle {                      // brillo suave del icono activo
+                            anchors.centerIn: parent
+                            width: 40 * page.ui.u; height: width; radius: width / 2
+                            color: S.accent
+                            opacity: sectionTile.selected ? 0.14 : 0
+                            Behavior on opacity { NumberAnimation { duration: 220 } }
+                        }
+                        Text { anchors.centerIn: parent; text: String.fromCharCode(sectionTile.glyph)
+                               font.family: page.ui.iconFamily; font.pixelSize: 22 * page.ui.u
+                               color: sectionTile.selected ? S.accent : S.muted
+                               scale: sectionTile.selected ? 1.12 : (tileTap.pressed ? 0.9 : 1)
+                               Behavior on color { ColorAnimation { duration: 220 } }
+                               Behavior on scale { enabled: page.ui.reducedMotion !== true
+                                                   NumberAnimation { duration: 260; easing.type: Easing.OutBack; easing.overshoot: 2.0 } } }
+                        MouseArea {
+                            id: tileTap
+                            anchors.fill: parent; enabled: !page.app.modalOpen
+                            onClicked: {
+                                if (page.tab === sectionTile.modelData) return
+                                page.app.haptic("selection")
+                                page.expensesTab.persistExpanded()
+                                page.showSection(sectionTile.modelData)
+                            }
+                        }
+                        Accessible.role: Accessible.Button
+                        Accessible.name: page.sectionTitles[sectionTile.modelData]
+                        Accessible.checked: sectionTile.selected
+                    }
+                }
             }
         }
     }
@@ -294,421 +455,25 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        visible: page.tab !== "summary"
-        RenditionExpenses { objectName: "expensesTab"; anchors.fill: parent; visible: page.tab === "expenses"; detail: page }
-        RenditionFinancial { objectName: "financialTab"; anchors.fill: parent; visible: page.tab === "financial"; detail: page }
-        RenditionDocuments { objectName: "documentsTab"; anchors.fill: parent; visible: page.tab === "documents"; detail: page }
-        RenditionReview { objectName: "reviewTab"; anchors.fill: parent; visible: page.tab === "review"; detail: page }
+        visible: true
+        id: sectionStage
+        clip: page.sectionAnimating
+        RenditionExpenses { id: expensesTabItem; objectName: "expensesTab"; width: parent.width; height: parent.height; detail: page
+                            visible: page.sectionVisible("expenses"); x: page.sectionX("expenses", width)
+                            opacity: page.sectionOpacity("expenses"); scale: page.sectionScale("expenses")
+                            z: page.tab === "expenses" ? 1 : 0 }
+        RenditionFinancial { objectName: "financialTab"; width: parent.width; height: parent.height; detail: page
+                             visible: page.sectionVisible("financial"); x: page.sectionX("financial", width)
+                             opacity: page.sectionOpacity("financial"); scale: page.sectionScale("financial")
+                             z: page.tab === "financial" ? 1 : 0 }
+        RenditionDocuments { objectName: "documentsTab"; width: parent.width; height: parent.height; detail: page
+                             visible: page.sectionVisible("documents"); x: page.sectionX("documents", width)
+                             opacity: page.sectionOpacity("documents"); scale: page.sectionScale("documents")
+                             z: page.tab === "documents" ? 1 : 0 }
+        RenditionReview { id: reviewTabItem; objectName: "reviewTab"; width: parent.width; height: parent.height; detail: page
+                          visible: page.sectionVisible("review"); x: page.sectionX("review", width)
+                          opacity: page.sectionOpacity("review"); scale: page.sectionScale("review")
+                          z: page.tab === "review" ? 1 : 0 }
     }
 
-    // ------------------------------------------------------------ Resumen total
-    // Bloque del resumen: SOLO informativo (sin MouseArea, sin señales): los
-    // toques y arrastres llegan íntegros al Flickable (scroll y actualizar).
-    // Gastos, Finanzas, Documentos y Revisión se abren sólo desde el Dock.
-    component Block: Item {
-        id: block
-        property int order: 0
-        default property alias content: blockBody.data
-        width: parent ? parent.width : 0
-        height: blockBody.implicitHeight + 28 * page.ui.u
-        opacity: page.reveal(order)
-        transform: Translate { y: (1 - page.reveal(block.order)) * 18 * page.ui.u }
-        Column { id: blockBody; x: 0; y: 14 * page.ui.u; width: parent.width; spacing: 10 * page.ui.u }
-    }
-    component Divider: Rectangle { width: parent ? parent.width : 0; height: 1; color: S.ink(0.08) }
-    component IconBadge: Rectangle {
-        property int glyph: 0xE0CC
-        property color tone: S.corporateBlue
-        width: 54 * page.ui.u; height: width; radius: width / 2
-        color: Qt.rgba(tone.r, tone.g, tone.b, 0.10)
-        Text { anchors.centerIn: parent; text: String.fromCharCode(parent.glyph); font.family: page.ui.iconFamily; font.pixelSize: 26 * page.ui.u; color: parent.tone }
-    }
-    component Stat: Rectangle {
-        id: stat
-        property int value: 0
-        property string label: ""
-        property color tone: S.corporateBlue
-        property int glyph: 0xE0CC
-        width: (summaryColumn.width - 3 * 8 * page.ui.u) / 4
-        height: 104 * page.ui.u
-        radius: 16 * page.ui.u
-        color: Qt.rgba(tone.r, tone.g, tone.b, 0.08)
-        Column {
-            anchors.centerIn: parent
-            spacing: 4 * page.ui.u
-            Text { anchors.horizontalCenter: parent.horizontalCenter; text: String.fromCharCode(stat.glyph); font.family: page.ui.iconFamily; font.pixelSize: 24 * page.ui.u; color: stat.tone }
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: page.expensesKnown ? Math.round(stat.value * page.reveal(2)) : "—"
-                color: S.text
-                font.family: page.ui.fontFamily; font.pixelSize: 24 * page.ui.u; font.weight: Font.DemiBold
-            }
-            Text { anchors.horizontalCenter: parent.horizontalCenter; text: stat.label; color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 13 * page.ui.u }
-        }
-    }
-    component LegendRow: Item {
-        property color tone: S.muted
-        property string label: ""
-        property int value: 0
-        width: parent ? parent.width : 0
-        height: 26 * page.ui.u
-        Rectangle { width: 14 * page.ui.u; height: width; radius: width / 2; color: parent.tone; anchors.verticalCenter: parent.verticalCenter }
-        Text { x: 26 * page.ui.u; anchors.verticalCenter: parent.verticalCenter; text: parent.label; color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u }
-        Text {
-            anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-            text: page.expensesKnown ? String(parent.value) : "—"
-            color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 16 * page.ui.u; font.weight: Font.DemiBold
-        }
-    }
-    component Check: Row {
-        property bool ok: false
-        property string label: ""
-        spacing: 10 * page.ui.u
-        Rectangle {
-            width: 20 * page.ui.u; height: width; radius: width / 2
-            color: parent.ok ? S.corporateGreen : S.ink(0.12)
-            anchors.verticalCenter: parent.verticalCenter
-            Text { anchors.centerIn: parent; text: String.fromCharCode(0xE06C); font.family: page.ui.iconFamily; font.pixelSize: 13 * page.ui.u; color: "#FFFFFF" }
-        }
-        Text { text: parent.label; color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u; anchors.verticalCenter: parent.verticalCenter }
-    }
-
-    // La superficie redondeada es ESTÁTICA; el contenido se desplaza en un
-    // visor interior inscrito (20u laterales, 14u verticales dentro del radio
-    // de 28u): el recorte rectangular del Flickable nunca alcanza las esquinas
-    // (el punto (20,14) queda a 16u del centro del arco, dentro del radio).
-    // Sin máscaras ni capturas. Termina sobre el área reservada al Dock global.
-    Rectangle {
-        id: card
-        anchors.top: header.bottom
-        anchors.topMargin: 4 * page.ui.u
-        x: 12 * page.ui.u
-        width: parent.width - 24 * page.ui.u
-        readonly property real maxHeight: Math.max(160 * page.ui.u,
-            page.height - header.height - 4 * page.ui.u - page.ui.dockArea - 8 * page.ui.u)
-        height: Math.min(summaryColumn.height + 36 * page.ui.u, maxHeight)
-        visible: page.tab === "summary"
-        radius: 28 * page.ui.u
-        color: Qt.rgba(1, 1, 1, 0.80)
-        border.width: 1
-        border.color: Qt.rgba(1, 1, 1, 0.95)
-
-        Flickable {
-            id: flick
-            anchors.fill: parent
-            anchors.leftMargin: 20 * page.ui.u
-            anchors.rightMargin: 20 * page.ui.u
-            anchors.topMargin: 14 * page.ui.u
-            anchors.bottomMargin: 14 * page.ui.u
-            contentWidth: width
-            contentHeight: summaryColumn.height + 8 * page.ui.u
-            // Vertical explícito: deslizar para actualizar funciona aunque el
-            // resumen quepa entero en la tarjeta.
-            flickableDirection: Flickable.VerticalFlick
-            boundsBehavior: Flickable.DragOverBounds
-            topMargin: page.refreshing ? 52 * page.ui.u : 0
-            Behavior on topMargin { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-            clip: true
-            onDragEnded: if (page.pull >= page.pullThreshold) page.refreshFromPull()
-
-            Column {
-                id: summaryColumn
-                width: parent.width
-                spacing: 4 * page.ui.u
-
-                Text {
-                    width: parent.width
-                    visible: !page.exists
-                    topPadding: 10 * page.ui.u
-                    text: "La rendición ya no está disponible en esta cuenta."
-                    color: S.danger; wrapMode: Text.WordWrap
-                    font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u
-                }
-                // Sólo situaciones que requieren acción: conflicto CAS REAL o un rechazo
-                // del servidor. La pérdida de conexión nunca llega aquí (aura roja).
-                Text {
-                    width: parent.width
-                    readonly property string rejection: page.ctl.visibleSyncError(String(page.current.syncError || ""))
-                    visible: page.conflict || rejection.length > 0
-                    topPadding: 10 * page.ui.u
-                    // Línea de estado (no recuadro rojo): el detalle, la causa y la acción
-                    // de recuperación están en Estado de Rendiciones (toque).
-                    text: (page.conflict ? "Conflicto con el servidor: desliza hacia abajo para traer la versión vigente; tus cambios locales se conservan."
-                                         : "El servidor rechazó un cambio: " + page.ctl.errorText("", rejection))
-                          + "  ·  Ver estado"
-                    color: S.navy; wrapMode: Text.WordWrap
-                    font.family: page.ui.fontFamily; font.pixelSize: 13 * page.ui.u
-                    MouseArea { anchors.fill: parent; onClicked: if (page.app.toggleStatus !== undefined) page.app.toggleStatus() }
-                }
-
-                // ---- Declarado / validado
-                Block {
-                    order: 1
-                    Row {
-                        width: parent.width
-                        spacing: 16 * page.ui.u
-                        IconBadge { glyph: 0xE0CC }
-                        Column {
-                            width: parent.width - 70 * page.ui.u
-                            spacing: 2 * page.ui.u
-                            Text { text: "Declarado"; color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u }
-                            Text {
-                                width: parent.width
-                                text: page.expensesKnown ? page.ctl.formatCents(page.totals.penCents, "PEN") + "  •  " + page.ctl.formatCents(page.totals.usdCents, "USD")
-                                                         : "Gastos por cargar"
-                                color: S.text; elide: Text.ElideRight
-                                font.family: page.ui.fontFamily; font.pixelSize: 25 * page.ui.u; font.weight: Font.Bold
-                            }
-                            Text { topPadding: 6 * page.ui.u; text: "Validado"; color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u }
-                            Text {
-                                width: parent.width
-                                text: page.expensesKnown ? page.ctl.formatCents(page.totals.validatedPenCents, "PEN") + "  •  " + page.ctl.formatCents(page.totals.validatedUsdCents, "USD") : "—"
-                                color: S.text; elide: Text.ElideRight
-                                font.family: page.ui.fontFamily; font.pixelSize: 21 * page.ui.u; font.weight: Font.DemiBold
-                            }
-                        }
-                    }
-                }
-                Divider {}
-
-                // ---- Conteos
-                Item {
-                    width: parent.width
-                    height: 104 * page.ui.u + 24 * page.ui.u
-                    opacity: page.reveal(2)
-                    transform: Translate { y: (1 - page.reveal(2)) * 18 * page.ui.u }
-                    Row {
-                        y: 12 * page.ui.u
-                        spacing: 8 * page.ui.u
-                        Stat { value: page.totals.count || 0; label: "gastos"; glyph: 0xE0CC; tone: S.corporateBlue }
-                        Stat { value: page.totals.pending || 0; label: "pendientes"; glyph: 0xE1F5; tone: S.warning }
-                        Stat { value: page.totals.observed || 0; label: "observados"; glyph: 0xE0F9; tone: S.danger }
-                        Stat { value: page.totals.validated || 0; label: "validados"; glyph: 0xE06C; tone: S.corporateGreen }
-                    }
-                }
-
-                // ---- Estado de gastos (dona animada)
-                Block {
-                    order: 3
-                    Text { text: "Estado de gastos"; color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 18 * page.ui.u; font.weight: Font.DemiBold }
-                    Row {
-                        width: parent.width
-                        spacing: 22 * page.ui.u
-                        Item {
-                            id: donut
-                            width: 132 * page.ui.u; height: width
-                            readonly property real r: 52 * page.ui.u
-                            readonly property real cx: width / 2
-                            readonly property real total: Math.max(1, Number(page.totals.count || 0))
-                            readonly property real t: page.reveal(3)
-                            readonly property real aValid: 360 * Number(page.totals.validated || 0) / total * t
-                            readonly property real aPending: 360 * Number(page.totals.pending || 0) / total * t
-                            readonly property real aObserved: 360 * Number(page.totals.observed || 0) / total * t
-                            Shape {
-                                anchors.fill: parent
-                                ShapePath {
-                                    strokeColor: S.track; strokeWidth: 20 * page.ui.u; fillColor: "transparent"
-                                    PathAngleArc { centerX: donut.cx; centerY: donut.cx; radiusX: donut.r; radiusY: donut.r; startAngle: 0; sweepAngle: 360 }
-                                }
-                                ShapePath {
-                                    strokeColor: S.corporateGreen; strokeWidth: 20 * page.ui.u; fillColor: "transparent"
-                                    PathAngleArc { centerX: donut.cx; centerY: donut.cx; radiusX: donut.r; radiusY: donut.r; startAngle: -90; sweepAngle: donut.aValid }
-                                }
-                                ShapePath {
-                                    strokeColor: S.warning; strokeWidth: 20 * page.ui.u; fillColor: "transparent"
-                                    PathAngleArc { centerX: donut.cx; centerY: donut.cx; radiusX: donut.r; radiusY: donut.r; startAngle: -90 + donut.aValid; sweepAngle: donut.aPending }
-                                }
-                                ShapePath {
-                                    strokeColor: S.danger; strokeWidth: 20 * page.ui.u; fillColor: "transparent"
-                                    PathAngleArc { centerX: donut.cx; centerY: donut.cx; radiusX: donut.r; radiusY: donut.r; startAngle: -90 + donut.aValid + donut.aPending; sweepAngle: donut.aObserved }
-                                }
-                            }
-                            Column {
-                                anchors.centerIn: parent
-                                Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    text: page.expensesKnown ? Math.round(Number(page.totals.count || 0) * donut.t) : "—"
-                                    color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 26 * page.ui.u; font.weight: Font.Bold
-                                }
-                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: "gastos"; color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 14 * page.ui.u }
-                            }
-                        }
-                        Column {
-                            width: parent.width - donut.width - 22 * page.ui.u
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: 8 * page.ui.u
-                            LegendRow { tone: S.corporateGreen; label: "Validados"; value: page.totals.validated || 0 }
-                            LegendRow { tone: S.warning; label: "Pendientes"; value: page.totals.pending || 0 }
-                            LegendRow { tone: S.danger; label: "Observados"; value: page.totals.observed || 0 }
-                            Text {
-                                width: parent.width
-                                visible: page.completion.known === true
-                                text: "Completitud " + Math.round(Number(page.completion.percent || 0) * donut.t) + " %"
-                                color: S.corporateBlue
-                                font.family: page.ui.fontFamily; font.pixelSize: 14 * page.ui.u; font.weight: Font.DemiBold
-                            }
-                        }
-                    }
-                }
-                Divider {}
-
-                // ---- Finanzas
-                Block {
-                    order: 4
-                    Row {
-                        width: parent.width
-                        spacing: 16 * page.ui.u
-                        IconBadge { glyph: 0xE529 }
-                        Column {
-                            width: parent.width - 70 * page.ui.u
-                            spacing: 6 * page.ui.u
-                            Text { text: "Finanzas"; color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 18 * page.ui.u; font.weight: Font.DemiBold }
-                            Row {
-                                width: parent.width
-                                spacing: 10 * page.ui.u
-                                Column {
-                                    width: (parent.width - 20 * page.ui.u) / 3
-                                    Text { text: "Fondo total"; color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 13 * page.ui.u }
-                                    Text {
-                                        width: parent.width; wrapMode: Text.WordWrap
-                                        text: !page.balance.enabled ? "Sin fondo"
-                                              : page.ctl.formatCents(page.balance.fundPenCents, "PEN")
-                                                + (Number(page.balance.fundUsdCents || 0) !== 0 ? "\n" + page.ctl.formatCents(page.balance.fundUsdCents, "USD") : "")
-                                        color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 16 * page.ui.u; font.weight: Font.DemiBold
-                                    }
-                                }
-                                Column {
-                                    width: (parent.width - 20 * page.ui.u) / 3
-                                    Text { text: "Disponible"; color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 13 * page.ui.u }
-                                    Text {
-                                        width: parent.width; wrapMode: Text.WordWrap
-                                        text: !page.balance.enabled ? "—"
-                                              : page.balance.error ? "No calculable"
-                                              : (page.balance.penCents === undefined || page.balance.penCents === null ? "S/ —" : page.ctl.formatCents(page.balance.penCents, "PEN"))
-                                                + "\n" + (page.balance.usdCents === undefined || page.balance.usdCents === null ? "US$ —" : page.ctl.formatCents(page.balance.usdCents, "USD"))
-                                        color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 16 * page.ui.u; font.weight: Font.DemiBold
-                                    }
-                                }
-                                Column {
-                                    width: (parent.width - 20 * page.ui.u) / 3
-                                    Text { text: "Tipo de cambio"; color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 13 * page.ui.u }
-                                    Text {
-                                        width: parent.width; wrapMode: Text.WordWrap
-                                        text: page.rate.rate === undefined || page.rate.rate === null ? "Sin registrar" : String(page.rate.rate) + " PEN/USD"
-                                        color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 16 * page.ui.u; font.weight: Font.DemiBold
-                                    }
-                                    Text {
-                                        width: parent.width; wrapMode: Text.WordWrap
-                                        visible: page.rate.rate !== undefined && page.rate.rate !== null
-                                        text: page.rate.mode === "AUTOMATIC"
-                                              ? "BCRP/SBS" + (S.text_(page.rate, "quoted_on").length ? " venta del " + S.date(page.rate.quoted_on) : "")
-                                              : "Manual"
-                                        color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 12 * page.ui.u
-                                    }
-                                    Text {                       // estado de la consulta actual (no del valor guardado)
-                                        width: parent.width; wrapMode: Text.WordWrap
-                                        visible: page.quoteNotice.length > 0
-                                        text: page.quoteNotice
-                                        color: S.danger; font.family: page.ui.fontFamily; font.pixelSize: 11 * page.ui.u
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                Divider {}
-
-                // ---- Documentos
-                Block {
-                    order: 5
-                    Row {
-                        width: parent.width
-                        spacing: 16 * page.ui.u
-                        IconBadge { glyph: 0xE0CC; tone: S.corporateGreen }
-                        Column {
-                            width: parent.width - 70 * page.ui.u
-                            spacing: 8 * page.ui.u
-                            Text { text: "Documentos"; color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 18 * page.ui.u; font.weight: Font.DemiBold }
-                            Check { ok: page.hasFolder; label: page.hasFolder ? "Carpeta en InGe Drive conectada" : "Sin carpeta en InGe Drive" }
-                            Check { ok: page.exportable; label: page.exportable ? "Exportación PDF/Excel disponible" : "Exportación al presentar la rendición" }
-                            Text {
-                                width: parent.width
-                                text: page.expensesKnown ? page.withSupport + " con sustento  •  " + (page.expenses.length - page.withSupport) + " sin sustento"
-                                                         : "Sustentos por cargar"
-                                color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u
-                            }
-                        }
-                    }
-                }
-                Divider {}
-
-                // ---- Revisión
-                Block {
-                    order: 6
-                    Row {
-                        width: parent.width
-                        spacing: 16 * page.ui.u
-                        IconBadge { glyph: 0xE1F5; tone: S.statusColor(page.current.status) }
-                        Column {
-                            width: parent.width - 70 * page.ui.u
-                            spacing: 4 * page.ui.u
-                            Text { text: "Revisión"; color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 18 * page.ui.u; font.weight: Font.DemiBold }
-                            Row {
-                                spacing: 8 * page.ui.u
-                                Rectangle { width: 12 * page.ui.u; height: width; radius: width / 2; color: S.statusColor(page.current.status); anchors.verticalCenter: parent.verticalCenter }
-                                Text {
-                                    text: page.ctl.statusLabel(String(page.current.status || "BORRADOR"))
-                                          + (Number(page.current.versionNumber || 0) > 0 ? "  •  Versión " + page.current.versionNumber : "  •  Sin versión presentada")
-                                    color: S.text; font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u
-                                }
-                            }
-                            Text {
-                                width: parent.width; wrapMode: Text.WordWrap
-                                text: page.writable ? "Edición autorizada" : "Solo lectura"
-                                color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 13 * page.ui.u
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ---- Indicador circular de actualización (mismo patrón que la lista).
-    Item {
-        id: spinner
-        width: 34 * page.ui.u; height: width
-        anchors.horizontalCenter: parent.horizontalCenter
-        visible: page.tab === "summary" && opacity > 0.01
-        y: header.height + (page.refreshing ? 10 * page.ui.u : -34 * page.ui.u + Math.min(page.pull, page.pullThreshold) * 0.6)
-        opacity: page.refreshing ? 1 : Math.min(1, page.pull / page.pullThreshold)
-        Behavior on opacity { enabled: !flick.dragging; NumberAnimation { duration: 220 } }
-        Behavior on y { enabled: !flick.dragging; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-        Rectangle { anchors.fill: parent; radius: width / 2; color: "#FFFFFF"; border.width: 1; border.color: S.ink(0.06) }
-        Item {
-            anchors.fill: parent
-            anchors.margins: 8 * page.ui.u
-            rotation: page.refreshing ? 0 : page.pull * 3
-            Shape {
-                anchors.fill: parent
-                RotationAnimator on rotation {
-                    from: 0; to: 360; duration: 900
-                    loops: Animation.Infinite
-                    running: page.refreshing && page.visible
-                }
-                ShapePath {
-                    strokeColor: S.corporateBlue
-                    strokeWidth: 3 * page.ui.u
-                    fillColor: "transparent"
-                    capStyle: ShapePath.RoundCap
-                    PathAngleArc {
-                        centerX: 9 * page.ui.u; centerY: 9 * page.ui.u
-                        radiusX: 7.5 * page.ui.u; radiusY: 7.5 * page.ui.u
-                        startAngle: -90
-                        sweepAngle: page.refreshing ? 280 : 300 * Math.min(1, page.pull / page.pullThreshold)
-                    }
-                }
-            }
-        }
-    }
 }

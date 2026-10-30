@@ -17,6 +17,7 @@ Column {
     // limpiar la fecha (emite picked("")).
     property bool formStyle: false
     property bool clearable: false
+    property bool animatePicker: false
     signal picked(string value)
 
     spacing: 6 * ui.u
@@ -30,6 +31,16 @@ Column {
         if (s.length !== 10) return null
         var d = new Date(Number(s.substring(0, 4)), Number(s.substring(5, 7)) - 1, Number(s.substring(8, 10)))
         return isNaN(d.getTime()) ? null : d
+    }
+    // Abre el calendario (también desde un contenedor visual propio, p. ej. Nueva rendición).
+    function openPicker() {
+        if (readOnly) return
+        dateField.forceActiveFocus()                 // el foco no vuelve a un campo de texto al cerrar
+        Qt.inputMethod.hide()
+        var d = parse(value) || parse(minimum) || new Date()
+        grid.month = d.getMonth()
+        grid.year = d.getFullYear()
+        calendar.open()
     }
     function allowed(text) {
         return (minimum.length === 0 || text >= minimum) && (maximum.length === 0 || text <= maximum)
@@ -47,7 +58,7 @@ Column {
         width: parent.width
         height: (dateField.formStyle ? 56 : 48) * dateField.ui.u
         radius: (dateField.formStyle ? 16 : 12) * dateField.ui.u
-        color: dateField.formStyle ? Qt.rgba(1, 1, 1, dateField.readOnly ? 0.45 : (tap.pressed ? 0.6 : 0.78))
+        color: dateField.formStyle ? S.glass(dateField.readOnly ? 0.45 : (tap.pressed ? 0.6 : 0.78))
                                    : S.ink(dateField.readOnly ? 0.03 : (tap.pressed ? 0.14 : 0.08))
         border.width: 1
         border.color: dateField.error.length > 0 ? S.danger : (dateField.formStyle ? S.fieldBorder : S.border)
@@ -74,12 +85,7 @@ Column {
             id: tap
             anchors.fill: parent
             enabled: !dateField.readOnly
-            onClicked: {
-                var d = dateField.parse(dateField.value) || dateField.parse(dateField.minimum) || new Date()
-                grid.month = d.getMonth()
-                grid.year = d.getFullYear()
-                calendar.open()
-            }
+            onClicked: dateField.openPicker()
         }
         Rectangle {                                   // limpiar fecha (X)
             visible: dateField.clearable && !dateField.readOnly && dateField.value.length > 0
@@ -118,6 +124,12 @@ Column {
         y: parent ? (parent.height - height) / 2 : 0
         padding: 14 * dateField.ui.u
         background: Rectangle { radius: 18 * dateField.ui.u; color: S.popup; border.width: 1; border.color: S.border }
+        enter: Transition {
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: dateField.animatePicker && dateField.ui.reducedMotion !== true ? 180 : 0; easing.type: Easing.OutCubic }
+        }
+        exit: Transition {
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: dateField.animatePicker && dateField.ui.reducedMotion !== true ? 140 : 0; easing.type: Easing.OutQuad }
+        }
         Column {
             anchors.fill: parent
             spacing: 8 * dateField.ui.u

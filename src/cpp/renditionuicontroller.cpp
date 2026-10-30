@@ -464,6 +464,9 @@ QString RenditionUiController::statusLabel(const QString &status) const
         {QStringLiteral("OBSERVADO"), QStringLiteral("Observada")},
         {QStringLiteral("EN_REVISION"), QStringLiteral("En revisión")},
         {QStringLiteral("APROBADO"), QStringLiteral("Aprobada")},
+        {QStringLiteral("REVISADO"), QStringLiteral("Revisada")},
+        {QStringLiteral("ARCHIVADO"), QStringLiteral("Archivada")},
+        {QStringLiteral("EXPORTADO"), QStringLiteral("Exportada")},
         {QStringLiteral("PRESENTADA"), QStringLiteral("Presentada")}};
     return labels.value(status.toUpper(), status);
 }

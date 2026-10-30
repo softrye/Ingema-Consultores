@@ -15,9 +15,9 @@ Item {
     readonly property var current: detail.current
     readonly property var expenses: detail.selected ? (app.st.expenses || []).filter(function(e) { return e.archived !== true }) : []
     readonly property var remote: detail.selected ? (app.st.attachments || []) : []
-    ListModel { id: expensesModel }
-    onExpensesChanged: S.syncRows(expensesModel, expenses, ["localId"])
-    Component.onCompleted: S.syncRows(expensesModel, expenses, ["localId"])
+    ListModel { id: expenseRows }
+    onExpensesChanged: S.syncRows(expenseRows, expenses, ["localId"])
+    Component.onCompleted: S.syncRows(expenseRows, expenses, ["localId"])
     readonly property bool exportable: String(current.remoteId || "").length > 0 && String(current.currentVersionId || "").length > 0
                                        && ["BORRADOR", "OBSERVADO"].indexOf(String(current.status || "BORRADOR")) < 0
     readonly property var life: ({ alive: true })
@@ -48,13 +48,51 @@ Item {
         })
     }
     function exportVersion(format) {
-        app.call("ownerExport", { format: format }, "export:" + format, function(ok, result, code, message) {
-            if (!ok) { tab.app.toast(tab.app.errorText(code, message), "error"); return }
-            var path = String(result.output || "")
-            tab.app.toast("Archivo generado: " + path, "success")
-            if (typeof excelExporter !== "undefined" && excelExporter && path.length)
-                excelExporter.openExportedFile(path, true)
-        })
+        // Exportación híbrida: el destino se elige en el menú 3D Touch.
+        tab.app.askExportDestination(format, function(destination) { tab.app.runExport(format, destination) })
+    }
+
+    // ---- Rediseño aprobado: avance neutro, una tarjeta por gasto con
+    // miniaturas, «+ Adjuntar», hoja Abrir/Retirar y Drive + Exportar al final.
+    readonly property int withSupport: expenses.filter(function(e) { return remoteFor(e).length + localFor(e).length > 0 }).length
+    property var sheetFile: null
+    property bool sheetRemote: false
+    function fileName(row) { return S.text_(row, "file_name", "fileName") || "Sustento" }
+    function isPdf(row) { return /\.pdf$/i.test(fileName(row)) }
+
+    component FileTile: Rectangle {
+        id: fileTile
+        property var row
+        property bool remoteFile: false
+        width: 72 * tab.ui.u; height: 84 * tab.ui.u; radius: 14 * tab.ui.u
+        color: tileTap.pressed ? S.tintSoft : S.surfaceStrong
+        border.width: 1; border.color: S.tintSoftBorder
+        Column {
+            anchors.centerIn: parent
+            spacing: 6 * tab.ui.u
+            Item {
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 38 * tab.ui.u; height: 44 * tab.ui.u
+                visible: tab.isPdf(fileTile.row)
+                Rectangle { anchors.fill: parent; radius: 5 * tab.ui.u; color: "#E2231A" }
+                Rectangle { anchors.right: parent.right; width: 13 * tab.ui.u; height: width; color: "#F7A29D" }
+                Text { anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 6 * tab.ui.u
+                       text: "PDF"; color: "white"; font.family: tab.ui.fontFamily; font.pixelSize: 11 * tab.ui.u; font.weight: Font.ExtraBold }
+            }
+            Rectangle {
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 36 * tab.ui.u; height: width; radius: 10 * tab.ui.u; color: S.accent
+                visible: !tab.isPdf(fileTile.row)
+                Text { anchors.centerIn: parent; text: String.fromCharCode(0xE0F6); color: "white"
+                       font.family: tab.ui.iconFamily; font.pixelSize: 20 * tab.ui.u }
+            }
+            Text { width: 62 * tab.ui.u; horizontalAlignment: Text.AlignHCenter; text: tab.fileName(fileTile.row); elide: Text.ElideMiddle
+                   color: S.text; font.family: tab.ui.fontFamily; font.pixelSize: 11 * tab.ui.u }
+        }
+        MouseArea { id: tileTap; anchors.fill: parent
+                    onClicked: { tab.sheetFile = fileTile.row; tab.sheetRemote = fileTile.remoteFile; fileSheet.open() } }
+        Accessible.role: Accessible.Button
+        Accessible.name: "Archivo " + tab.fileName(row)
     }
 
     Flickable {
@@ -69,51 +107,22 @@ Item {
             width: parent.width - 2 * tab.ui.gutter
             spacing: 12 * tab.ui.u
 
-            RCard {
-                width: parent.width
-                ui: tab.ui
-                Text { text: "Ubicación en InGe Drive"; color: S.text; font.family: tab.ui.fontFamily; font.pixelSize: 15 * tab.ui.u; font.weight: Font.DemiBold }
-                Text {
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    color: S.muted
-                    font.family: tab.ui.fontFamily; font.pixelSize: 14 * tab.ui.u
-                    text: String(tab.current.documentParentNodeId || "").length
-                          ? "Carpeta: " + (S.text_(tab.current, "documentParentNodeName", "folderName") || "seleccionada en el proyecto principal")
-                            + (String(tab.current.documentNodeId || "").length ? "\nExpediente documental creado en el servidor." : "\nEl expediente se crea al sincronizar.")
-                          : "Sin carpeta documental. Edita los datos de la rendición para elegirla."
-                }
+            Item {
+                width: parent.width; height: 26 * tab.ui.u
+                Text { anchors.verticalCenter: parent.verticalCenter; text: "Sustentos"; color: S.text
+                       font.family: tab.ui.fontFamily; font.pixelSize: 17 * tab.ui.u; font.weight: Font.Bold }
+                Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; color: S.muted
+                       text: tab.withSupport + " de " + tab.expenses.length + " gastos con sustento"
+                       font.family: tab.ui.fontFamily; font.pixelSize: 13 * tab.ui.u }
             }
-
-            RCard {
-                width: parent.width
-                ui: tab.ui
-                Text { text: "Exportar versión presentada"; color: S.text; font.family: tab.ui.fontFamily; font.pixelSize: 15 * tab.ui.u; font.weight: Font.DemiBold }
-                Text {
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    color: S.muted
-                    font.family: tab.ui.fontFamily; font.pixelSize: 13 * tab.ui.u
-                    text: tab.exportable ? "Se exporta la versión inmutable " + (tab.current.versionNumber || "") + " con su fondo y tipo de cambio congelados."
-                                         : "Disponible cuando la rendición tiene una versión presentada y sincronizada."
-                }
-                Row {
-                    spacing: 8 * tab.ui.u
-                    RButton { ui: tab.ui; glyph: 0xE32A; label: "PDF"; enabledButton: tab.exportable; busy: tab.app.busy("export:pdf"); onActivated: tab.exportVersion("pdf") }
-                    RButton { ui: tab.ui; glyph: 0xE32A; label: "Excel"; enabledButton: tab.exportable; busy: tab.app.busy("export:xlsx"); onActivated: tab.exportVersion("xlsx") }
-                }
-            }
-
-            Text { text: "Sustentos por gasto"; color: S.text; font.family: tab.ui.fontFamily; font.pixelSize: 17 * tab.ui.u; font.weight: Font.DemiBold }
-            Text {
-                width: parent.width
-                visible: tab.expenses.length === 0
-                text: "No hay gastos con sustentos. Agrega comprobantes desde la ficha de cada gasto."
-                color: S.muted; wrapMode: Text.WordWrap
-                font.family: tab.ui.fontFamily; font.pixelSize: 14 * tab.ui.u
+            Rectangle {
+                width: parent.width; height: 6 * tab.ui.u; radius: height / 2; color: S.ink(0.08)
+                Rectangle { height: parent.height; radius: parent.radius; color: S.accent
+                            width: parent.width * tab.withSupport / Math.max(1, tab.expenses.length)
+                            Behavior on width { NumberAnimation { duration: 240 } } }
             }
             Repeater {
-                model: expensesModel
+                model: expenseRows
                 delegate: RCard {
                     id: expenseCard
                     required property string rowJson
@@ -130,64 +139,131 @@ Item {
                     }
                     width: column.width
                     ui: tab.ui
-                    Text {
-                        width: parent.width
-                        text: (S.text_(modelData, "concept") || "Gasto") + " · " + tab.ctl.formatMoney(modelData.amount, S.text_(modelData, "currencyCode", "currency_code"))
-                        color: S.text; elide: Text.ElideRight
-                        font.family: tab.ui.fontFamily; font.pixelSize: 15 * tab.ui.u; font.weight: Font.DemiBold
-                    }
-                    Text {
-                        width: parent.width
-                        visible: expenseCard.remoteRows.length === 0 && expenseCard.localRows.length === 0
-                        text: "Sin sustentos."
-                        color: S.warning
-                        font.family: tab.ui.fontFamily; font.pixelSize: 13 * tab.ui.u
-                    }
-                    Repeater {
-                        model: localFiles
-                        delegate: Text {
-                            required property string rowJson
-                            readonly property var modelData: JSON.parse(rowJson)
-                            width: column.width - 32 * tab.ui.u
-                            text: "• " + S.text_(modelData, "fileName") + " · " + tab.ctl.syncLabel(tab.app.syncState(modelData))
-                                  + (tab.ctl.visibleSyncError(S.text_(modelData, "syncError")).length ? " · " + tab.ctl.visibleSyncError(S.text_(modelData, "syncError")) : "")
-                            color: S.syncColor(tab.app.syncState(modelData)); wrapMode: Text.WordWrap
-                            font.family: tab.ui.fontFamily; font.pixelSize: 13 * tab.ui.u
+                    color: S.glass(0.80); border.color: S.edge(1); radius: 22 * tab.ui.u
+                    Item {
+                        width: parent.width; height: 40 * tab.ui.u
+                        Rectangle { width: 40 * tab.ui.u; height: width; radius: 12 * tab.ui.u; color: S.tintSoft
+                                    Text { anchors.centerIn: parent; text: String.fromCharCode(0xE0CC); color: S.accent
+                                           font.family: tab.ui.iconFamily; font.pixelSize: 21 * tab.ui.u } }
+                        Column {
+                            x: 52 * tab.ui.u; anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width - x - amountText.width - 10 * tab.ui.u
+                            Text { width: parent.width; text: S.text_(expenseCard.modelData, "concept") || "Gasto"; elide: Text.ElideRight
+                                   color: S.text; font.family: tab.ui.fontFamily; font.pixelSize: 15 * tab.ui.u; font.weight: Font.Bold }
+                            Text { width: parent.width; elide: Text.ElideRight; color: S.muted
+                                   text: S.date(S.text_(expenseCard.modelData, "expenseDate", "expense_date"))
+                                   font.family: tab.ui.fontFamily; font.pixelSize: 12.5 * tab.ui.u }
                         }
+                        Text { id: amountText; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                               text: tab.ctl.formatMoney(expenseCard.modelData.amount, S.text_(expenseCard.modelData, "currencyCode", "currency_code"))
+                               color: S.text; font.family: tab.ui.fontFamily; font.pixelSize: 15 * tab.ui.u; font.weight: Font.Bold }
                     }
-                    Repeater {
-                        model: remoteFiles
-                        delegate: Row {
-                            required property string rowJson
-                            readonly property var modelData: JSON.parse(rowJson)
-                            width: column.width - 32 * tab.ui.u
-                            spacing: 6 * tab.ui.u
-                            Text {
-                                width: parent.width - 200 * tab.ui.u
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: "• " + S.text_(modelData, "file_name", "fileName")
-                                color: S.text; elide: Text.ElideRight
-                                font.family: tab.ui.fontFamily; font.pixelSize: 13 * tab.ui.u
+                    Flow {
+                        width: parent.width; spacing: 8 * tab.ui.u
+                        Repeater { model: remoteFiles
+                                   delegate: FileTile { required property string rowJson; row: JSON.parse(rowJson); remoteFile: true } }
+                        Repeater { model: localFiles
+                                   delegate: FileTile { required property string rowJson; row: JSON.parse(rowJson); remoteFile: false } }
+                        Rectangle {
+                            visible: tab.detail.writable
+                            width: 72 * tab.ui.u; height: 84 * tab.ui.u; radius: 14 * tab.ui.u
+                            color: addTap.pressed ? S.tintSoft : "transparent"
+                            border.width: 1.5; border.color: "#AEB8C8"
+                            opacity: tab.detail.editable ? 1 : 0.5
+                            Column {
+                                anchors.centerIn: parent; spacing: 4 * tab.ui.u
+                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: String.fromCharCode(0xE13D); color: S.accent
+                                       font.family: tab.ui.iconFamily; font.pixelSize: 22 * tab.ui.u }
+                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Adjuntar"; color: S.accent
+                                       font.family: tab.ui.fontFamily; font.pixelSize: 11.5 * tab.ui.u; font.weight: Font.DemiBold }
                             }
-                            RButton { ui: tab.ui; label: "Abrir"; width: 90 * tab.ui.u; busy: tab.app.busy("access:" + S.text_(modelData, "id")); onActivated: tab.open(S.text_(modelData, "id")) }
-                            RButton {
-                                ui: tab.ui; label: "Retirar"; danger: true; width: 100 * tab.ui.u
-                                visible: tab.detail.writable
-                                enabledButton: tab.detail.editable
-                                onActivated: tab.archive(modelData)
-                            }
+                            MouseArea { id: addTap; anchors.fill: parent; enabled: tab.detail.editable
+                                        onClicked: tab.app.openExpense(tab.detail.localId, String(expenseCard.modelData.localId)) }
+                            Accessible.role: Accessible.Button
+                            Accessible.name: "Adjuntar comprobante"
                         }
-                    }
-                    RButton {
-                        ui: tab.ui
-                        visible: tab.detail.writable
-                        enabledButton: tab.detail.editable
-                        glyph: 0xE12D
-                        label: "Adjuntar comprobante"
-                        onActivated: tab.app.openExpense(tab.detail.localId, String(modelData.localId))
                     }
                 }
             }
+
+            // Drive + exportación: una sola tarjeta al final (se usan menos).
+            RCard {
+                width: parent.width
+                ui: tab.ui
+                color: S.glass(0.80); border.color: S.edge(1); radius: 22 * tab.ui.u
+                Item {
+                    width: parent.width; height: 44 * tab.ui.u
+                    Rectangle { width: 40 * tab.ui.u; height: width; radius: 12 * tab.ui.u; color: S.tintSoft
+                                anchors.verticalCenter: parent.verticalCenter
+                                Text { anchors.centerIn: parent; text: String.fromCharCode(0xE0D7); color: S.accent
+                                       font.family: tab.ui.iconFamily; font.pixelSize: 21 * tab.ui.u } }
+                    Column {
+                        x: 52 * tab.ui.u; anchors.verticalCenter: parent.verticalCenter; width: parent.width - x
+                        Text { text: "InGe Drive"; color: S.text; font.family: tab.ui.fontFamily; font.pixelSize: 15 * tab.ui.u; font.weight: Font.Bold }
+                        Text { width: parent.width; elide: Text.ElideRight; color: S.muted; font.family: tab.ui.fontFamily; font.pixelSize: 12.5 * tab.ui.u
+                               text: String(tab.current.documentParentNodeId || "").length
+                                     ? (S.text_(tab.current, "documentParentNodeName", "folderName") || "Proyecto principal")
+                                       + (String(tab.current.documentNodeId || "").length ? " · expediente creado" : " · se crea al sincronizar")
+                                     : "Sin carpeta: elígela en los datos de la rendición" }
+                    }
+                }
+                Rectangle { width: parent.width; height: 1; color: S.tintSoftBorder }
+                Item {
+                    width: parent.width; height: 44 * tab.ui.u
+                    Column {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width - exportActions.width - 10 * tab.ui.u
+                        Text { text: "Exportar"; color: S.text; font.family: tab.ui.fontFamily; font.pixelSize: 15 * tab.ui.u; font.weight: Font.Bold }
+                        Text { width: parent.width; elide: Text.ElideRight; color: S.muted; font.family: tab.ui.fontFamily; font.pixelSize: 12.5 * tab.ui.u
+                               text: tab.exportable ? "Versión " + (tab.current.versionNumber || "") + " presentada" : "Se habilita al presentar la rendición" }
+                    }
+                    Row {
+                        id: exportActions
+                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                        spacing: 6 * tab.ui.u
+                        RButton { visible: tab.exportable; ui: tab.ui; width: 64 * tab.ui.u; label: "PDF"; primary: true
+                                  busy: tab.app.busy("export:pdf"); onActivated: tab.exportVersion("pdf") }
+                        RButton { visible: tab.exportable; ui: tab.ui; width: 70 * tab.ui.u; label: "Excel"; color: S.tintSoft
+                                  busy: tab.app.busy("export:xlsx"); onActivated: tab.exportVersion("xlsx") }
+                        Rectangle { visible: !tab.exportable; width: pdfXls.implicitWidth + 24 * tab.ui.u; height: 32 * tab.ui.u; radius: height / 2; color: S.ink(0.06)
+                                    Text { id: pdfXls; anchors.centerIn: parent; text: "PDF · Excel"; color: S.muted
+                                           font.family: tab.ui.fontFamily; font.pixelSize: 12.5 * tab.ui.u; font.weight: Font.DemiBold } }
+                    }
+                }
+            }
+        }
+    }
+
+    // Hoja del archivo: Abrir como acción principal; Retirar aparte.
+    Popup {
+        id: fileSheet
+        objectName: "documentFileSheet"
+        parent: Overlay.overlay
+        modal: true; dim: true; focus: true
+        width: parent ? Math.min(parent.width - 24 * tab.ui.u, 520 * tab.ui.u) : 0
+        x: parent ? (parent.width - width) / 2 : 0
+        y: parent ? parent.height - height - tab.ui.dockArea - 12 * tab.ui.u : 0
+        padding: 16 * tab.ui.u
+        background: Rectangle { radius: 24 * tab.ui.u; color: S.popup; border.width: 1; border.color: S.edge(1) }
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: tab.ui.reducedMotion ? 0 : 180 }
+                            NumberAnimation { property: "scale"; from: 0.94; to: 1; duration: tab.ui.reducedMotion ? 0 : 240; easing.type: Easing.OutBack } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: tab.ui.reducedMotion ? 0 : 140 } }
+        contentItem: Column {
+            spacing: 10 * tab.ui.u
+            Text { width: parent.width; text: tab.sheetFile ? tab.fileName(tab.sheetFile) : ""; elide: Text.ElideMiddle
+                   color: S.text; font.family: tab.ui.fontFamily; font.pixelSize: 15 * tab.ui.u; font.weight: Font.Bold }
+            Text { width: parent.width; visible: !tab.sheetRemote; wrapMode: Text.WordWrap; color: S.muted
+                   text: tab.sheetFile ? tab.ctl.syncLabel(tab.app.syncState(tab.sheetFile)) : ""
+                   font.family: tab.ui.fontFamily; font.pixelSize: 12.5 * tab.ui.u }
+            RButton { width: parent.width; height: 50 * tab.ui.u; ui: tab.ui; primary: true; label: "Abrir"
+                      visible: tab.sheetRemote
+                      busy: tab.sheetFile ? tab.app.busy("access:" + S.text_(tab.sheetFile, "id")) : false
+                      onActivated: { var id = S.text_(tab.sheetFile, "id"); fileSheet.close(); tab.open(id) } }
+            RButton { width: parent.width; ui: tab.ui; danger: true; label: "Retirar archivo"; color: "transparent"
+                      visible: tab.sheetRemote && tab.detail.writable
+                      enabledButton: tab.detail.editable
+                      onActivated: { var row = tab.sheetFile; fileSheet.close(); tab.archive(row) } }
+            RButton { width: parent.width; ui: tab.ui; label: "Cerrar"; color: S.ink(0.06); onActivated: fileSheet.close() }
         }
     }
 }

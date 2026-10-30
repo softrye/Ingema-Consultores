@@ -60,6 +60,10 @@ RenditionSyncController::RenditionSyncController(
             this, &RenditionSyncController::finishCurrent);
     connect(m_repository, &RenditionRepository::draftDeleted,
             this, &RenditionSyncController::finishCurrent);
+    connect(m_repository, &RenditionRepository::draftTrashed,
+            this, &RenditionSyncController::finishCurrent);
+    connect(m_repository, &RenditionRepository::renditionArchived,
+            this, &RenditionSyncController::finishCurrent);
     connect(m_repository, &RenditionRepository::documentLocationChanged, this,
             [this]() {
         if (m_locationRefreshLocalId.isEmpty())
@@ -409,6 +413,15 @@ void RenditionSyncController::processNext()
                                   m_current.value(QStringLiteral("expectedRowVersion")).toLongLong());
         return;
     }
+    if (kind == QLatin1String("rendition_trash") || kind == QLatin1String("rendition_archive")) {
+        if (!m_store->markRenditionSyncing(aggregateLocalId)) { failCurrent("LOCAL_PERSISTENCE_FAILED", m_store->lastError()); return; }
+        const auto remoteId=m_current.value(QStringLiteral("remoteId")).toString();
+        const auto version=m_current.value(QStringLiteral("expectedRowVersion")).toLongLong();
+        const auto requestId=m_current.value(QStringLiteral("requestId")).toString();
+        if (kind == QLatin1String("rendition_archive")) m_repository->archiveRendition(remoteId,version,requestId);
+        else m_repository->trashDraft(remoteId,version,requestId);
+        return;
+    }
     if (kind == QLatin1String("rendition_create")) {
         if (!m_store->markRenditionSyncing(aggregateLocalId)) { failCurrent("LOCAL_PERSISTENCE_FAILED", m_store->lastError()); return; }
         m_repository->createRendition(
@@ -523,6 +536,10 @@ void RenditionSyncController::finishCurrent(const QVariantMap &remote)
         }
     } else if (kind == QLatin1String("rendition_delete")) {
         if (!m_store->markDraftDeleted(aggregateLocalId, remote)) { failCurrent("INVALID_RESPONSE", m_store->lastError()); return; }
+    } else if (kind == QLatin1String("rendition_trash")) {
+        if (!m_store->markDraftTrashed(aggregateLocalId, remote)) { failCurrent("INVALID_RESPONSE", m_store->lastError()); return; }
+    } else if (kind == QLatin1String("rendition_archive")) {
+        if (!m_store->markRenditionArchived(aggregateLocalId, remote)) { failCurrent("INVALID_RESPONSE", m_store->lastError()); return; }
     } else if (kind.startsWith(QLatin1String("expense_"))) {
         if (!m_store->markExpenseSynced(aggregateLocalId, localId, remote)) {
             failCurrent(QStringLiteral("INVALID_RESPONSE"), m_store->lastError());
@@ -611,6 +628,11 @@ void RenditionSyncController::failCurrent(const QString &code,
         state = conflict ? QString::fromLatin1(Conflict)
                          : QString::fromLatin1(Error);
         m_store->markExpenseState(aggregateLocalId, localId, state, shown);
+    } else if ((kind == QLatin1String("rendition_trash") || kind == QLatin1String("rendition_archive")) && !ambiguous) {
+        const bool persisted=kind==QLatin1String("rendition_archive")
+            ? m_store->rejectRenditionArchive(aggregateLocalId, shown) : m_store->rejectDraftTrash(aggregateLocalId, shown);
+        if (!persisted)
+            m_store->markRenditionState(aggregateLocalId, QString::fromLatin1(Error), m_store->lastError());
     } else if (kind.startsWith(QLatin1String("expense_"))) {
         state = conflict ? QString::fromLatin1(Conflict)
                          : QString::fromLatin1(NeedsReconciliation);

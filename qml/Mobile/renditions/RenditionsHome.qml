@@ -49,7 +49,7 @@ Item {
     }
     function closeMenus() { filterMenu.close(); projectMenu.close() }
     readonly property bool listInteractive: flick.interactive
-    readonly property bool renderInteractionBusy: filterMenu.visible || projectMenu.visible
+    readonly property bool renderInteractionBusy: filterMenu.visible || projectMenu.visible || cardMenu.visible
     function selectStatus(value) {
         statusFilter = value
         if (value === "RECEIVED" && !receivedLoaded) loadReceived()
@@ -123,6 +123,8 @@ Item {
         contentWidth: width
         contentHeight: panel.y + panel.height
         boundsBehavior: Flickable.DragOverBounds
+        // Con la hoja «Nueva rendición» (u otro menú modal) abierta, la lista no se mueve.
+        interactive: !(page.app && page.app.modalOpen === true)
         // Mientras sincroniza, la lista deja un hueco superior para el indicador.
         topMargin: page.refreshing ? 56 * page.ui.u : 0
         Behavior on topMargin { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
@@ -164,9 +166,9 @@ Item {
             height: Math.max(column.height + 22 * page.ui.u + page.ui.dockArea + 12 * page.ui.u,
                              flick.height - y + 30 * page.ui.u)
             radius: 30 * page.ui.u
-            color: Qt.rgba(1, 1, 1, 0.38)              // deja percibir las auras (tarjetas siguen al 90%)
+            color: S.glass(0.38)              // deja percibir las auras (tarjetas siguen al 90%)
             border.width: 1
-            border.color: Qt.rgba(1, 1, 1, 0.95)
+            border.color: S.edge(0.95)
         }
 
         Column {
@@ -322,6 +324,7 @@ Item {
                     ctl: page.ctl
                     row: modelData
                     onActivated: page.app.openDetail(String(modelData.localId))
+                    onHeld: page.openCardMenu(modelData, this)
                 }
             }
             Repeater {                                              // recibidas (vista «Recibidas»)
@@ -357,7 +360,7 @@ Item {
         visible: opacity > 0.01
         Behavior on opacity { enabled: !flick.dragging; NumberAnimation { duration: 220 } }
         Behavior on y { enabled: !flick.dragging; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-        Rectangle { anchors.fill: parent; radius: width / 2; color: "#FFFFFF"; border.width: 1; border.color: S.ink(0.06) }
+        Rectangle { anchors.fill: parent; radius: width / 2; color: S.glass(1); border.width: 1; border.color: S.ink(0.06) }
         Item {                                              // giro del gesto (antes de soltar)
             anchors.fill: parent
             anchors.margins: 8 * page.ui.u
@@ -412,40 +415,181 @@ Item {
         }
     }
 
-    // ---- Menú de proyectos autorizados (IDs reales del modelo).
+    // ---- Menú de proyectos autorizados (imagen 3): lista compacta con nombres
+    // descriptivos reales; la selección se indica con AURA (sin check ni carpeta).
+    // ··· = «Nueva rendición en este proyecto» (abre la hoja con el proyecto marcado).
+    function newRenditionIn(projectId) {
+        projectMenu.close()
+        page.app.openCreate()
+        if (!projectId.length) return
+        Qt.callLater(function() {
+            var e = page.app.createSheetEditor
+            if (!e || e.projects.indexOf(projectId) >= 0) return
+            e.toggleProject(projectId)
+            e.setPrimary(projectId)
+        })
+    }
+    component ProjectRow: Item {
+        id: row
+        property var ui
+        property string title: ""
+        property string subtitle: ""
+        property bool selected: false
+        property bool separator: true
+        signal activated()
+        signal more()
+        width: parent ? parent.width : 0
+        height: (subtitle.length ? 76 : 62) * ui.u
+        Rectangle {                                  // aura de selección
+            anchors.fill: parent; anchors.margins: 3 * row.ui.u
+            radius: 22 * row.ui.u
+            color: row.selected ? Qt.rgba(59 / 255, 130 / 255, 214 / 255, 0.16) : (rowTap.pressed ? S.ink(0.05) : "transparent")
+            border.width: row.selected ? 1 : 0
+            border.color: Qt.rgba(59 / 255, 130 / 255, 214 / 255, 0.30)
+            Behavior on color { ColorAnimation { duration: 160 } }
+        }
+        Column {
+            x: 18 * row.ui.u; width: parent.width - x - 56 * row.ui.u
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 2 * row.ui.u
+            Text { width: parent.width; text: row.title; color: row.selected ? S.navyDark : S.text; elide: Text.ElideRight
+                   font.family: row.ui.fontFamily; font.pixelSize: 18 * row.ui.u; font.weight: Font.DemiBold }
+            Text { width: parent.width; visible: row.subtitle.length > 0; text: row.subtitle; color: S.muted; elide: Text.ElideRight
+                   font.family: row.ui.fontFamily; font.pixelSize: 13 * row.ui.u }
+        }
+        MouseArea { id: rowTap; anchors.fill: parent; onClicked: row.activated() }
+        Rectangle {
+            width: 44 * row.ui.u; height: width; radius: width / 2
+            anchors.right: parent.right; anchors.rightMargin: 6 * row.ui.u
+            anchors.verticalCenter: parent.verticalCenter
+            color: moreTap.pressed ? S.ink(0.08) : "transparent"
+            Text { anchors.centerIn: parent; text: String.fromCharCode(0xE0B6); color: S.muted
+                   font.family: row.ui.iconFamily; font.pixelSize: 20 * row.ui.u }
+            MouseArea { id: moreTap; anchors.fill: parent; onClicked: row.more() }
+            Accessible.role: Accessible.Button
+            Accessible.name: "Nueva rendición en " + row.title
+        }
+        Rectangle { visible: row.separator; x: 18 * row.ui.u; width: parent.width - 36 * row.ui.u; height: 1; anchors.bottom: parent.bottom; color: S.ink(0.07) }
+    }
+    // ---- Pulsación prolongada sobre una rendición (3D Touch: desenfoque global,
+    // tarjeta elevada y menú pegado a ella).
+    property var cardMenuRow: null
+    readonly property bool cardExportable: !!cardMenuRow && String(cardMenuRow.remoteId || "").length > 0
+                                           && String(cardMenuRow.currentVersionId || "").length > 0
+    // Archivar / Papelera / Eliminar: sólo el dueño (el servidor lo exige).
+    readonly property bool cardIsMine: {
+        if (!cardMenuRow) return false
+        var owner = S.text_(cardMenuRow, "owner_user_id", "ownerUserId")
+        var me = typeof auth !== "undefined" && auth ? String(auth.userId || "") : ""
+        return !owner.length || !me.length || owner === me
+    }
+    readonly property bool cardIsDraft: !!cardMenuRow && String(cardMenuRow.status || "BORRADOR").toUpperCase() === "BORRADOR"
+    function openCardMenu(row, card) {
+        cardMenuRow = row
+        page.app.haptic("medium")
+        page.app.homeTouchItem = cardMenu.hosted ? card : null
+        page.app.homeTouchMenu = cardMenu
+        var host = cardMenu.parent
+        var p = card.mapToItem(host, card.width / 2, card.height)
+        cardMenu.above = p.y > host.height * 0.55
+        cardMenu.anchorX = p.x
+        cardMenu.anchorY = cardMenu.above ? card.mapToItem(host, 0, 0).y : p.y
+        cardMenu.open = true
+    }
+    RGlassMenu {
+        id: cardMenu
+        objectName: "renditionCardMenu"
+        readonly property bool hosted: !!page.app.touchLayer
+        parent: hosted ? page.app.touchLayer : page
+        dimBackground: !hosted
+        ui: page.ui
+        cardWidth: 260 * page.ui.u
+        onDismissed: page.app.homeTouchItem = null
+        RMenuItem { ui: page.ui; label: "Abrir"; glyph: 0xE0BA; glyphColor: S.accent
+                    onActivated: { var id = String(page.cardMenuRow.localId); cardMenu.close(); page.app.openDetail(id) } }
+        RMenuItem { ui: page.ui; label: page.cardExportable ? "Exportar PDF" : "Exportar · al presentar"; glyph: 0xE0CC; glyphColor: S.danger
+                    enabledItem: page.cardExportable
+                    onActivated: { var id = String(page.cardMenuRow.localId); cardMenu.close(); page.app.exportFromList(id, "pdf") } }
+        RMenuItem { ui: page.ui; label: "Exportar Excel"; glyph: 0xE086; glyphColor: S.success; visible: page.cardExportable
+                    onActivated: { var id = String(page.cardMenuRow.localId); cardMenu.close(); page.app.exportFromList(id, "xlsx") } }
+        RMenuItem { objectName: "cardMenuArchive"; ui: page.ui; label: "Archivar"; glyph: 0xE0D7; glyphColor: S.accent
+                    visible: page.cardIsMine
+                    onActivated: {
+                        var row = page.cardMenuRow
+                        cardMenu.close()
+                        page.app.confirm("Archivar rendición",
+                                         "«" + (S.text_(row, "displayName", "display_name") || "La rendición") + "» pasará al Archivero (solo consulta). Podrás reactivarla desde Carpeta › Archivero.",
+                                         "Archivar", false, function() {
+                            page.app.call("archiveRendition", { localId: String(row.localId) }, "archiveRendition:" + row.localId, function(ok, result, code, message) {
+                                if (!ok) page.app.toast(page.app.errorText(code, message), "error")
+                            })
+                        })
+                    } }
+        RMenuItem { objectName: "cardMenuTrash"; ui: page.ui; label: "Mover a la Papelera"; glyph: 0xE18E; glyphColor: S.danger
+                    visible: page.cardIsDraft && page.cardIsMine
+                    onActivated: {
+                        var row = page.cardMenuRow
+                        cardMenu.close()
+                        page.app.confirm("Mover a la Papelera",
+                                         "«" + (S.text_(row, "displayName", "display_name") || "La rendición") + "» irá a la Papelera con sus gastos. Podrás restaurarla desde Carpeta › Papelera.",
+                                         "Mover", true, function() {
+                            page.app.call("trashDraft", { localId: String(row.localId) }, "trashDraft:" + row.localId, function(ok, result, code, message) {
+                                if (!ok) page.app.toast(page.app.errorText(code, message), "error")
+                            })
+                        })
+                    } }
+        RMenuItem { objectName: "cardMenuDelete"; ui: page.ui; label: "Eliminar borrador"; glyph: 0xE18E; glyphColor: S.danger; separator: false
+                    visible: page.cardIsDraft && page.cardIsMine
+                    onActivated: {
+                        var row = page.cardMenuRow
+                        cardMenu.close()
+                        page.app.confirm("Eliminar borrador",
+                                         "Se eliminará «" + (S.text_(row, "displayName", "display_name") || "la rendición") + "» con sus gastos.",
+                                         "Eliminar", true, function() {
+                            page.app.call("deleteDraft", { localId: String(row.localId) }, "deleteDraft:" + row.localId, function(ok, result, code, message) {
+                                if (!ok) page.app.toast(page.app.errorText(code, message), "error")
+                            })
+                        })
+                    } }
+    }
+
     RGlassMenu {
         id: projectMenu
+        objectName: "projectMenu"
         ui: page.ui
         above: false
-        cardWidth: 300 * page.ui.u
-        RMenuItem {
+        cardWidth: 340 * page.ui.u
+        ProjectRow {
             ui: page.ui
-            label: "Todos los proyectos"
-            glyph: 0xE0D7
-            glyphColor: page.projectFilter.length ? S.muted : S.corporateBlue
+            title: "Todos los proyectos"
+            subtitle: "Sin filtro de proyecto"
+            selected: page.projectFilter.length === 0
             onActivated: { page.projectFilter = ""; page.app.haptic("selection"); projectMenu.close() }
+            onMore: page.newRenditionIn("")
         }
         Flickable {
             width: parent.width
-            height: Math.min(projectList.height, 5 * 58 * page.ui.u)
+            height: Math.min(projectList.height, 5 * 62 * page.ui.u)
             contentHeight: projectList.height
             clip: true
             boundsBehavior: Flickable.StopAtBounds
+            interactive: contentHeight > height
             Column {
                 id: projectList
                 width: parent.width
                 Repeater {
                     model: page.app.st.projects || []
-                    delegate: RMenuItem {
+                    delegate: ProjectRow {
                         required property var modelData
                         required property int index
                         readonly property string projectId: S.text_(modelData, "id", "project_id")
+                        width: projectList.width
                         ui: page.ui
-                        label: page.ctl.projectLabel(projectId)
-                        glyph: page.projectFilter === projectId ? 0xE06C : 0
-                        glyphColor: S.corporateBlue
+                        title: (S.text_(modelData, "name") || page.ctl.projectLabel(projectId)).toUpperCase()
+                        selected: page.projectFilter === projectId
                         separator: index < (page.app.st.projects || []).length - 1
                         onActivated: { page.projectFilter = projectId; page.app.haptic("selection"); projectMenu.close() }
+                        onMore: page.newRenditionIn(projectId)
                     }
                 }
             }
