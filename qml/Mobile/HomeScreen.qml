@@ -1436,6 +1436,7 @@ Item {
     // Presets: el diseño no cambia; solo las herramientas.
     readonly property var homeDockPreset: [
         { key: "home", glyph: 0xE0F5, page: "home", name: "Inicio" },
+        { key: "addTools", glyph: 0xE173, name: "Agregar herramientas" },
         { key: "profile", glyph: 0xE19F, page: "profile", name: "Perfil" },
         { key: "settings", glyph: 0xE154, page: "settings", name: "Ajustes" }
     ]
@@ -1678,8 +1679,10 @@ Item {
     // Deep Press); sin subfunciones ejecuta el comando.
     function dockSlotTap(slot, pressGeneration, anchorItem) {
         if (!slot.action) {
-            if (!consumeEditTap())
-                navigate(slot.page)
+            if (!consumeEditTap()) {
+                if (slot.key === "addTools") openAdd()
+                else navigate(slot.page)
+            }
             return
         }
         var a = slot.action
