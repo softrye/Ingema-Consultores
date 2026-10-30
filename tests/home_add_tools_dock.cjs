@@ -7,6 +7,9 @@ const path = require('node:path')
 const source = fs.readFileSync(path.join(__dirname,'../qml/Mobile/HomeScreen.qml'),'utf8')
 const preset = vm.runInNewContext('(' + source.match(/homeDockPreset:\s*(\[[\s\S]*?\n    \])/)[1] + ')')
 const tap = source.slice(source.indexOf('    function dockSlotTap('),source.indexOf('    function dockSlotHold('))
+test('Agregar herramientas is offered by the Dock without a duplicate Home tile',()=>{
+  assert.doesNotMatch(source,/Tile\s*\{[^\n]*addStyle:\s*true[^\n]*onActivated:\s*home\.openAdd\(\)/)
+})
 test('Home Dock includes Inicio, Agregar herramientas and Ajustes',()=>{
   assert.deepEqual(Array.from(preset,s=>s.key),['home','addTools','settings'])
   assert.equal(preset[1].name,'Agregar herramientas')

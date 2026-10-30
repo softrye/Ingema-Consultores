@@ -792,9 +792,21 @@ Item {
         layer.enabled: blur.visible
         visible: !blur.visible
 
+        Renditions.RendicionesSyncBackdrop {
+            id: corporateHomeBackdrop
+            anchors.fill: parent
+            visible: home.appSkin === "ingema"
+            skin: "ingema"
+            dark: true                       // Home retains white labels over the Web's navy background.
+            mode: "synced"
+            running: visible && home.visible && home.page === "home"
+            reducedMotion: home.reducedMotion
+            lowCost: home.dockLowCostGlass
+        }
         Image {
             id: photoImage
             anchors.fill: parent
+            visible: home.appSkin !== "ingema"
             source: home.photo.source
             fillMode: Image.PreserveAspectCrop
             horizontalAlignment: home.photo.align
@@ -807,7 +819,7 @@ Item {
         MultiEffect {
             id: photoBlur
             anchors.fill: photoImage
-            source: photoImage
+            source: home.appSkin === "ingema" ? corporateHomeBackdrop : photoImage
             blurEnabled: true
             blurMax: 64
             blur: 1.0
@@ -919,7 +931,6 @@ Item {
                         }
                     }
 
-                    Tile { ui: home; size: "compact"; addStyle: true; glyph: 0xE173; title: "Agregar"; subtitle: "Más herramientas"; onActivated: home.openAdd() }
                 }
             }
         }
