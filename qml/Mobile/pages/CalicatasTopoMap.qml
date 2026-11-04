@@ -26,7 +26,12 @@ Item {
     // [{ key, lat, lon, code, status }] — solo fichas con coordenadas válidas.
     property var markers: []
     property string selectedKey: ""
-    property real bottomInset: 0                // reserva del Dock
+    property real bottomInset: 0                // reserva del Dock (+ popup de detalle abierto)
+    // Solo las teselas (sin controles): fondo del vidrio del Home; así los +/− no se
+    // ven refractados a través del popup ni de la hoja.
+    readonly property Item engineItem: engine
+    property bool controlsVisible: true         // el Home oculta los controles bajo su hoja
+    property real controlsInset: 0              // alto extra (popup abierto): solo controles, sin mover la cámara
     property real topInset: ui && ui.topInset !== undefined ? ui.topInset : 0
     property bool topoLayer: true
     // El Home lo desactiva mientras la página del mapa no se ve.
@@ -35,7 +40,7 @@ Item {
     property string tileHostOverride: ""
     property string cacheDirectoryOverride: ""
     signal markerTapped(var marker, real x, real y)
-    signal backgroundTapped()
+    signal backgroundTapped(real latitude, real longitude)
 
     readonly property string tileHost: tileHostOverride.length ? tileHostOverride
                                      : topoLayer ? "https://tile.opentopomap.org/" : "https://tile.openstreetmap.org/"
@@ -53,8 +58,13 @@ Item {
     readonly property int tileZoom: Math.floor(zoom)
     readonly property real originX: width / 2                            // centro óptico (sobre el Dock)
     readonly property real originY: (height - bottomInset) / 2
-    readonly property bool running: active && visible && width > 0 && height > 0
-                                    && Qt.application.state === Qt.ApplicationActive
+    // GPU lifecycle is controlled by the containing page, not transient
+    // visibility while Hero/reparent/layout runs. A temporary visibility flip
+    // must not start/stop a second tile renderer.
+    // Do not unload the native Map on Android permission dialogs or brief
+    // app focus loss: Qt pauses rendering itself, and tearing down QtLocation
+    // during EGL surface loss caused excessive recreations on resume.
+    readonly property bool running: active && width > 0 && height > 0
     property bool everActive: false
     readonly property var geoMap: engine.item
     readonly property bool mapReady: !!geoMap && geoMap.mapReady === true
@@ -62,7 +72,8 @@ Item {
 
     function _trace(msg) { console.info("INGE_CALICATA_MAP_" + msg) }
     onRunningChanged: {
-        _trace("ACTIVE running=" + running)
+        _trace("ACTIVE running=" + running + " active=" + active
+               + " size=" + Math.round(width) + "x" + Math.round(height))
         if (running && !everActive) everActive = true
     }
     onTileZoomChanged: _trace("LEVEL to=" + tileZoom + " zoom=" + zoom.toFixed(2))
@@ -96,17 +107,20 @@ Item {
         var m = geoMap
         if (!m || _syncing) return
         _syncing = true
-        zoom = m.zoomLevel
-        bearing = m.bearing
-        centerLat = m.center.latitude
-        centerLon = m.center.longitude
+        var nextZoom = m.zoomLevel, nextBearing = m.bearing
+        var nextLat = m.center.latitude, nextLon = m.center.longitude
+        if (Math.abs(zoom - nextZoom) > 0.000001) zoom = nextZoom
+        if (Math.abs(bearing - nextBearing) > 0.000001) bearing = nextBearing
+        if (Math.abs(centerLat - nextLat) > 0.00000001) centerLat = nextLat
+        if (Math.abs(centerLon - nextLon) > 0.00000001) centerLon = nextLon
         _syncing = false
     }
-    onZoomChanged: _pushCamera()
-    onBearingChanged: _pushCamera()
-    onCenterLatChanged: _pushCamera()
-    onCenterLonChanged: _pushCamera()
+    // Camera is sent imperatively by setCamera/centerOn only. The cached
+    // properties below are an observation of user gestures, NEVER a feedback
+    // loop that writes back onto the QtLocation Map every frame.
     function setCamera(lat, lon, z) {
+        if (!isFinite(lat) || !isFinite(lon) || !isFinite(z)) return
+        _trace("CAMERA_SET reason=explicit zoom=" + clampZoom(z).toFixed(2))
         _syncing = true                                          // un solo envío al Map
         centerLat = lat; centerLon = lon; zoom = clampZoom(z)
         _syncing = false
@@ -152,25 +166,14 @@ Item {
         if (c.isValid) m.alignCoordinateToPoint(c, Qt.point(px, py))
         _pullCamera()
     }
-    property real _animZoom: 5
-    property point _animAnchor: Qt.point(0, 0)
-    on_AnimZoomChanged: if (zoomAnim.running) zoomAround(_animZoom, _animAnchor.x, _animAnchor.y)
+    // GPU-safe zoom: one native camera change per explicit zoom action,
+    // not an extra NumberAnimation updating QtLocation on each frame.
     function animateZoomTo(target, px, py) {
-        zoomAnim.stop()
-        _animAnchor = px === undefined ? Qt.point(originX, originY) : Qt.point(px, py)
-        _animZoom = zoom
-        zoomAnim.to = clampZoom(target)
-        zoomAnim.start()
+        var anchor=px===undefined ? Qt.point(originX,originY) : Qt.point(px,py)
+        zoomAround(clampZoom(target),anchor.x,anchor.y)
     }
     function zoomBy(delta) { animateZoomTo(Math.round(zoom) + delta) }
-    NumberAnimation { id: zoomAnim; target: map; property: "_animZoom"; duration: 240; easing.type: Easing.OutCubic }
-    // Brújula: vuelve al norte arriba por el camino más corto.
-    function resetNorth() {
-        var b = normalizedBearing(bearing)
-        bearing = b > 180 ? b - 360 : b
-        northAnim.restart()
-    }
-    NumberAnimation { id: northAnim; target: map; property: "bearing"; to: 0; duration: 260; easing.type: Easing.OutCubic }
+    function resetNorth() { bearing=0; _pushCamera() }
     // Desplazamiento del contenido en pantalla (el dedo arrastra el mapa).
     function panBy(dx, dy) {
         var m = geoMap
@@ -292,7 +295,9 @@ Item {
         id: engine
         objectName: "mapEngine"
         anchors.fill: parent
-        active: map.everActive && !map._reloading
+        // Release the native QtLocation Map/GPU tiles when its owning page
+        // is inactive; everActive only remembers whether it was initialized.
+        active: map.running && !map._reloading
         sourceComponent: Component {
             Map {
                 id: geo
@@ -448,7 +453,7 @@ Item {
         property real lastX: NaN
         property real lastY: NaN
         onActiveChanged: {
-            if (active) zoomAnim.stop()
+            // No legacy zoomAnim: native zoom is now imperative.
             lastX = active ? centroid.position.x : NaN
             lastY = active ? centroid.position.y : NaN
         }
@@ -465,10 +470,10 @@ Item {
         target: null
         property real startZoom: map.zoom
         property real startBearing: map.bearing
-        onActiveChanged: if (active) { zoomAnim.stop(); northAnim.stop(); startZoom = map.zoom; startBearing = map.bearing }
+        onActiveChanged: if (active) { startZoom = map.zoom; startBearing = map.bearing }
         onActiveScaleChanged: map.zoomAround(startZoom + Math.log(activeScale) / Math.LN2, centroid.position.x, centroid.position.y)
         // Girar los dedos en sentido horario gira el contenido igual (cámara opuesta).
-        onActiveRotationChanged: map.bearing = startBearing - activeRotation
+        onActiveRotationChanged: { map.bearing = startBearing - activeRotation; map._pushCamera() }
     }
     WheelHandler {
         target: null
@@ -480,7 +485,12 @@ Item {
                 map.animateZoomTo(Math.round(map.zoom) + 1, eventPoint.position.x, eventPoint.position.y)
         }
         onSingleTapped: function(eventPoint) {
-            if (!map.pinAt(eventPoint.position.x, eventPoint.position.y)) map.backgroundTapped()
+            if (!map.pinAt(eventPoint.position.x, eventPoint.position.y) && map.geoMap) {
+                var picked = map.geoMap.toCoordinate(eventPoint.position, false)
+                if (picked && isFinite(picked.latitude) && isFinite(picked.longitude)
+                        && Math.abs(picked.latitude) <= 90 && Math.abs(picked.longitude) <= 180)
+                    map.backgroundTapped(picked.latitude, picked.longitude)
+            }
         }
     }
 
@@ -522,6 +532,9 @@ Item {
     Column {
         id: controls
         objectName: "mapControls"
+        opacity: map.controlsVisible ? 1 : 0
+        visible: opacity > 0.01                  // sin toques mientras está oculto
+        Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
         anchors.right: parent.right
         anchors.rightMargin: 16 * map.u
         y: map.topInset + 64 * map.u
@@ -605,10 +618,13 @@ Item {
     }
     Rectangle {                                       // zoom +/- (cápsula)
         objectName: "mapZoomControls"
+        opacity: map.controlsVisible ? 1 : 0
+        visible: opacity > 0.01                  // sin toques mientras está oculto
+        Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
         anchors.right: parent.right
         anchors.rightMargin: 16 * map.u
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: map.bottomInset + 24 * map.u
+        anchors.bottomMargin: map.bottomInset + map.controlsInset + 24 * map.u
         width: 52 * map.u
         height: 112 * map.u
         radius: 18 * map.u
@@ -637,7 +653,7 @@ Item {
         anchors.left: parent.left
         anchors.leftMargin: 10 * map.u
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: map.bottomInset + 6 * map.u
+        anchors.bottomMargin: map.bottomInset + map.controlsInset + 6 * map.u
         text: map.topoLayer ? "© OpenTopoMap (CC-BY-SA) · © OpenStreetMap" : "© OpenStreetMap"
         color: S.dark ? "#C9D1E2" : "#3C4650"
         font.pixelSize: 10 * map.u

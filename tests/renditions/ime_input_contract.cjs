@@ -20,16 +20,17 @@ function body(source, marker) {
   return source.slice(start + 1, end - 1)
 }
 test('Next changes editor/hints without hiding and reopening the IME', () => {
-  let focused = 0, hidden = 0, queued = 0, updated = 0
+  let focused = 0, hidden = 0, queued = 0, updated = 0, shown = 0
   const next = {visible:true, enabled:true, readOnly:false, cursorPosition:0, inputMethodHints:0,
-    forceActiveFocus() {++focused}}
+    forceActiveFocus() {++focused; this.activeFocus = true}}
   const input = {focus:true, inputMethodHints:1, nextItemInFocusChain() {return next}}
-  const scope = {input, reshowKeyboard:{restart(){++queued}}, Qt:{ImQueryInput:1, ImHints:2,
-    inputMethod:{hide(){++hidden}, update(queries){updated = queries}}}}
+  const scope = {input, reshowKeyboard:{restart(){++queued}}, Qt:{ImQueryInput:1, ImHints:2, callLater(fn){fn()},
+    inputMethod:{hide(){++hidden}, show(){++shown}, update(queries){updated = queries}}}}
   vm.runInNewContext('(function(){' + body(field, 'onAccepted:') + '})()', scope)
   assert.equal(focused, 1)
   assert.equal(hidden, 0)
   assert.equal(queued, 0)
+  assert.equal(shown, 1, 'changed hints refresh the Android keyboard without hide')
   assert.equal(updated & scope.Qt.ImHints, scope.Qt.ImHints)
 })
 test('field reveal enters the existing CoreFlow queue instead of starting competing scrolls', () => {
@@ -52,9 +53,10 @@ test('the expense modal samples one frozen backdrop while keeping its original b
   const source = read('qml/Mobile/renditions/RenditionExpenses.qml')
   const overlay = body(source, 'Overlay.modal: Item')
   assert.match(overlay, /id:\s*editorBackdrop/)
-  assert.match(overlay, /sourceItem:\s*editorPopup\.visible\s*\?\s*tab\.app\s*:\s*null/)
+  assert.match(overlay, /sourceItem:\s*tab\.app/)
+  assert.doesNotMatch(overlay, /source:\s*visible\s*\?/)
   assert.match(overlay, /live:\s*false/)
-  assert.match(overlay, /source:\s*visible\s*\?\s*editorBackdrop\s*:\s*null/)
+  assert.match(overlay, /source:\s*editorBackdrop/)
   assert.match(overlay, /blurEnabled:\s*true;\s*blurMax:\s*48;\s*blur:\s*0\.8/)
   assert.doesNotMatch(overlay, /\bsource:\s*tab\.app\b/)
   const scroll = body(source, 'FlowCore.ImeAwareFlickable {')

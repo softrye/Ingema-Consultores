@@ -23,7 +23,13 @@ Item {
 
     Item {
         id: header
+        z: 1                                               // el contenido pasa por debajo al desplazar
         width: parent.width; height: 56 * page.ui.u + page.ui.topInset
+        Rectangle {                                       // velo superior (igual que el de la barra inferior)
+            anchors.fill: parent
+            gradient: Gradient { GradientStop { position: 0.65; color: page.dark ? Qt.rgba(10 / 255, 10 / 255, 10 / 255, 0.92) : Qt.rgba(243 / 255, 246 / 255, 251 / 255, 0.85) }
+                                 GradientStop { position: 1.0; color: page.dark ? Qt.rgba(10 / 255, 10 / 255, 10 / 255, 0) : Qt.rgba(243 / 255, 246 / 255, 251 / 255, 0) } }
+        }
         Text { x: 12 * page.ui.u; y: page.ui.topInset + 14 * page.ui.u; text: String.fromCharCode(0xE06E); color: page.inkColor
                font.family: page.ui.iconFamily; font.pixelSize: 24 * page.ui.u
                MouseArea { anchors.fill: parent; anchors.margins: -12 * page.ui.u; onClicked: page.back() } }
@@ -34,13 +40,14 @@ Item {
                MouseArea { anchors.fill: parent; anchors.margins: -12 * page.ui.u; onClicked: page.more() } }
     }
     Flickable {
-        anchors.top: header.bottom; anchors.bottom: bottomHost.top
+        anchors.top: parent.top; anchors.bottom: bottomHost.top
         width: parent.width
-        contentHeight: body.height + footerText.height + 40 * page.ui.u
+        contentHeight: body.y + body.height + footerText.height + 40 * page.ui.u
         boundsBehavior: Flickable.DragOverBounds
         clip: true
         Column {
             id: body; x: 16 * page.ui.u; width: parent.width - 2 * x; spacing: 12 * page.ui.u
+            y: header.height + 8 * page.ui.u                  // empieza bajo la cabecera; al desplazar pasa por debajo (sin corte duro)
             opacity: 0
             transform: Translate { id: enterShift; y: 18 * page.ui.u }
             Component.onCompleted: page.replay()
@@ -56,7 +63,7 @@ Item {
                 NumberAnimation { target: enterShift; property: "y"; to: 0; duration: page.ui.reducedMotion ? 0 : 620; easing.type: Easing.OutQuint }
             }
         }
-        Text { id: footerText; y: body.height + 16 * page.ui.u; width: parent.width; horizontalAlignment: Text.AlignHCenter
+        Text { id: footerText; y: body.y + body.height + 16 * page.ui.u; width: parent.width; horizontalAlignment: Text.AlignHCenter
                text: page.footer; visible: text.length > 0; color: page.dark ? "#A3A9B6" : "#5A6378"
                font.family: page.ui.fontFamily; font.pixelSize: 13 * page.ui.u }
     }

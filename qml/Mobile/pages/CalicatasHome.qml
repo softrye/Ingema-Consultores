@@ -92,6 +92,107 @@ Item {
         return pk.length ? "Km " + pk : ""
     }
 
+    // ----------------------------------------------- Portada
+    readonly property var latestRow: rows.length ? rows[0] : null
+    // Avance = datos de la ficha ya registrados (8 campos reales del listado).
+    function progressOf(r) {
+        if (!r) return 0
+        var f = [r.code, r.project, r.location, r.geo ? "1" : "", r.altitude, r.supervisor, r.startDate, r.observations]
+        var n = 0
+        for (var i = 0; i < f.length; ++i) if (String(f[i] || "").trim().length) ++n
+        return n / f.length
+    }
+    function dash(v) { var t = String(v || "").trim(); return t.length ? t : "—" }
+    function _meters(v) { var n = _num(v); return isFinite(n) ? n.toLocaleString(Qt.locale("es_PE"), "f", 3) + " m" : "" }
+    // Coordenadas WGS84: UTM real si la ficha es WGS84; si no, lat/lon convertidas.
+    function coordLines(r) {
+        if (!r) return ["—"]
+        var n = _meters(r.utmN), e = _meters(r.utmE)
+        if (n.length && e.length && String(r.datum || "WGS84") !== "PSAD56") return ["N: " + n, "E: " + e]
+        if (r.geo) return ["Lat: " + r.geo.lat.toFixed(6), "Lon: " + r.geo.lon.toFixed(6)]
+        return ["—"]
+    }
+
+    // ----- Diseño final: vidrio del Dock sobre el mapa (misma GlassSurface / glass.frag) -----
+    property string query: ""
+    // Tinta del vidrio del Home: oscuro = blanco; claro = navy y gris pizarra.
+    readonly property color inkMain: S.dark ? "white" : "#151A30"
+    readonly property color inkSoft: S.dark ? Qt.rgba(1, 1, 1, 0.70) : "#5A6378"
+    readonly property color accentLime: S.dark ? "#B8E986" : "#486426"
+    readonly property bool extreme: !!flow && flow.extremeMotion === true   // ganchos «Extrema» de InGeCoreFlow
+    readonly property var searchRows: {
+        var q = query.trim().toLowerCase()
+        if (!q.length) return rows
+        return rows.filter(function(r) {
+            return [r.code, r.project, r.location].join(" ").toLowerCase().indexOf(q) >= 0
+        })
+    }
+    function timeOf(r) { return r && r.updatedMs > 0 ? Qt.formatTime(new Date(r.updatedMs), "hh:mm") : "—" }
+    // Primera sección con datos pendientes (mismos 8 campos del avance).
+    function nextSection(r) {
+        if (!r) return "—"
+        function has(v) { return String(v || "").trim().length > 0 }
+        if (!has(r.code) || !has(r.project)) return "Datos generales"
+        if (!has(r.location) || !r.geo || !has(r.altitude)) return "Ubicación"
+        if (!has(r.supervisor) || !has(r.startDate)) return "Registro de campo"
+        if (!has(r.observations)) return "Observaciones"
+        return "Revisión"
+    }
+    function openFilterFrom(item) {
+        if (filterMenu.open) { filterMenu.close(); return }
+        closeMenus()
+        var p = item.mapToItem(home, item.width / 2, item.height)
+        filterMenu.anchorX = p.x - 100 * u; filterMenu.anchorY = p.y
+        haptic("light"); filterMenu.open = true
+    }
+    readonly property bool sheetNoMotion: !!ui && ui.reducedMotion === true
+    readonly property bool sheetLowTier: !!ui && ui.dockLowCostGlass === true
+    // Vidrio de Calicatas (hoja, píldora, filtro y popup). Las teselas del Map de
+    // QtLocation no las captura ShaderEffectSource (solo sus MapItems), así que un
+    // blur del mapa sale vacío y el panel queda transparente. Material sólido
+    // translúcido en todos los tiers: blanco 72 % / grafito 75 %, borde y filo del Dock.
+    component FinalGlass: Item {
+        id: fg
+        property real radius: 22 * home.u
+        anchors.fill: parent
+        z: -1
+        Rectangle {
+            anchors.fill: parent
+            radius: fg.radius
+            color: S.dark ? Qt.rgba(28 / 255, 28 / 255, 30 / 255, 0.75) : Qt.rgba(1, 1, 1, 0.72)
+            border.width: 1
+            border.color: S.dark ? Qt.rgba(1, 1, 1, 0.18) : Qt.rgba(1, 1, 1, 0.85)
+        }
+        Rectangle {                                    // filo especular superior (como el Dock)
+            anchors.fill: parent
+            radius: fg.radius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, S.dark ? 0.12 : 0.45) }
+                GradientStop { position: Math.min(0.5, 28 * home.u / Math.max(1, fg.height)); color: Qt.rgba(1, 1, 1, 0) }
+            }
+        }
+    }
+    component Helmet: Shape {                        // casco de obra (sin asset)
+        property real size: 20
+        property color tone: "white"
+        width: size; height: size
+        ShapePath {
+            strokeColor: tone; strokeWidth: Math.max(1.4, size * 0.09); fillColor: "transparent"
+            capStyle: ShapePath.RoundCap; joinStyle: ShapePath.RoundJoin
+            startX: size * 0.18; startY: size * 0.70
+            PathArc { x: size * 0.82; y: size * 0.70; radiusX: size * 0.32; radiusY: size * 0.36 }
+            PathMove { x: size * 0.06; y: size * 0.74 }
+            PathLine { x: size * 0.94; y: size * 0.74 }
+            PathMove { x: size * 0.50; y: size * 0.30 }
+            PathLine { x: size * 0.50; y: size * 0.52 }
+        }
+    }
+
+    function isRemotePurged(remoteId) {
+        var ids = serviceAvailable ? CalicataCloud.purgedCalicataIds : []
+        return ids.indexOf(String(remoteId || "").toLowerCase()) >= 0
+    }
+
     // Calicatas reales sin duplicados (fila remota + su borrador local = una).
     readonly property var allRows: {
         var dep = home.revision
@@ -102,12 +203,14 @@ Item {
             for (var i = 0; i < rows.length; ++i) {
                 var r = rows[i]
                 var rid = String(r.id || "").toLowerCase()
-                if (!rid.length || byKey["r:" + rid]) continue
+                if (!rid.length || byKey["r:" + rid] || isRemotePurged(rid)) continue
                 put("r:" + rid, {
                     key: "r:" + rid, remoteId: rid, instanceId: "", fileUrl: "",
                     code: String(r.code || "").trim(), projectId: String(r.project_id || pid),
                     location: _location(r.progresiva, ""), status: String(r.status || "BORRADOR"),
                     syncState: "SYNCED", geo: _geo(null, null, r.easting, r.northing, r.utm_zone, "WGS84"),
+                    utmE: String(r.easting === null || r.easting === undefined ? "" : r.easting),
+                    utmN: String(r.northing === null || r.northing === undefined ? "" : r.northing), datum: "WGS84",
                     altitude: String(r.altitude_m === null || r.altitude_m === undefined ? "" : r.altitude_m),
                     supervisor: String(r.supervisor || ""), startDate: String(r.start_date || ""),
                     observations: String(r.observations || ""), photoUrl: "",
@@ -128,6 +231,7 @@ Item {
             if (!lid.length || seenLocal[lid] || String(l.status || "") === "ARCHIVADO") continue
             seenLocal[lid] = true
             var remote = String(l.remoteCalicataId || "").toLowerCase()
+            if (isRemotePurged(remote)) continue // retain the draft on disk; omit its active tile
             var existing = remote.length ? byKey["r:" + remote] : null
             if (existing) {                                   // mismo UUID remoto: una sola tarjeta
                 existing.instanceId = lid
@@ -135,6 +239,9 @@ Item {
                 // La nube no guarda el datum: la copia local (WGS84/PSAD56 real) manda.
                 var localGeo = _geo(l.latitude, l.longitude, l.utmX, l.utmY, l.utmZone, String(l.datum || ""))
                 if (localGeo) existing.geo = localGeo
+                if (String(l.utmX || "").length && String(l.utmY || "").length) {
+                    existing.utmE = String(l.utmX); existing.utmN = String(l.utmY); existing.datum = String(l.datum || "")
+                }
                 if (String(l.photoUrl || "").length) existing.photoUrl = String(l.photoUrl)
                 var ls = String(l.syncState || "")
                 if (ls === "PENDING" || ls === "CONFLICT") existing.syncState = ls
@@ -149,6 +256,7 @@ Item {
                 location: _location(l.progresiva, l.location), status: String(l.status || "BORRADOR"),
                 syncState: String(l.syncState || "LOCAL") || "LOCAL",
                 geo: _geo(l.latitude, l.longitude, l.utmX, l.utmY, l.utmZone, String(l.datum || "")),
+                utmE: String(l.utmX || ""), utmN: String(l.utmY || ""), datum: String(l.datum || ""),
                 altitude: String(l.altitudeM || ""), supervisor: String(l.supervisor || ""),
                 startDate: String(l.startDate || ""), observations: String(l.observations || ""),
                 photoUrl: String(l.photoUrl || ""), updatedMs: Number(l.lastModifiedMs || 0)
@@ -355,6 +463,8 @@ Item {
     function closeMenus() {
         filterMenu.close(); cardMenu.close(); detailMenu.close()
         balanceMenu.close(); createMenu.close(); openMenu.close()
+        if (home.editor && typeof home.editor.closeHealthPanel === "function")
+            home.editor.closeHealthPanel()               // un solo emergente a la vez
     }
     function anyMenuOpen() {
         return filterMenu.open || cardMenu.open || detailMenu.open || balanceMenu.open || createMenu.open || openMenu.open
@@ -426,12 +536,13 @@ Item {
     function swipeDecision(fromPage, dx, dy, vx, startX, canceled) {
         var dir = dx > 0 ? "right" : dx < 0 ? "left" : "none"
         var wanted = fromPage === "list" ? dx < 0 : dx > 0
-        var horizontal = Math.abs(dx) > Math.abs(dy)
+        // Desde el mapa: claramente horizontal (|dx| > 2·|dy|) y con velocidad de lanzamiento.
+        var horizontal = fromPage === "map" ? Math.abs(dx) > 2 * Math.abs(dy) : Math.abs(dx) > Math.abs(dy)
         var far = Math.abs(dx) >= swipeDistance
         var fling = Math.abs(vx) >= swipeFlingVelocity && Math.abs(dx) >= 24 * u && (vx > 0) === (dx > 0)
         var edge = fromPage === "list" && (startX < systemEdge || startX > width - systemEdge)
         var reason = canceled ? "canceled" : edge ? "system_edge" : !horizontal ? "vertical"
-                   : !wanted ? "opposite" : !(far || fling) ? "short" : "ok"
+                   : !wanted ? "opposite" : !(fromPage === "map" ? fling : (far || fling)) ? "short" : "ok"
         return { dir: dir, commit: reason === "ok", reason: reason,
                  target: reason === "ok" ? (fromPage === "list" ? "map" : "list") : fromPage }
     }
@@ -541,8 +652,9 @@ Item {
             id: flick
             objectName: "homeListFlick"
             anchors.fill: parent
+            visible: false; enabled: false           // diseño final: hoja inferior «Mis calicatas»
             contentWidth: width
-            contentHeight: panel.y + panel.height
+            contentHeight: Math.max(height, column.y + column.height)
             boundsBehavior: Flickable.DragOverBounds
             // Mientras actualiza, la lista deja un hueco superior para el indicador.
             topMargin: home.refreshing ? 56 * home.u : 0
@@ -582,105 +694,129 @@ Item {
                 if (completed && !home.refreshing) { home.haptic("light"); home._trace("PULL_REFRESH"); home.refresh() }
             }
 
-            Column {                                     // cabecera desplazable
+            Column {                                     // portada (sobre las auras)
                 id: header
                 objectName: "homeHeader"
-                width: parent.width
-                y: (home.ui ? home.ui.topInset : 0) + 22 * home.u
-                spacing: 8 * home.u
+                x: 22 * home.u
+                width: parent.width - 44 * home.u
+                // Centrado vertical en el espacio libre sobre la tarjeta (como el preview).
+                readonly property real headerTop: (home.ui ? home.ui.topInset : 0) + 16 * home.u
+                y: headerTop + Math.max(0, (panel.restY - headerTop - height) / 2)
+                spacing: 10 * home.u
+                Rectangle { width: 34 * home.u; height: 5 * home.u; radius: height / 2; color: S.corporateGreen }
                 Text {
                     width: parent.width
-                    horizontalAlignment: Text.AlignHCenter
-                    text: "Calicatas"
+                    text: "Crea tu\ncalicata en\npasos simples"
                     color: S.text
+                    wrapMode: Text.WordWrap
+                    lineHeight: 1.08
                     font.family: home.ui ? home.ui.fontFamily : ""
-                    font.pixelSize: 40 * home.u
-                    font.weight: Font.Bold
-                    font.letterSpacing: -1 * home.u
+                    font.pixelSize: 32 * home.u
+                    font.weight: Font.Medium
+                    font.letterSpacing: -0.3 * home.u
                 }
-                PageDots { anchors.horizontalCenter: parent.horizontalCenter }
+                Text {
+                    width: parent.width
+                    text: "Datos geotécnicos organizados por proyecto."
+                    color: S.muted
+                    wrapMode: Text.WordWrap
+                    font.family: home.ui ? home.ui.fontFamily : ""
+                    font.pixelSize: 16 * home.u
+                }
+                PageDots { opacity: 0.55 }
             }
 
-            Rectangle {                                  // panel de vidrio (deja ver las auras)
+            // Tarjeta «Último reciente»: la calicata modificada más recientemente.
+            Rectangle {
                 id: panel
-                x: 12 * home.u
-                width: parent.width - 24 * home.u
-                y: header.y + header.height + 24 * home.u
-                // Reserva final = Dock flotante + respiro (como Rendiciones).
-                height: Math.max(column.height + 22 * home.u + (home.ui ? home.ui.dockArea : 96) + 12 * home.u,
-                                 flick.height - y + 30 * home.u)
-                radius: 30 * home.u
-                color: S.glass(0.38)
+                objectName: "homeLatestCard"
+                x: 14 * home.u
+                width: parent.width - 28 * home.u
+                // Anclada abajo, sobre el Dock; nunca se monta sobre el título.
+                readonly property real restY: flick.height - (home.ui ? home.ui.dockArea : 96) - 14 * home.u - height
+                y: Math.max(restY, header.y + header.height + 24 * home.u)
+                height: latestCol.height + 40 * home.u
+                radius: 28 * home.u
+                visible: home.latestRow !== null
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "#1C2D50" }
+                    GradientStop { position: 1.0; color: "#151A30" }
+                }
                 border.width: 1
-                border.color: S.edge(0.95)
+                border.color: Qt.rgba(1, 1, 1, S.dark ? 0.10 : 0.0)
+                scale: latestTap.pressed ? 0.98 : 1
+                Behavior on scale { NumberAnimation { duration: home.flow ? home.flow.duration(120) : 120 } }
+                MouseArea { id: latestTap; anchors.fill: parent; onClicked: home.openRow(home.latestRow) }
+                Column {
+                    id: latestCol
+                    x: 20 * home.u; y: 20 * home.u
+                    width: parent.width - 40 * home.u
+                    spacing: 10 * home.u
+                    Row {
+                        spacing: 10 * home.u
+                        Rectangle {
+                            width: 30 * home.u; height: width; radius: width / 2; color: "#486426"
+                            Text { anchors.centerIn: parent; text: "✓"; color: "white"; font.pixelSize: 16 * home.u; font.bold: true }
+                        }
+                        Text { anchors.verticalCenter: parent.verticalCenter; text: "Último reciente"; color: "white"
+                               font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 15 * home.u }
+                    }
+                    Text {
+                        width: parent.width; elide: Text.ElideRight
+                        text: home.latestRow ? home.dash(home.latestRow.code.length ? "Calicata " + home.latestRow.code : "") : ""
+                        color: "white"
+                        font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 30 * home.u; font.weight: Font.Bold
+                    }
+                    Text {
+                        width: parent.width; elide: Text.ElideRight
+                        text: home.latestRow ? home.dash(home.latestRow.project) : ""
+                        color: Qt.rgba(1, 1, 1, 0.82)
+                        font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 16 * home.u
+                    }
+                    Item { width: 1; height: 2 * home.u }
+                    Rectangle {                              // avance de la ficha
+                        width: parent.width; height: 28 * home.u; radius: height / 2
+                        color: Qt.rgba(1, 1, 1, 0.16)
+                        readonly property real ratio: home.progressOf(home.latestRow)
+                        Rectangle {
+                            width: Math.max(height, parent.width * parent.ratio); height: parent.height; radius: height / 2
+                            color: "white"
+                            Behavior on width { NumberAnimation { duration: home.flow ? home.flow.duration(320) : 320; easing.type: Easing.OutCubic } }
+                        }
+                        Text { x: 12 * home.u; anchors.verticalCenter: parent.verticalCenter
+                               text: Math.round(parent.ratio * 100) + "%"; color: "#1C2D50"
+                               font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 14 * home.u; font.weight: Font.Bold }
+                    }
+                    Item {
+                        width: parent.width; height: 36 * home.u
+                        Text { anchors.verticalCenter: parent.verticalCenter; text: "Datos de la ficha registrados"
+                               color: Qt.rgba(1, 1, 1, 0.62); font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 12 * home.u }
+                        Rectangle {                          // editar = abrir la ficha
+                            anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                            height: 36 * home.u; radius: height / 2
+                            color: "#486426"
+                            width: editRow.implicitWidth + 30 * home.u
+                            Row {
+                                id: editRow; anchors.centerIn: parent; spacing: 6 * home.u
+                                Text { anchors.verticalCenter: parent.verticalCenter; text: "Editar"; color: "white"
+                                       font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 14 * home.u; font.weight: Font.DemiBold }
+                                Components.FlowIcon { anchors.verticalCenter: parent.verticalCenter; width: 16 * home.u; height: width
+                                                      name: "action.edit"; flow: home.flow; tintColor: "white"; activeTintColor: "white"
+                                                      onDark: true; inactiveOpacity: 1 }
+                            }
+                        }
+                    }
+                }
+                Accessible.role: Accessible.Button
+                Accessible.name: "Abrir la calicata más reciente"
             }
 
             Column {
                 id: column
-                x: panel.x + 16 * home.u
-                width: panel.width - 32 * home.u
-                y: panel.y + 18 * home.u
-                spacing: 14 * home.u
-
-                Item {
-                    width: parent.width
-                    height: 44 * home.u
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "Calicatas recientes"
-                        color: S.text
-                        opacity: 0.72
-                        font.family: home.ui ? home.ui.fontFamily : ""
-                        font.pixelSize: 21 * home.u
-                    }
-                    Rectangle {                          // filtro (3D Touch)
-                        id: filterButton
-                        objectName: "homeFilterButton"
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 44 * home.u; height: width; radius: width / 2
-                        color: filterTap.pressed ? S.glass(0.98) : S.glass(0.82)
-                        border.width: 1
-                        border.color: home.filterProjectId.length ? S.corporateBlue : S.ink(0.06)
-                        scale: filterTap.pressed ? 0.94 : 1
-                        Behavior on scale { NumberAnimation { duration: 120 } }
-                        Components.FlowIcon {
-                            anchors.centerIn: parent
-                            width: 22 * home.u; height: width
-                            name: "project.current"           // registrado en IconCatalog
-                            flow: home.flow
-                            tintColor: home.filterProjectId.length ? S.corporateBlue : S.navy
-                            activeTintColor: S.corporateBlue
-                            onDark: S.dark
-                            inactiveOpacity: 1
-                        }
-                        MouseArea {
-                            id: filterTap
-                            anchors.fill: parent
-                            anchors.margins: -6 * home.u
-                            onClicked: {
-                                if (filterMenu.open) { filterMenu.close(); return }
-                                home.closeMenus()
-                                var p = filterButton.mapToItem(home, filterButton.width / 2, filterButton.height)
-                                filterMenu.anchorX = p.x - 100 * home.u
-                                filterMenu.anchorY = p.y
-                                home.haptic("light")
-                                filterMenu.open = true
-                            }
-                        }
-                        Accessible.role: Accessible.Button
-                        Accessible.name: "Filtrar por proyecto"
-                    }
-                }
-                Text {                                   // filtro activo
-                    width: parent.width
-                    visible: home.filterProjectId.length > 0
-                    text: home.projectLabel(home.filterProjectId, "", "")
-                    color: S.corporateBlue
-                    elide: Text.ElideRight
-                    font.family: home.ui ? home.ui.fontFamily : ""
-                    font.pixelSize: 14 * home.u
-                }
+                x: 22 * home.u
+                width: parent.width - 44 * home.u
+                y: (panel.visible ? panel.y + panel.height : header.y + header.height) + 18 * home.u
+                spacing: 10 * home.u
                 Text {
                     objectName: "homeLoadingText"
                     width: parent.width
@@ -695,7 +831,7 @@ Item {
                     objectName: "homeStateText"
                     width: parent.width
                     visible: home.loadState === "empty" || home.loadState === "error" || home.loadState === "offline"
-                    topPadding: 24 * home.u
+                    topPadding: 12 * home.u
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
                     text: CalDiag.isHomeTimeout(home.projectsError.length ? home.projectsError : home.listError)
@@ -710,34 +846,7 @@ Item {
                     font.family: home.ui ? home.ui.fontFamily : ""
                     font.pixelSize: 15 * home.u
                 }
-                Grid {
-                    id: cards
-                    width: parent.width
-                    columns: 2
-                    columnSpacing: 12 * home.u
-                    rowSpacing: 12 * home.u
-                    readonly property real cellW: (width - columnSpacing) / 2
-                    Repeater {
-                        objectName: "homeCards"
-                        // Las celdas de dos columnas tienen siempre el mismo ancho.
-                        // El elemento impar de ancho completo va FUERA del Grid para
-                        // que Qt Grid no lo desplace ni produzca una tercera columna.
-                        model: home.rows.length % 2 ? home.rows.slice(0, -1) : home.rows
-                        delegate: CalicataCard {
-                            required property var modelData
-                            required property int index
-                            row: modelData
-                            wide: false
-                            width: cards.cellW
-                        }
-                    }
-                }
-                CalicataCard {
-                    visible: home.rows.length % 2 === 1
-                    row: home.rows.length ? home.rows[home.rows.length - 1] : ({})
-                    wide: true
-                    width: column.width
-                }
+                Item { width: 1; height: (home.ui ? home.ui.dockArea : 96) + 12 * home.u }
             }
         }
 
@@ -781,6 +890,192 @@ Item {
         // gesto se vuelve horizontal, el handler toma el toque y la tarjeta no se abre.
         // Una vez reconocido como horizontal, ni el Flickable (por una leve deriva
         // vertical) ni una tarjeta se lo quitan; el sistema aún puede cancelarlo.
+        // ====== Diseño final (2026-11-02): mapa topográfico de fondo + vidrio del Dock ======
+        Item {                                       // barra superior
+            id: finalTop
+            opacity: 1 - 0.55 * sheet.expandProgress
+            scale: 1 - 0.06 * sheet.expandProgress
+            transformOrigin: Item.Left
+            x: 18 * home.u; width: parent.width - 36 * home.u
+            y: (home.ui ? home.ui.topInset : 0) + 8 * home.u
+            height: 54 * home.u
+            Text {                                   // título a la izquierda; la píldora es el filtro
+                anchors.left: parent.left; anchors.leftMargin: 4 * home.u
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.StyledText
+                text: "Calicatas"
+                color: home.inkMain
+                font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 24 * home.u; font.weight: Font.Medium
+            }
+        }
+        Item {                                       // píldora de calicatas con ubicación
+            id: nearPill
+            opacity: 1 - sheet.expandProgress
+            visible: opacity > 0.02
+            anchors.right: finalTop.right
+            y: finalTop.y + finalTop.height + 14 * home.u
+            width: nearText.implicitWidth + 64 * home.u; height: 46 * home.u
+            FinalGlass { radius: height / 2 }
+            Text {
+                id: nearText
+                x: 22 * home.u; anchors.verticalCenter: parent.verticalCenter
+                text: home.markers.length + (home.markers.length === 1 ? " calicata en el mapa" : " calicatas en el mapa") + "  ˅"
+                color: home.inkMain; font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 16 * home.u
+            }
+            MouseArea { anchors.fill: parent; onClicked: home.openFilterFrom(nearPill) }
+        }
+        Rectangle {                                  // el mapa se atenúa al expandir la hoja
+            anchors.fill: parent
+            color: "black"
+            opacity: 0.30 * sheet.expandProgress
+        }
+        Item {                                       // hoja inferior: buscador + Mis calicatas
+            id: sheet
+            x: 0; width: parent.width
+            property bool expanded: false
+            property real dragY: 0
+            readonly property real restY: parent.height * (expanded ? 0.15 : 0.57)
+            y: Math.max(parent.height * 0.12, Math.min(parent.height * 0.62, restY + dragY))
+            Behavior on y { enabled: !sheetDrag.active
+                NumberAnimation { duration: home.sheetNoMotion ? 0 : 380; easing.type: Easing.OutCubic } }
+            // Alto fijo (sin re-maquetar durante el arrastre): solo cambia y.
+            height: parent.height * 0.88 + 30 * home.u
+            readonly property real expandProgress: Math.max(0, Math.min(1, (parent.height * 0.57 - y) / (parent.height * 0.42)))
+            FinalGlass { radius: 30 * home.u }
+            Rectangle {                              // tirador
+                anchors.horizontalCenter: parent.horizontalCenter; y: 8 * home.u
+                width: (sheetDrag.active ? 56 : 40) * home.u; height: 5 * home.u; radius: height / 2
+                color: Qt.rgba(1, 1, 1, sheetDrag.active ? 0.90 : 0.45)
+                Behavior on width { NumberAnimation { duration: home.sheetNoMotion ? 0 : 160; easing.type: Easing.OutCubic } }
+                Behavior on color { ColorAnimation { duration: home.sheetNoMotion ? 0 : 160 } }
+            }
+            // Arrastre vertical de la hoja; el horizontal sigue siendo el paso al mapa.
+            DragHandler {
+                id: sheetDrag
+                target: null
+                xAxis.enabled: false
+                property real base: 0
+                onTranslationChanged: if (active) sheet.dragY = translation.y - base
+                onActiveChanged: {
+                    if (active) { base = translation.y; return }   // 1:1 desde que se reconoce el gesto
+                    var v = centroid.velocity.y
+                    if (sheet.dragY < -60 * home.u || v < -600) sheet.expanded = true
+                    else if (sheet.dragY > 60 * home.u || v > 600) sheet.expanded = false
+                    sheet.dragY = 0
+                    home.haptic("light")
+                }
+            }
+            Item {
+                id: searchBox
+                x: 20 * home.u; y: 20 * home.u; width: parent.width - 40 * home.u; height: 50 * home.u
+                Rectangle { anchors.fill: parent; radius: height / 2; color: Qt.rgba(1, 1, 1, 0.10); border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.22) }
+                Components.FlowIcon { x: 18 * home.u; anchors.verticalCenter: parent.verticalCenter; width: 20 * home.u; height: width
+                                      name: "action.search"; flow: home.flow; tintColor: "white"; activeTintColor: "white"; onDark: true; inactiveOpacity: 1 }
+                TextInput {
+                    id: searchInput
+                    x: 50 * home.u; width: parent.width - 66 * home.u; anchors.verticalCenter: parent.verticalCenter
+                    color: home.inkMain; clip: true
+                    font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 16 * home.u
+                    onTextChanged: home.query = text
+                    Text { anchors.fill: parent; visible: !parent.text.length && !parent.activeFocus; text: "¿Qué calicata buscas?"
+                           color: home.inkSoft; font: parent.font }
+                }
+            }
+            Text {
+                x: 22 * home.u; y: searchBox.y + searchBox.height + 18 * home.u
+                text: "Mis calicatas"; color: home.inkMain
+                font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 24 * home.u; font.weight: Font.Medium
+            }
+            ListView {
+                id: finalList
+                x: 14 * home.u; width: parent.width - 28 * home.u
+                y: searchBox.y + searchBox.height + 60 * home.u
+                // Alto del área visible con la hoja expandida (fijo).
+                height: sheet.height - y - 30 * home.u - home.height * 0.03
+                clip: true; boundsBehavior: Flickable.DragOverBounds
+                interactive: sheet.expanded                  // scroll interno solo con la hoja expandida
+                onContentYChanged: if (sheet.expanded && contentY < -50 * home.u) sheet.expanded = false
+                model: home.searchRows
+                footer: Item { width: 1; height: (home.ui ? home.ui.dockArea : 96) + 8 * home.u }
+                delegate: Item {
+                    id: frow
+                    required property var modelData
+                    required property int index
+                    width: ListView.view.width; height: 74 * home.u
+                    // Cascada al expandir: 0→1 y +12 u→0, 30 ms entre filas (15 en LOW).
+                    property real enter: 1
+                    opacity: enter
+                    transform: Translate { y: (1 - frow.enter) * 12 * home.u }
+                    scale: frowTap.pressed ? (home.extreme ? home.flow.pressScale : 0.98) : 1
+                    Behavior on scale { NumberAnimation { duration: home.sheetNoMotion ? 0 : 120; easing.type: Easing.OutCubic } }
+                    SequentialAnimation {
+                        id: frowIn
+                        PauseAnimation { duration: Math.min(frow.index, 10) * (home.extreme ? home.flow.staggerDuration : home.sheetLowTier ? 15 : 30) }
+                        NumberAnimation { target: frow; property: "enter"; from: 0; to: 1; duration: 280; easing.type: Easing.OutCubic }
+                    }
+                    Connections {
+                        target: sheet
+                        function onExpandedChanged() {
+                            if (!sheet.expanded || home.sheetNoMotion) { frowIn.stop(); frow.enter = 1; return }
+                            frow.enter = 0; frowIn.restart()
+                        }
+                    }
+                    Rectangle { anchors.fill: parent; anchors.margins: 3 * home.u; radius: 16 * home.u
+                                color: Qt.rgba(1, 1, 1, frowTap.pressed ? (home.extreme ? home.flow.pressHighlight : 0.10) : 0) }    // realce del vidrio
+                    Rectangle { visible: frow.index > 0; x: 66 * home.u; width: parent.width - 66 * home.u; height: 1; color: Qt.rgba(1, 1, 1, 0.12) }
+                    Rectangle { x: 6 * home.u; anchors.verticalCenter: parent.verticalCenter; width: 46 * home.u; height: width; radius: width / 2
+                                color: Qt.rgba(1, 1, 1, 0.10); border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.18)
+                                Helmet { anchors.centerIn: parent; size: 20 * home.u; tone: home.inkMain } }
+                    Column {
+                        x: 66 * home.u; width: parent.width - 140 * home.u; anchors.verticalCenter: parent.verticalCenter; spacing: 3 * home.u
+                        Text { width: parent.width; elide: Text.ElideRight; color: home.inkMain
+                               text: home.dash(frow.modelData.code) + " · " + home.dash(frow.modelData.project)
+                               font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 16 * home.u }
+                        Text { width: parent.width; elide: Text.ElideRight; color: home.inkSoft
+                               text: home.dash(frow.modelData.location) + " · " + home.timeOf(frow.modelData)
+                               font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 14 * home.u }
+                    }
+                    Text { anchors.right: parent.right; anchors.rightMargin: 6 * home.u; anchors.verticalCenter: parent.verticalCenter
+                           text: Math.round(home.progressOf(frow.modelData) * 100) + "%"; color: home.accentLime
+                           font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 20 * home.u; font.weight: S.dark ? Font.Medium : Font.DemiBold }
+                    MouseArea { id: frowTap; anchors.fill: parent; onClicked: home.openRow(frow.modelData) }
+                }
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter; y: 16 * home.u
+                    visible: home.searchRows.length === 0
+                    text: home.loadState === "loading" ? "Cargando tus calicatas…" : home.query.length ? "Sin resultados." : "Aún no hay calicatas."
+                    color: home.inkSoft; font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 15 * home.u
+                }
+            }
+            Item {                                   // barra de desplazamiento de vidrio
+                id: listBar
+                visible: finalList.contentHeight > finalList.height
+                x: sheet.width - width - 2 * home.u
+                y: finalList.y; width: 24 * home.u; height: finalList.height
+                readonly property bool hot: finalList.moving || barTap.pressed
+                opacity: hot ? 0.95 : 0.30
+                Behavior on opacity { NumberAnimation { duration: listBar.hot ? 120 : 700; easing.type: Easing.OutQuad } }
+                Rectangle {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: 4 * home.u; radius: width / 2
+                    height: Math.max(36 * home.u, parent.height * finalList.visibleArea.heightRatio)
+                    y: Math.max(0, Math.min(parent.height - height, parent.height * finalList.visibleArea.yPosition))
+                    color: Qt.rgba(1, 1, 1, 0.75); border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.35)
+                }
+                MouseArea {
+                    id: barTap
+                    anchors.fill: parent
+                    preventStealing: true
+                    function scrollTo(py) {
+                        var maxY = Math.max(0, finalList.contentHeight - finalList.height)
+                        finalList.contentY = finalList.originY + Math.max(0, Math.min(1, py / height)) * maxY
+                    }
+                    onPressed: function(m) { if (!sheet.expanded) sheet.expanded = true; scrollTo(m.y) }
+                    onPositionChanged: function(m) { if (pressed) scrollTo(m.y) }
+                }
+                Accessible.role: Accessible.ScrollBar; Accessible.name: "Desplazar Mis calicatas"
+            }
+        }
         PageSwipe { id: listSwipe; objectName: "homeListSwipe"; fromPage: "list"
                     grabPermissions: PointerHandler.CanTakeOverFromAnything | PointerHandler.ApprovesCancellation }
     }
@@ -790,24 +1085,45 @@ Item {
     // mientras se ve o entra (active), y conserva las listas al volver a la lista.
     CalicatasTopoMap {
         id: topoMap
+        scale: 1 // QtLocation GPU surface must never be continuously rescaled
         objectName: "homeMapPage"
         width: parent.width
         height: parent.height
-        x: (1 - home.pagePos) * width
-        visible: home.pagePos > 0.001
-        active: visible
+        z: -1                                      // fondo del Home (misma instancia del mapa)
+        x: 0
+        // The map is the LIVE BACKGROUND of both Home views: list + map.
+        // Hiding it on "list" removed the topo terrain behind the glass sheet.
+        // Release its QtLocation renderer only when opening a Calicata form,
+        // so the form and Home never have two live GPU maps simultaneously.
+        visible: home.visible && !!home.editor && home.editor.homeMode
+        active: home.visible && !!home.editor && home.editor.homeMode
+        // In list mode the sheet/swipe owns touch; in map mode QtLocation pans.
+        enabled: active && home.view === "map"
         ui: home.ui
         flow: home.flow
         markers: home.markers
-        selectedKey: detailMenu.open ? detailMenu.rowKey : ""
+        selectedKey: detailMenu.open ? detailMenu.rowKey : (home.view !== "map" && home.latestRow ? home.latestRow.key : "")
         bottomInset: home.ui ? home.ui.dockArea : 96
+        controlsInset: 0
+        // Con el popup de la calicata abierto, los controles se ocultan (orden de DIOS).
+        controlsVisible: home.pagePos > 0.5 && !detailMenu.open
         property bool fitted: false
-        onVisibleChanged: if (visible && !fitted) { fitted = true; Qt.callLater(topoMap.fitToMarkers) }
+        // Página del mapa: encuadra marcadores; en el Home se centra en la calicata activa.
+        Connections {
+            target: home
+            function onViewChanged() { if (home.view === "map" && !topoMap.fitted) { topoMap.fitted = true; Qt.callLater(topoMap.fitToMarkers) } }
+            function onLatestRowChanged() {
+                // Do not recenter an inactive renderer on every async list update.
+                if (topoMap.active && home.latestRow && home.latestRow.geo
+                        && !topoMap.fitted)
+                    topoMap.setCamera(home.latestRow.geo.lat, home.latestRow.geo.lon, 14)
+            }
+        }
         // Los resultados del filtro y de la nube llegan de forma asíncrona.
         // Nunca conservar el encuadre del filtro anterior cuando cambia la selección.
         onMarkersChanged: {
-            if (home.view === "map" && visible)
-                Qt.callLater(topoMap.fitToMarkers)
+            if (topoMap.active && !topoMap.fitted)
+                Qt.callLater(function() { if (topoMap.active && !topoMap.fitted) topoMap.fitToMarkers() })
         }
         onMarkerTapped: function(marker, x, y) {
             home.closeMenus()
@@ -827,6 +1143,7 @@ Item {
         // Cabecera compacta flotante: título e indicador sin ocupar el mapa.
         Rectangle {
             objectName: "homeMapHeader"
+            opacity: home.pagePos
             anchors.horizontalCenter: parent.horizontalCenter
             y: (home.ui ? home.ui.topInset : 0) + 10 * home.u
             width: mapHeaderRow.width + 28 * home.u
@@ -856,9 +1173,11 @@ Item {
         Item {
             objectName: "homeMapEdge"
             anchors.left: parent.left
-            anchors.leftMargin: 40 * home.u                           // fuera del borde de gestos de Android
+            // Franja de 16 u justo después del borde de gestos de Android: el resto del
+            // mapa (también cerca del borde) es paneo del mapa.
+            anchors.leftMargin: home.systemEdge
             y: (home.ui ? home.ui.topInset : 0) + 300 * home.u
-            width: 72 * home.u
+            width: 16 * home.u
             height: Math.max(0, parent.height - y - topoMap.bottomInset - 150 * home.u)
             // El Map de Qt Location toma el toque que pasa por debajo: una vez activo,
             // el gesto de página no se deja quitar (el sistema aún puede cancelarlo).
@@ -868,17 +1187,10 @@ Item {
     }
     // Detalle del marcador: sobre la gota si hay espacio arriba; si no, debajo.
     // Si el marcador sale del mapa visible, el detalle se cierra.
-    function _placeDetail() {
-        var p = topoMap.markerScreenPoint(detailMenu.rowKey)
-        if (!p || p.x < 0 || p.y < 0 || p.x > topoMap.width || p.y > topoMap.height - topoMap.bottomInset * 0.5) {
-            if (detailMenu.open) { _trace("MARKER_DETAIL_CLOSE reason=offscreen"); detailMenu.close() }
-            return
-        }
-        var a = topoMap.mapToItem(home, p.x, p.y)
-        detailMenu.above = a.y > home.height * 0.5
-        detailMenu.anchorX = a.x
-        detailMenu.anchorY = detailMenu.above ? a.y - 6 * home.u : a.y + 44 * home.u
-    }
+    // La tarjeta de detalle es fija sobre el Dock: el zoom o el paneo ya no la cierran.
+    // (Antes, al salir el marcador de la vista durante el zoom, se cerraba, controlsInset
+    // volvía a 0 y los botones +/− saltaban bajo el dedo.)
+    function _placeDetail() {}
 
     // ------------------------------------------------------- Tarjeta
     component CalicataCard: Rectangle {
@@ -1011,43 +1323,79 @@ Item {
     }
 
     // ------------------------------------------------- Menús 3D Touch
-    Renditions.RGlassMenu {                               // filtro por proyecto/carpeta
+    // Filtro por proyecto/carpeta: mismo vidrio verde oscuro del Home (FinalGlass),
+    // textos blancos y check lima. Misma API que el menú anterior (open/close/anchor).
+    Item {
         id: filterMenu
         objectName: "homeFilterMenu"
-        ui: home.ui
-        above: false
+        property bool open: false
+        property real anchorX: 0
+        property real anchorY: 0
+        function close() { open = false }
+        anchors.fill: parent
         z: 45
-        cardWidth: 260 * home.u
-        Renditions.RMenuItem {
-            ui: home.ui
-            objectName: "homeFilterAll"
-            label: "Todos"
-            glyph: home.filterProjectId.length ? 0 : 0xE06C
-            glyphColor: S.corporateBlue
-            onActivated: { home.filterProjectId = ""; home.haptic("selection"); filterMenu.close() }
-        }
-        Flickable {
-            width: parent.width
-            height: Math.min(projectList.height, 5 * 58 * home.u)
-            contentHeight: projectList.height
-            clip: true
-            boundsBehavior: Flickable.StopAtBounds
+        visible: filterCard.opacity > 0.01
+        MouseArea { anchors.fill: parent; enabled: filterMenu.open; onClicked: filterMenu.close() }
+        Item {
+            id: filterCard
+            width: Math.min(260 * home.u, home.width - 24 * home.u)
+            height: filterCol.height + 16 * home.u
+            x: Math.max(12 * home.u, Math.min(home.width - width - 12 * home.u, filterMenu.anchorX - width / 2))
+            y: filterMenu.anchorY + 10 * home.u
+            transformOrigin: Item.Top
+            scale: filterMenu.open ? 1 : (home.extreme ? home.flow.sheetStartScale : 0.9)   // «Extrema»: desde la píldora
+            opacity: filterMenu.open ? 1 : 0
+            Behavior on scale { NumberAnimation { duration: filterMenu.open ? 240 : 150; easing.type: filterMenu.open ? Easing.OutBack : Easing.InCubic; easing.overshoot: 1.3 } }
+            Behavior on opacity { NumberAnimation { duration: filterMenu.open ? 180 : 140; easing.type: Easing.OutQuad } }
+            FinalGlass { radius: 18 * home.u }
+            MouseArea { anchors.fill: parent }
+            component FilterRow: Item {
+                id: frow
+                property string label: ""
+                property bool checked: false
+                property bool separator: true
+                signal activated()
+                width: filterCol.width; height: 52 * home.u
+                Rectangle { anchors.fill: parent; anchors.margins: 2 * home.u; radius: 12 * home.u; color: rowTap.pressed ? Qt.rgba(1, 1, 1, 0.10) : "transparent" }
+                Text { x: 14 * home.u; anchors.verticalCenter: parent.verticalCenter; visible: frow.checked; text: "✓"
+                       color: home.accentLime; font.pixelSize: 18 * home.u; font.bold: true }
+                Text { x: 44 * home.u; width: parent.width - 54 * home.u; anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight
+                       text: frow.label; color: home.inkMain; font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 16 * home.u }
+                Rectangle { visible: frow.separator; x: 44 * home.u; width: parent.width - 54 * home.u; height: 1; anchors.bottom: parent.bottom; color: Qt.rgba(1, 1, 1, 0.12) }
+                MouseArea { id: rowTap; anchors.fill: parent; onClicked: frow.activated() }
+                Accessible.role: Accessible.Button; Accessible.name: frow.label
+            }
             Column {
-                id: projectList
-                width: parent.width
-                Repeater {
-                    objectName: "homeFilterProjects"
-                    model: home.projects
-                    delegate: Renditions.RMenuItem {
-                        required property var modelData
-                        required property int index
-                        readonly property string projectId: String(modelData.id || "")
-                        ui: home.ui
-                        label: String(modelData.name || modelData.code || "")
-                        glyph: home.filterProjectId === projectId ? 0xE06C : 0
-                        glyphColor: S.corporateBlue
-                        separator: index < home.projects.length - 1
-                        onActivated: { home.filterProjectId = projectId; home.haptic("selection"); filterMenu.close() }
+                id: filterCol
+                x: 8 * home.u; y: 8 * home.u; width: parent.width - 16 * home.u
+                FilterRow {
+                    objectName: "homeFilterAll"
+                    label: "Todos"
+                    checked: !home.filterProjectId.length
+                    onActivated: { home.filterProjectId = ""; home.haptic("selection"); filterMenu.close() }
+                }
+                Flickable {
+                    width: parent.width
+                    height: Math.min(projectList.height, 5 * 52 * home.u)
+                    contentHeight: projectList.height
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    Column {
+                        id: projectList
+                        width: parent.width
+                        Repeater {
+                            objectName: "homeFilterProjects"
+                            model: home.projects
+                            delegate: FilterRow {
+                                required property var modelData
+                                required property int index
+                                readonly property string projectId: String(modelData.id || "")
+                                label: String(modelData.name || modelData.code || "")
+                                checked: home.filterProjectId === projectId
+                                separator: index < home.projects.length - 1
+                                onActivated: { home.filterProjectId = projectId; home.haptic("selection"); filterMenu.close() }
+                            }
+                        }
                     }
                 }
             }
@@ -1088,100 +1436,119 @@ Item {
         }
     }
 
-    Renditions.RGlassMenu {                               // detalle de la calicata del marcador
+    // Detalle de la calicata del marcador: tarjeta de vidrio del Dock (diseño final).
+    // Fija sobre el Dock; el mapa suma su alto a bottomInset para que sus controles
+    // queden siempre por encima. Misma API que el menú anterior (open/close/rowKey).
+    Item {
         id: detailMenu
         objectName: "calicataMapDetail"
         property string rowKey: ""
         readonly property var row: home.rowByKey(rowKey) || ({})
-        ui: home.ui
-        above: true
+        property bool open: false
+        property real anchorX: 0
+        property real anchorY: 0
+        property bool above: true
+        function close() { open = false }
         z: 45
-        cardWidth: 340 * home.u
-        Item {
-            width: parent.width
-            height: Math.max(detailPhoto.height, detailHead.height) + 8 * home.u
-            Rectangle {
-                id: detailPhoto
-                visible: home.coverFor(detailMenu.row).length > 0
-                width: visible ? 86 * home.u : 0
-                height: 86 * home.u
-                radius: 14 * home.u
-                clip: true
-                color: S.ink(0.05)
-                Image { anchors.fill: parent; source: home.coverFor(detailMenu.row); fillMode: Image.PreserveAspectCrop
-                        sourceSize: Qt.size(240, 240); asynchronous: true }
-            }
-            Column {
-                id: detailHead
-                x: detailPhoto.width + (detailPhoto.visible ? 12 * home.u : 4 * home.u)
-                width: parent.width - x - 44 * home.u
-                spacing: 3 * home.u
-                Text { width: parent.width; text: detailMenu.row.code || "Sin código"; color: S.text; elide: Text.ElideRight
-                       font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 20 * home.u; font.weight: Font.Bold }
-                Text { width: parent.width; visible: text.length > 0; text: detailMenu.row.location || ""; color: S.muted
-                       elide: Text.ElideRight; font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 14 * home.u }
-                Text { width: parent.width; visible: text.length > 0; text: detailMenu.row.project || ""; color: S.muted
-                       elide: Text.ElideRight; font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 14 * home.u }
-                Text { width: parent.width; visible: text.length > 0; text: home.dateLabel(detailMenu.row.startDate); color: S.muted
-                       font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 14 * home.u }
-            }
-            Rectangle {
-                anchors.right: parent.right
-                width: 34 * home.u; height: width; radius: width / 2
-                color: S.ink(0.05)
-                Text { anchors.centerIn: parent; text: String.fromCharCode(0xE1B2); color: S.text
-                       font.family: home.ui ? home.ui.iconFamily : ""; font.pixelSize: 17 * home.u }
-                MouseArea { anchors.fill: parent; anchors.margins: -6 * home.u; onClicked: detailMenu.close() }
-                Accessible.role: Accessible.Button
-                Accessible.name: "Cerrar"
-            }
+        x: 16 * home.u
+        width: parent.width - 32 * home.u
+        height: detailCol.height + 32 * home.u
+        y: parent.height - (home.ui ? home.ui.dockArea : 96) - 12 * home.u - height + (open ? 0 : 24 * home.u)
+        opacity: open ? 1 : 0
+        visible: opacity > 0.01
+        Behavior on opacity { NumberAnimation { duration: home.flow ? home.flow.duration(200) : 200; easing.type: Easing.OutCubic } }
+        Behavior on y { NumberAnimation { duration: home.flow ? home.flow.duration(240) : 240; easing.type: Easing.OutCubic } }
+        // «Extrema»: nace desde el marcador (escala desde el origen); en lo demás, sin escala.
+        transform: Scale {
+            origin.x: detailMenu.anchorX > 0 ? Math.max(0, Math.min(detailMenu.width, detailMenu.anchorX - detailMenu.x)) : detailMenu.width / 2
+            origin.y: detailMenu.height
+            xScale: detailMenu.open || !home.extreme ? 1 : home.flow.sheetStartScale
+            yScale: xScale
+            Behavior on xScale { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
         }
-        Repeater {
-            model: {
-                var r = detailMenu.row, out = []
-                if (r.geo) out.push(["Coordenadas", r.geo.lat.toFixed(6) + ", " + r.geo.lon.toFixed(6)])
-                if (String(r.altitude || "").length) out.push(["Cota", r.altitude + " m.s.n.m."])
-                if (r.status) out.push(["Estado", home.statusLabel(r.status)
-                                        + (r.syncState === "LOCAL" || r.syncState === "PENDING" ? " · solo en este equipo" : "")])
-                if (String(r.supervisor || "").length) out.push(["Supervisor", r.supervisor])
-                if (String(r.observations || "").length) out.push(["Observaciones", r.observations])
-                return out
-            }
-            delegate: Item {
-                required property var modelData
-                width: detailMenu.cardWidth - 24 * home.u
-                height: Math.max(26 * home.u, valueText.implicitHeight + 6 * home.u)
-                Text { width: parent.width * 0.36; text: modelData[0]; color: S.muted
-                       font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 14 * home.u }
+        FinalGlass { radius: 22 * home.u }
+        MouseArea { anchors.fill: parent }
+        Column {
+            id: detailCol
+            x: 16 * home.u; y: 16 * home.u; width: parent.width - 32 * home.u
+            spacing: 8 * home.u
+            Item {
+                width: parent.width; height: 26 * home.u
                 Row {
-                    x: parent.width * 0.38
-                    width: parent.width * 0.62
-                    spacing: 6 * home.u
-                    Rectangle {
-                        visible: modelData[0] === "Estado"
-                        width: visible ? 9 * home.u : 0; height: 9 * home.u; radius: width / 2
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: S.statusColor(detailMenu.row.status)
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 8 * home.u
+                    Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 10 * home.u; height: width; radius: width / 2
+                                color: detailMenu.row.status === "BORRADOR" ? "#FF3B30" : "#B8E986" }
+                    Text { text: detailMenu.row.status ? home.statusLabel(detailMenu.row.status)
+                                 + (detailMenu.row.syncState === "LOCAL" || detailMenu.row.syncState === "PENDING" ? " · solo en este equipo" : "") : "—"
+                           color: home.inkMain; font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 15 * home.u }
+                }
+                Rectangle {                              // ✕ cerrar
+                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                    width: 30 * home.u; height: width; radius: width / 2; color: Qt.rgba(1, 1, 1, 0.14)
+                    Shape {                              // ✕ dibujado
+                        anchors.centerIn: parent; width: 12 * home.u; height: width
+                        ShapePath {
+                            strokeColor: home.inkMain; strokeWidth: 2 * home.u; capStyle: ShapePath.RoundCap; fillColor: "transparent"
+                            startX: 0; startY: 0
+                            PathLine { x: 12 * home.u; y: 12 * home.u }
+                            PathMove { x: 12 * home.u; y: 0 }
+                            PathLine { x: 0; y: 12 * home.u }
+                        }
                     }
-                    Text { id: valueText; width: parent.width - 15 * home.u; text: modelData[1]; color: S.text; wrapMode: Text.WordWrap
-                           maximumLineCount: 3; elide: Text.ElideRight
-                           font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 14 * home.u }
+                    MouseArea { anchors.fill: parent; anchors.margins: -8 * home.u; onClicked: detailMenu.close() }
+                    Accessible.role: Accessible.Button; Accessible.name: "Cerrar"
                 }
             }
-        }
-        Renditions.RButton {
-            ui: home.ui
-            primary: true
-            label: "Abrir ficha"
-            onActivated: { var r = detailMenu.row; detailMenu.close(); home.openRow(r) }
+            Text { width: parent.width; elide: Text.ElideRight; color: home.inkMain
+                   text: "Calicata " + home.dash(detailMenu.row.code)
+                   font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 22 * home.u; font.weight: Font.Medium }
+            Text { width: parent.width; elide: Text.ElideRight; color: home.inkSoft
+                   text: home.dash(detailMenu.row.location) + " · " + home.dash(detailMenu.row.project) + " · " + home.dash(home.dateLabel(detailMenu.row.startDate))
+                   font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 14 * home.u }
+            Item {
+                width: parent.width; height: 22 * home.u
+                readonly property real ratio: home.progressOf(detailMenu.row)
+                Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 6 * home.u; radius: height / 2; color: Qt.rgba(1, 1, 1, 0.22) }
+                Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width * parent.ratio; height: 6 * home.u; radius: height / 2; color: "#B8E986" }
+                Rectangle {
+                    x: Math.max(0, Math.min(parent.width - width, parent.width * parent.ratio - width / 2))
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 22 * home.u; height: width; radius: width / 2; color: "#2E3B22"; border.width: 2; border.color: "#B8E986"
+                    Helmet { anchors.centerIn: parent; size: 13 * home.u; tone: "#B8E986" }
+                }
+            }
+            Text { width: parent.width; elide: Text.ElideRight; color: home.inkMain
+                   text: "Siguiente: " + home.nextSection(detailMenu.row)
+                   font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 13 * home.u }
+            Repeater {                                   // filas compactas
+                model: [["Coordenadas", detailMenu.row.geo ? detailMenu.row.geo.lat.toFixed(6) + ", " + detailMenu.row.geo.lon.toFixed(6) : "—"],
+                        ["Cota", String(detailMenu.row.altitude || "").length ? detailMenu.row.altitude + " m.s.n.m." : "—"],
+                        ["Supervisor", home.dash(detailMenu.row.supervisor)]]
+                delegate: Item {
+                    required property var modelData
+                    width: detailCol.width; height: 22 * home.u
+                    Text { text: modelData[0]; color: home.inkSoft; font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 13 * home.u }
+                    Text { anchors.right: parent.right; width: parent.width * 0.62; horizontalAlignment: Text.AlignRight; elide: Text.ElideRight
+                           text: modelData[1]; color: home.inkMain; font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 13 * home.u }
+                }
+            }
+            Rectangle {                                  // «Abrir ficha» lima
+                width: parent.width; height: 46 * home.u; radius: height / 2
+                color: openTap.pressed ? "#9FD06C" : "#B8E986"
+                Text { anchors.centerIn: parent; text: "Abrir ficha"; color: "#1A2A10"
+                       font.family: home.ui ? home.ui.fontFamily : ""; font.pixelSize: 16 * home.u; font.weight: Font.DemiBold }
+                MouseArea { id: openTap; anchors.fill: parent; onClicked: { var r = detailMenu.row; detailMenu.close(); home.openRow(r) } }
+                Accessible.role: Accessible.Button; Accessible.name: "Abrir ficha"
+            }
         }
     }
 
-    // ---- Dock 1 · Avance global de calicatas (balance de Rendiciones).
     Renditions.RGlassMenu {
         id: balanceMenu
         objectName: "calicatasBalanceMenu"
         ui: home.ui
+        frostedFallback: true
         z: 45
         cardWidth: 360 * home.u
         readonly property var c: home.statusCounts
@@ -1406,6 +1773,7 @@ Item {
         id: openMenu
         objectName: "calicatasOpenMenu"
         ui: home.ui
+        frostedFallback: true
         z: 45
         cardWidth: 330 * home.u
         readonly property var recent: home.allRows.length ? home.allRows[0] : null

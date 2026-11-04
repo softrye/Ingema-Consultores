@@ -81,3 +81,6 @@ add_test(NAME diagnostics COMMAND rendition-diagnostics)
 add_test(NAME dock-context COMMAND rendition-dock-context)
 add_test(NAME qml-flow COMMAND rendition-qml-flow "${CMAKE_CURRENT_SOURCE_DIR}/../../qml/Mobile/renditions")
 set_tests_properties(qml-flow PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Seasonal presentation policy, exercised against real QML.
+add_subdirectory(../halloween halloween)

@@ -2,7 +2,11 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Effects
 import QtQuick.Dialogs
+import InGe 1.0
 import "../renditions"
+import "../components" as Components
+import ".." as Mobile                            // DockGlassPanel (vidrio del Dock)
+import "../renditions/RStyle.js" as S
 
 // Configuración (diseño claro aprobado; base convertida de SettingsApp.swift de
 // iOS-26-clone, Apache 2.0). Foto del Home desenfocada + velo claro + auras de
@@ -33,6 +37,13 @@ Item {
     property url avatarSource: ""
     property string firstName: ""
     property string lastName: ""
+    // Solo visual: sin nombre/apellido en Auth se separa el nombre completo
+    // (4+ palabras: los dos últimos son apellidos; si no, la primera es el nombre).
+    readonly property var fullNameSplit: {
+        var w = String(userName || "").trim().split(/\s+/).filter(function (x) { return x.length > 0 })
+        var n = w.length >= 4 ? w.length - 2 : Math.min(1, w.length)
+        return [w.slice(0, n).join(" "), w.slice(n).join(" ")]
+    }
     property string userPhone: ""
     property string userPosition: ""
     property string userArea: ""
@@ -94,16 +105,23 @@ Item {
     // Tema: claro u oscuro (ui.darkTheme lo resuelve HomeScreen, incluido «Automático»).
     property string theme: "light"
     signal themeSelected(string key)
-    property string skin: "none"                     // none | galaxias
+    property string skin: "none"                     // none | galaxias | ingema
     signal skinSelected(string key)
+    property string effectiveSkin: skin
+    readonly property bool halloween: effectiveSkin === "halloween"
+    property bool halloweenScares: true
+    property bool halloweenSound: false
+    signal halloweenScaresToggled(bool value)
+    signal halloweenSoundToggled(bool value)
+    readonly property bool halloweenBlocked: visible && (stack.busy || avatarDialog.visible || profileSaving || syncBusy || sessionsBusy || biometricBusy || storageBusy || stack.depth > 1)
     readonly property bool dark: !!ui && ui.darkTheme === true
     readonly property color ink: dark ? "#F2F4F8" : "#151A30"
     readonly property color muted: dark ? "#A3A9B6" : "#5A6378"
     // Azul corporativo #0654A2 → azul claro en oscuro; verde #486426 → verde claro.
-    readonly property color accent: dark ? "#8AB8FF" : "#0654A2"
+    readonly property color accent: halloween ? "#FF8A1F" : dark ? "#8AB8FF" : "#0654A2"
     // Verde Ingema (#486426) en tono medio para acentos del modo oscuro.
-    readonly property color green: "#5F8A36"
-    readonly property color accentSoft: dark ? Qt.rgba(138 / 255, 184 / 255, 255 / 255, 0.14) : Qt.rgba(31 / 255, 111 / 255, 214 / 255, 0.10)
+    readonly property color green: halloween ? "#FF8A1F" : "#5F8A36"
+    readonly property color accentSoft: halloween ? Qt.rgba(1, 138 / 255, 31 / 255, 0.16) : dark ? Qt.rgba(138 / 255, 184 / 255, 255 / 255, 0.14) : Qt.rgba(31 / 255, 111 / 255, 214 / 255, 0.10)
     function initials(name) {
         var parts = String(name || "").trim().split(/\s+/)
         return String((parts[0] || "").charAt(0) + (parts.length > 1 ? parts[parts.length - 1].charAt(0) : "")).toUpperCase()
@@ -132,13 +150,18 @@ Item {
         return p === "android" || p === "ios" ? 0xE163 : (p === "web" ? 0xE1CD : 0xE11D)
     }
     // Abre una sección directamente (p. ej. el antiguo acceso «Perfil» → Mi cuenta).
+    // Administradores (rol global del perfil actual): ven «Solicitudes de acceso».
+    property string accessMessage: ""                 // resultado de la última acción en Solicitudes
+    readonly property bool isAdmin: ["ADMINISTRADOR", "ADMINISTRADOR_GENERAL", "GERENCIA"]
+                                    .indexOf(String(Auth.globalRole || "").toUpperCase()) >= 0
     function openPage(key) {
         var pages = { account: accountPage, personal: personalPage, devices: devicesPage,
                       accounts: accountsPage, security: privacyPage, storage: storagePage,
-                      about: aboutPage, company: companyPage, sync: syncPage, appearance: appearancePage }
+                      about: aboutPage, company: companyPage, sync: syncPage, appearance: appearancePage,
+                      access: accessPage }
         if (pages[key]) stack.push(pages[key], key === "security" ? { title: "Inicio de sesión y seguridad" } : {})
     }
-    function handleBack() { if (stack.depth > 1) { stack.pop(); return true } return false }
+    function handleBack() { if (demanding.shown) { demanding.cancel(); return true } if (stack.depth > 1) { stack.pop(); return true } return false }
     // Al abrir: vuelve a la raíz y repite la entrada del contenido.
     onVisibleChanged: if (visible) {
         if (stack.depth > 1) stack.pop(null, StackView.Immediate)
@@ -157,7 +180,8 @@ Item {
         anchors.fill: parent
         mode: app.syncMode
         dark: app.dark
-        skin: app.skin
+        skin: app.effectiveSkin
+        halloweenController: app.ui.seasonalController || null
         running: app.visible
         reducedMotion: app.reduceMotion || app.ui.reducedMotion === true
     }
@@ -174,6 +198,119 @@ Item {
         popExit: Transition { ParallelAnimation {
             NumberAnimation { property: "x"; from: 0; to: stack.width * 0.3; duration: app.ui.reducedMotion ? 0 : 280; easing.type: Easing.InCubic }
             NumberAnimation { property: "opacity"; from: 1; to: 0; duration: app.ui.reducedMotion ? 0 : 220 } } }
+    }
+
+    // ---- Fidelidad: «Muy alta» y «Extrema» se aplican sólo tras «Activar».
+    function chooseFidelity(k) {
+        if (k === GraphicsCore.qualityOverride) return
+        if (k === "VERY_HIGH" || k === "EXTREME") {
+            demanding.ask("Modo gráfico exigente",
+                          "Activar este modo gráfico reduce drásticamente el rendimiento de la app y aumenta el consumo de batería.",
+                          "Activar", false, function () { GraphicsCore.setQualityOverride(k) })
+            return
+        }
+        GraphicsCore.setQualityOverride(k)
+    }
+    // Confirmación de vidrio única de Configuración (Fidelidad, Solicitudes de acceso).
+    Item {
+        id: demanding
+        property bool shown: false
+        property string title: ""
+        property string message: ""
+        property string confirmText: "Activar"
+        property bool danger: false
+        property var action: null                      // se ejecuta sólo con el botón principal
+        function ask(t, m, c, d, f) { title = t; message = m; confirmText = c; danger = d; action = f; shown = true }
+        function cancel() { shown = false; action = null }   // nada cambia
+        function accept() { var f = action; shown = false; action = null; if (f) f() }
+        anchors.fill: parent
+        z: 50
+        opacity: shown ? 1 : 0
+        visible: opacity > 0.01
+        Behavior on opacity { NumberAnimation { duration: app.ui.reducedMotion ? 0 : 200; easing.type: Easing.OutCubic } }
+        // Fondo: la propia Configuración desenfocada (la pila se oculta mientras tanto).
+        ShaderEffectSource {
+            id: demandingCapture
+            anchors.fill: parent
+            sourceItem: demanding.shown ? stack : null
+            live: demanding.shown; hideSource: demanding.shown
+            visible: false; smooth: true; mipmap: true
+        }
+        MultiEffect { anchors.fill: parent; source: demandingCapture; blurEnabled: true; blurMax: 48; blur: 1.0; autoPaddingEnabled: false }
+        Rectangle { anchors.fill: parent; color: app.dark ? Qt.rgba(0, 0, 0, 0.35) : Qt.rgba(243 / 255, 246 / 255, 251 / 255, 0.35) }
+        MouseArea { anchors.fill: parent; onClicked: demanding.cancel() }   // tocar fuera = Cancelar
+        QtObject {
+            id: demandingGlassHost
+            readonly property Item backdrop: demanding
+            readonly property var glassTexture: demandingCapture
+            readonly property bool glassReady: demanding.shown
+            property int glassTick: 0
+        }
+        Rectangle {
+            id: demandingCard
+            width: Math.min(parent.width - 32 * app.ui.u, 420 * app.ui.u)
+            height: demandingBody.implicitHeight + 40 * app.ui.u
+            anchors.centerIn: parent
+            radius: 26 * app.ui.u
+            color: "transparent"
+            scale: demanding.shown ? 1 : 0.94
+            Behavior on scale { NumberAnimation { duration: app.ui.reducedMotion ? 0 : 260; easing.type: Easing.OutBack } }
+            Mobile.DockGlassPanel {                    // Liquid Glass oficial (preset único del Dock)
+                glassUi: demandingGlassHost; radius: demandingCard.radius; u: app.ui.u
+                tint: app.ui.dockGlassTint !== undefined ? app.ui.dockGlassTint : Qt.rgba(0, 0, 0, 0)
+            }
+            Rectangle {                                // velo claro de la referencia (texto legible)
+                anchors.fill: parent; radius: parent.radius
+                color: app.dark ? Qt.rgba(12 / 255, 14 / 255, 20 / 255, 0.55) : Qt.rgba(1, 1, 1, 0.55)
+                border.width: 1; border.color: app.dark ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(1, 1, 1, 0.85)
+            }
+            MouseArea { anchors.fill: parent }         // tocar la tarjeta no cancela
+            Column {
+                id: demandingBody
+                x: 20 * app.ui.u; y: 20 * app.ui.u; width: parent.width - 40 * app.ui.u
+                spacing: 14 * app.ui.u
+                Row {
+                    width: parent.width; spacing: 14 * app.ui.u
+                    Rectangle {                        // ícono ⚠ en cuadro de vidrio
+                        id: demandingIcon
+                        width: 46 * app.ui.u; height: width; radius: 12 * app.ui.u
+                        color: app.dark ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(150 / 255, 160 / 255, 185 / 255, 0.30)
+                        border.width: 1; border.color: Qt.rgba(1, 1, 1, app.dark ? 0.18 : 0.70)
+                        Components.FlowIcon {          // advertencia del cat\u00E1logo (sin glifo de texto)
+                            anchors.centerIn: parent; width: 24 * app.ui.u; height: width
+                            name: "status.warning"; tintColor: app.ink; activeTintColor: app.ink; inactiveOpacity: 1
+                        }
+                    }
+                    Text {
+                        width: parent.width - demandingIcon.width - parent.spacing
+                        anchors.verticalCenter: demandingIcon.verticalCenter
+                        text: demanding.title; color: app.ink; wrapMode: Text.WordWrap
+                        font.family: app.ui.fontFamily; font.pixelSize: 18 * app.ui.u; font.weight: Font.Bold
+                    }
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap; color: app.muted
+                    text: demanding.message
+                    font.family: app.ui.fontFamily; font.pixelSize: 16 * app.ui.u; lineHeight: 1.15
+                }
+                Rectangle {                            // «Activar»: azul, como «Entendido»
+                    width: parent.width; height: 52 * app.ui.u; radius: 14 * app.ui.u
+                    color: demanding.danger ? (activateTap.pressed ? "#A92634" : "#C62F3E") : (activateTap.pressed ? "#2E5FC4" : "#3A72DE")
+                    Text { anchors.centerIn: parent; text: demanding.confirmText; color: "white"
+                           font.family: app.ui.fontFamily; font.pixelSize: 17 * app.ui.u; font.weight: Font.DemiBold }
+                    MouseArea { id: activateTap; anchors.fill: parent; onClicked: demanding.accept() }
+                    Accessible.role: Accessible.Button; Accessible.name: demanding.confirmText
+                }
+                Rectangle {                            // «Cancelar»: secundario
+                    width: parent.width; height: 48 * app.ui.u; radius: 14 * app.ui.u
+                    color: cancelTap.pressed ? Qt.rgba(0.5, 0.55, 0.65, 0.18) : "transparent"
+                    Text { anchors.centerIn: parent; text: "Cancelar"; color: app.dark ? "#C9D1E2" : "#3A4258"
+                           font.family: app.ui.fontFamily; font.pixelSize: 16 * app.ui.u; font.weight: Font.DemiBold }
+                    MouseArea { id: cancelTap; anchors.fill: parent; onClicked: demanding.cancel() }
+                    Accessible.role: Accessible.Button; Accessible.name: "Cancelar"
+                }
+            }
+        }
     }
 
     component SectionLabel: Text {
@@ -219,8 +356,8 @@ Item {
         Row {
             anchors.centerIn: parent; spacing: 10 * app.ui.u
             Text { visible: actionRoot.glyph > 0; anchors.verticalCenter: parent.verticalCenter; text: String.fromCharCode(actionRoot.glyph)
-                   color: actionRoot.danger ? "#D64550" : "white"; font.family: app.ui.iconFamily; font.pixelSize: 19 * app.ui.u }
-            Text { anchors.verticalCenter: parent.verticalCenter; text: actionRoot.label; color: actionRoot.danger ? "#D64550" : "white"
+                   color: actionRoot.danger ? "#D64550" : (app.halloween ? "#2B1047" : "white"); font.family: app.ui.iconFamily; font.pixelSize: 19 * app.ui.u }
+            Text { anchors.verticalCenter: parent.verticalCenter; text: actionRoot.label; color: actionRoot.danger ? "#D64550" : (app.halloween ? "#2B1047" : "white")
                    font.family: app.ui.fontFamily; font.pixelSize: 16 * app.ui.u; font.weight: Font.DemiBold }
         }
         MouseArea { id: actionTap; anchors.fill: parent; enabled: !actionRoot.busy; onClicked: actionRoot.activated() }
@@ -237,10 +374,10 @@ Item {
         property bool chevron: false
         readonly property real textX: glyph > 0 ? 70 * app.ui.u : 16 * app.ui.u
         width: parent ? parent.width : 0; height: 72 * app.ui.u; radius: 16 * app.ui.u
-        color: app.dark ? Qt.rgba(28 / 255, 45 / 255, 80 / 255, (editable ? 0.70 : 0.45))
+        color: app.halloween ? S.glass(editable ? 0.94 : 0.70) : app.dark ? Qt.rgba(28 / 255, 45 / 255, 80 / 255, (editable ? 0.70 : 0.45))
                         : (editable ? Qt.rgba(1, 1, 1, 0.92) : Qt.rgba(236 / 255, 241 / 255, 248 / 255, 0.85))
         border.width: fieldInput.activeFocus ? 2 : 1
-        border.color: fieldInput.activeFocus ? "#2F7BD0" : (app.dark ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.08))
+        border.color: app.halloween ? (fieldInput.activeFocus ? app.accent : S.edge(0.95)) : fieldInput.activeFocus ? "#2F7BD0" : (app.dark ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.08))
         Rectangle {
             visible: fieldRoot.glyph > 0
             x: 14 * app.ui.u; anchors.verticalCenter: parent.verticalCenter
@@ -327,6 +464,10 @@ Item {
                                  onClicked: stack.push(syncPage) } }
             Card { SettingsRow { ui: app.ui; glyph: 0xE10B; tone: "#7B61D1"; title: "Privacidad y seguridad"; subtitle: "Acceso y protección"; last: true
                                  onClicked: stack.push(privacyPage) } }
+            Card { visible: app.isAdmin
+                   SettingsRow { ui: app.ui; glyph: 0xE1A4; tone: "#E8A21A"; title: "Solicitudes de acceso"; subtitle: "Cuentas pendientes de aprobación"; last: true
+                                 value: AccessRequests.requests.length > 0 ? String(AccessRequests.requests.length) : ""
+                                 onClicked: stack.push(accessPage) } }
             Card { SettingsRow { ui: app.ui; glyph: 0xE088; tone: "#E8A21A"; title: "Almacenamiento"; subtitle: "Espacio en el servidor"; last: true
                                  value: app.storageStats && app.storageStats.used !== undefined ? app.bytes(app.storageStats.used) : ""
                                  onClicked: { app.storageRefreshRequested(); stack.push(storagePage) } } }
@@ -454,9 +595,9 @@ Item {
             }
             Row {
                 width: parent.width; spacing: 12 * app.ui.u
-                FieldBox { id: nameField; width: (parent.width - parent.spacing) / 2; label: "Nombres"; text: app.firstName
+                FieldBox { id: nameField; width: (parent.width - parent.spacing) / 2; label: "Nombres"; text: app.firstName.length ? app.firstName : app.fullNameSplit[0]
                            inputHints: Qt.ImhNoPredictiveText }
-                FieldBox { id: lastField; width: (parent.width - parent.spacing) / 2; label: "Apellidos"; text: app.lastName
+                FieldBox { id: lastField; width: (parent.width - parent.spacing) / 2; label: "Apellidos"; text: app.lastName.length ? app.lastName : app.fullNameSplit[1]
                            inputHints: Qt.ImhNoPredictiveText }
             }
             FieldBox { label: "Correo principal"; text: app.userEmail; editable: false; glyph: 0xE10F }
@@ -543,6 +684,129 @@ Item {
                               color: app.muted; font.family: app.ui.fontFamily; font.pixelSize: 14 * app.ui.u } }
             }
             Notice { text: "Toca un dispositivo para cerrar su sesión. Incluye InGe+ en el teléfono y la versión web en PC." }
+        }
+    }
+
+    // ================================================ Solicitudes de acceso
+    // Perfiles PENDIENTE (paridad Web). Aprobar: rol institucional y, opcional,
+    // acceso a un proyecto. Rechazar: [PENDIENTE SERVIDOR] (no hay RPC).
+    component Choice: Rectangle {                      // chip de selección (mismo estilo que Fidelidad)
+        id: choice
+        property string text: ""
+        property bool on: false
+        signal picked()
+        width: choiceText.implicitWidth + 28 * app.ui.u; height: 40 * app.ui.u; radius: 12 * app.ui.u
+        color: on ? Qt.rgba(47 / 255, 123 / 255, 208 / 255, app.dark ? 0.22 : 0.08) : (app.dark ? Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.55) : Qt.rgba(1, 1, 1, 0.80))
+        border.width: on ? 2 : 1; border.color: on ? "#2F7BD0" : (app.dark ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.10))
+        Text { id: choiceText; anchors.centerIn: parent; text: choice.text; color: app.ink
+               font.family: app.ui.fontFamily; font.pixelSize: 13.5 * app.ui.u; font.weight: choice.on ? Font.Bold : Font.Normal }
+        MouseArea { anchors.fill: parent; onClicked: choice.picked() }
+        Accessible.role: Accessible.RadioButton; Accessible.name: text; Accessible.checked: on
+    }
+    component AccessRequestCard: Card {
+        id: requestCard
+        property var request: ({})
+        property string roleCode: ""
+        property string projectId: ""
+        property string projectRole: "OPERADOR_CAMPO"
+        property string accessLevel: "READ"
+        readonly property string displayName: String(request.fullName || "").trim().length ? String(request.fullName) : "Sin nombre"
+        Column {
+            x: 16 * app.ui.u; width: parent.width - 32 * app.ui.u; spacing: 10 * app.ui.u
+            topPadding: 16 * app.ui.u; bottomPadding: 16 * app.ui.u
+            Text { width: parent.width; text: requestCard.displayName; color: app.ink; elide: Text.ElideRight
+                   font.family: app.ui.fontFamily; font.pixelSize: 17 * app.ui.u; font.weight: Font.Bold }
+            Text { width: parent.width; text: String(requestCard.request.email || ""); color: app.muted; elide: Text.ElideMiddle
+                   textFormat: Text.PlainText; font.family: app.ui.fontFamily; font.pixelSize: 14 * app.ui.u }
+            Text { text: requestCard.request.registeredAt ? "Solicitada el " + Qt.formatDateTime(new Date(requestCard.request.registeredAt), "dd-MM-yyyy HH:mm") : ""
+                   visible: text.length > 0; color: app.muted; font.family: app.ui.fontFamily; font.pixelSize: 13 * app.ui.u }
+            SectionLabel { text: "Rol" }
+            Flow {
+                width: parent.width; spacing: 8 * app.ui.u
+                Repeater {
+                    model: AccessRequests.roles
+                    delegate: Choice { required property var modelData; text: String(modelData.label || modelData.code)
+                                       on: requestCard.roleCode === modelData.code; onPicked: requestCard.roleCode = modelData.code }
+                }
+            }
+            SectionLabel { text: "Proyecto (opcional)" }
+            Flow {
+                width: parent.width; spacing: 8 * app.ui.u
+                Choice { text: "Ninguno"; on: requestCard.projectId === ""; onPicked: requestCard.projectId = "" }
+                Repeater {
+                    model: CalicataCloud.projects || []
+                    delegate: Choice { required property var modelData; text: String(modelData.name || modelData.code || "Proyecto")
+                                       on: requestCard.projectId === String(modelData.id); onPicked: requestCard.projectId = String(modelData.id) }
+                }
+            }
+            Flow {
+                visible: requestCard.projectId !== ""
+                width: parent.width; spacing: 8 * app.ui.u
+                Repeater {
+                    model: [{ k: "COORDINADOR_PROYECTO", l: "Coordinador" }, { k: "ESPECIALISTA_TECNICO", l: "Especialista técnico" },
+                            { k: "OPERADOR_CAMPO", l: "Operador de campo" }, { k: "GESTOR_DOCUMENTAL", l: "Gestor documental" },
+                            { k: "LECTOR_PROYECTO", l: "Lector" }]
+                    delegate: Choice { required property var modelData; text: modelData.l
+                                       on: requestCard.projectRole === modelData.k; onPicked: requestCard.projectRole = modelData.k }
+                }
+                Choice { text: "Archivos: lectura"; on: requestCard.accessLevel === "READ"; onPicked: requestCard.accessLevel = "READ" }
+                Choice { text: "Archivos: edición"; on: requestCard.accessLevel === "WRITE"; onPicked: requestCard.accessLevel = "WRITE" }
+            }
+            Row {
+                width: parent.width; spacing: 10 * app.ui.u
+                ActionButton {
+                    width: (parent.width - parent.spacing) / 2
+                    label: "Aprobar"; busy: AccessRequests.busy
+                    opacity: requestCard.roleCode !== "" ? 1 : 0.5
+                    onActivated: {
+                        if (requestCard.roleCode === "" || AccessRequests.busy) return
+                        var r = requestCard.request
+                        demanding.ask("Aprobar cuenta",
+                                      "Se activará la cuenta de " + requestCard.displayName + " con el rol elegido"
+                                      + (requestCard.projectId !== "" ? " y acceso al proyecto." : "."),
+                                      "Aprobar", false, function () {
+                                          AccessRequests.approve(String(r.profileId), String(r.updatedAt), requestCard.roleCode,
+                                                                 requestCard.projectId, requestCard.projectRole, requestCard.accessLevel)
+                                      })
+                    }
+                }
+                ActionButton {
+                    width: (parent.width - parent.spacing) / 2
+                    label: "Rechazar"; danger: true
+                    opacity: AccessRequests.rejectAvailable ? 1 : 0.5
+                    onActivated: {
+                        if (!AccessRequests.rejectAvailable) { app.accessMessage = "Rechazar aún no está disponible en el servidor."; return }
+                        var r = requestCard.request
+                        demanding.ask("Rechazar solicitud", "La cuenta de " + requestCard.displayName + " no tendrá acceso a InGe+.",
+                                      "Rechazar", true, function () { AccessRequests.reject(String(r.profileId)) })
+                    }
+                }
+            }
+        }
+    }
+    Component {
+        id: accessPage
+        SettingsPage {
+            ui: app.ui; title: "Solicitudes de acceso"
+            onBack: stack.pop()
+            Component.onCompleted: { app.accessMessage = ""; AccessRequests.refresh(); if (CalicataCloud.refreshProjects) CalicataCloud.refreshProjects() }
+            Connections {
+                target: AccessRequests
+                function onActionFinished(ok, message) { app.accessMessage = message }
+            }
+            Notice { text: app.accessMessage.length ? app.accessMessage : AccessRequests.error }
+            SectionLabel { text: "Pendientes de aprobación" }
+            Card {
+                visible: AccessRequests.requests.length === 0
+                Item { width: parent.width; height: 72 * app.ui.u
+                       Text { anchors.centerIn: parent; text: AccessRequests.busy ? "Consultando el servidor…" : "Sin solicitudes"
+                              color: app.muted; font.family: app.ui.fontFamily; font.pixelSize: 15 * app.ui.u } }
+            }
+            Repeater {
+                model: AccessRequests.requests
+                delegate: AccessRequestCard { required property var modelData; request: modelData }
+            }
+            Notice { text: "Aprobar activa la cuenta con el rol elegido. El acceso a un proyecto es opcional y puede darse después." }
         }
     }
 
@@ -715,24 +979,42 @@ Item {
             SectionLabel { text: "Skins" }
             Row {
                 id: skins
-                width: parent.width; spacing: 10 * app.ui.u
+                width: parent.width; spacing: 8 * app.ui.u
                 Repeater {
-                    model: [{ k: "none", l: "Ninguna", d: "Auras", bg: "#0A0A0A" },
-                            { k: "galaxias", l: "Galaxias", d: "Universo vivo", bg: "#0B0F1E" }]
+                    // Miniaturas según el modo actual: claro u oscuro.
+                    model: [{ k: "none", l: "Ninguna", bg: app.dark ? "#0A0A0A" : "#EEF3FA" },
+                            { k: "ingema", l: "Ingema", bg: app.dark ? "#071A33" : "#F1F5FA" },
+                            { k: "galaxias", l: "Galaxias", bg: "#0B0F1E" },
+                            { k: "halloween", l: "Halloween", bg: app.dark ? "#2B1047" : "#FFF3E6" }]
                     delegate: Rectangle {
                         id: skinCell
                         required property var modelData
-                        readonly property bool on: modelData.k === app.skin
-                        width: (skins.width - skins.spacing) / 2; height: 132 * app.ui.u; radius: 18 * app.ui.u
+                        // «Automática» resalta la skin que está aplicando hoy.
+                        readonly property bool on: modelData.k === (app.skin === "auto" ? app.effectiveSkin : app.skin)
+                        width: (skins.width - 3 * skins.spacing) / 4; height: 88 * app.ui.u; radius: 14 * app.ui.u
                         color: on ? Qt.rgba(47 / 255, 123 / 255, 208 / 255, app.dark ? 0.22 : 0.08) : (app.dark ? Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.55) : Qt.rgba(1, 1, 1, 0.80))
                         border.width: on ? 2 : 1; border.color: on ? "#2F7BD0" : (app.dark ? Qt.rgba(1, 1, 1, 0.10) : "white")
                         scale: skinTap.pressed ? 0.97 : 1
                         Behavior on scale { NumberAnimation { duration: 110 } }
                         Rectangle {                        // miniatura
-                            x: 10 * app.ui.u; y: 10 * app.ui.u; width: parent.width - 20 * app.ui.u; height: 70 * app.ui.u
-                            radius: 10 * app.ui.u; color: skinCell.modelData.bg; clip: true
+                            x: 6 * app.ui.u; y: 6 * app.ui.u; width: parent.width - 12 * app.ui.u; height: 54 * app.ui.u
+                            radius: 9 * app.ui.u; color: skinCell.modelData.bg; clip: true
+                            border.width: app.dark ? 0 : 1; border.color: Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.08)
+                            Image {
+                                anchors.fill: parent; anchors.margins: 6 * app.ui.u
+                                visible: skinCell.modelData.k === "ingema"
+                                source: app.dark ? "qrc:/images/INGEMA_CONSULTORES_LOGO_NEGATIVO.png" : "qrc:/images/INGEMA_CONSULTORES_LOGO.png"
+                                fillMode: Image.PreserveAspectFit
+                                smooth: true
+                            }
+                            Image {
+                                anchors.centerIn: parent
+                                visible: skinCell.modelData.k === "halloween"
+                                width: 36 * app.ui.u; height: width
+                                source: visible ? "qrc:/images/halloween/pumpkin.svg" : ""; sourceSize: Qt.size(72, 72)
+                            }
                             Repeater {                     // estrellas de la miniatura Galaxias
-                                model: skinCell.modelData.k === "galaxias" ? 18 : 0
+                                model: skinCell.modelData.k === "galaxias" ? 14 : 0
                                 delegate: Rectangle { required property int index
                                     x: (index * 37 % 97) / 97 * parent.width; y: (index * 53 % 89) / 89 * parent.height
                                     width: index % 5 === 0 ? 3 : 1.6; height: width; radius: width / 2; color: "white"; opacity: 0.85 }
@@ -744,13 +1026,11 @@ Item {
                                                      GradientStop { position: 1.0; color: Qt.rgba(138 / 255, 184 / 255, 1, 0.0) } }
                             }
                         }
-                        Column {
-                            anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 8 * app.ui.u
-                            Text { anchors.horizontalCenter: parent.horizontalCenter; text: skinCell.modelData.l; color: app.ink
-                                   font.family: app.ui.fontFamily; font.pixelSize: 14 * app.ui.u; font.weight: skinCell.on ? Font.Bold : Font.Normal }
-                            Text { anchors.horizontalCenter: parent.horizontalCenter; color: app.muted
-                                   text: skinCell.modelData.d
-                                   font.family: app.ui.fontFamily; font.pixelSize: 11 * app.ui.u }
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 7 * app.ui.u
+                            width: parent.width - 8 * app.ui.u; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
+                            text: skinCell.modelData.l; color: app.ink
+                            font.family: app.ui.fontFamily; font.pixelSize: 12 * app.ui.u; font.weight: skinCell.on ? Font.Bold : Font.Normal
                         }
                         MouseArea { id: skinTap; anchors.fill: parent; onClicked: app.skinSelected(skinCell.modelData.k) }
                         Accessible.role: Accessible.RadioButton
@@ -759,12 +1039,59 @@ Item {
                     }
                 }
             }
+            Card {
+                // Misma clave de preferencia: skin "auto" (Halloween del 15 al 31 de octubre).
+                SettingsRow { ui: app.ui; glyph: 0xE163; tone: "#6B2FA0"; title: "Halloween automático (15–31 oct.)"
+                    toggle: true; last: true; checked: app.skin === "auto"
+                    onToggled: function(v) { app.skinSelected(v ? "auto" : "none") } }
+            }
+            SectionLabel { text: "Halloween"; visible: app.halloween || app.skin === "auto" }
+            Card {
+                visible: app.halloween || app.skin === "auto"
+                SettingsRow { ui: app.ui; glyph: 0xE412; tone: app.accent; title: "Sustos de Halloween"
+                    subtitle: "Un saludo tierno cada 5 minutos de uso"; toggle: true
+                    checked: app.halloweenScares; onToggled: function(v) { app.halloweenScaresToggled(v) } }
+                SettingsRow { ui: app.ui; glyph: 0xE059; tone: app.accent; title: "Sonido de sustos"
+                    subtitle: "Campanilla breve y suave"; toggle: true; last: true
+                    checked: app.halloweenSound; onToggled: function(v) { app.halloweenSoundToggled(v) } }
+            }
             SectionLabel { text: "Efectos visuales" }
             Card {
                 SettingsRow { ui: app.ui; glyph: 0xE412; tone: "#2F7BD0"; title: "Liquid Glass"; subtitle: "Vidrio, transparencia y desenfoque"; toggle: true
                               checked: app.liquidGlass; onToggled: function(v) { app.liquidGlassToggled(v) } }
                 SettingsRow { ui: app.ui; glyph: 0xE297; tone: "#3DA35D"; title: "Reducir movimiento"; subtitle: "Menos animaciones de interfaz"; toggle: true; last: true
                               checked: app.reduceMotion; onToggled: function(v) { app.reduceMotionToggled(v) } }
+            }
+            SectionLabel { text: "Fidelidad" }
+            Flow {
+                // Override del runtime de rendimiento (Android lo guarda): Automática = AUTO.
+                // Dos filas (3 + 2); «Muy alta» y «Extrema» piden confirmación antes de aplicarse.
+                id: quality
+                width: parent.width; spacing: 8 * app.ui.u
+                Repeater {
+                    model: [{ k: "AUTO", l: "Automática" }, { k: "LOW", l: "Baja" }, { k: "HIGH", l: "Alta" },
+                            { k: "VERY_HIGH", l: "Muy alta" }, { k: "EXTREME", l: "Extrema" }]
+                    delegate: Rectangle {
+                        id: qualityCell
+                        required property var modelData
+                        required property int index
+                        readonly property bool on: modelData.k === GraphicsCore.qualityOverride
+                        width: index < 3 ? (quality.width - 2 * quality.spacing) / 3 : (quality.width - quality.spacing) / 2
+                        height: 48 * app.ui.u; radius: 14 * app.ui.u
+                        color: on ? Qt.rgba(47 / 255, 123 / 255, 208 / 255, app.dark ? 0.22 : 0.08) : (app.dark ? Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.55) : Qt.rgba(1, 1, 1, 0.80))
+                        border.width: on ? 2 : 1; border.color: on ? "#2F7BD0" : (app.dark ? Qt.rgba(1, 1, 1, 0.10) : "white")
+                        scale: qualityTap.pressed ? 0.97 : 1
+                        Behavior on scale { NumberAnimation { duration: 110 } }
+                        Text {
+                            anchors.centerIn: parent; text: qualityCell.modelData.l; color: app.ink
+                            font.family: app.ui.fontFamily; font.pixelSize: 14 * app.ui.u; font.weight: qualityCell.on ? Font.Bold : Font.Normal
+                        }
+                        MouseArea { id: qualityTap; anchors.fill: parent; onClicked: app.chooseFidelity(qualityCell.modelData.k) }
+                        Accessible.role: Accessible.RadioButton
+                        Accessible.name: "Fidelidad " + modelData.l
+                        Accessible.checked: on
+                    }
+                }
             }
         }
     }

@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <functional>
+#include <vector>
 #include <QString>
 #include <QDateTime>
 #include <QUrl>
@@ -54,6 +55,12 @@ class AuthSession : public QObject
     // MALFORMED_REQUEST, BACKEND_ERROR o CONFIG_ERROR. Se fija antes de emitir
     // loginFail; el mensaje de la señal no cambia.
     Q_PROPERTY(QString lastLoginFailure READ lastLoginFailure NOTIFY lastLoginFailureChanged)
+    // Perfil PENDIENTE de aprobación (como en la web): la sesión queda solo en
+    // memoria, sin Home ni multicuenta, hasta volver a comprobar o cerrar sesión.
+    Q_PROPERTY(bool accountPending READ accountPending NOTIFY accountPendingChanged)
+    Q_PROPERTY(bool accountPendingChecking READ accountPendingChecking NOTIFY accountPendingChanged)
+    // Inicio con Google (Supabase OAuth PKCE) esperando el regreso de la Custom Tab.
+    Q_PROPERTY(bool oauthInProgress READ oauthInProgress NOTIFY oauthStateChanged)
 
 public:
     explicit AuthSession(SupabaseClient* api, QObject* parent = nullptr);
@@ -65,6 +72,11 @@ public:
 
     QString accessToken() const { return m_accessToken; }
     QString refreshToken() const { return m_refreshToken; }
+    bool accessTokenNearExpiry() const {
+        return m_expiresAtUtc.isValid() && QDateTime::currentDateTimeUtc().addSecs(60) >= m_expiresAtUtc;
+    }
+    // Single-flight para RPC autenticadas; conserva sesión ante fallo de red.
+    void refreshAccessTokenForRpc(std::function<void(bool, const QString &)> done);
     QString userId() const { return m_userId; }
     QString email() const { return m_email; }
     QString nombre() const { return m_nombre; }
@@ -85,6 +97,9 @@ public:
     QString profileStatus() const { return m_profileStatus; }
     bool profileReady() const { return m_profileReady; }
     bool profileActive() const { return m_profileReady && m_profileStatus == QStringLiteral("ACTIVO"); }
+    bool accountPending() const { return m_accountPending; }
+    bool accountPendingChecking() const { return m_accountPendingChecking; }
+    bool oauthInProgress() const { return m_oauthInProgress; }
     QVariantList assignedProjects() const { return m_assignedProjects; }
     QVariantList memberships() const { return m_memberships; }
     QVariantMap capabilities() const { return m_capabilities; }
@@ -97,6 +112,9 @@ public:
     Q_INVOKABLE void signInWithPassword(const QString& email, const QString& password);
     Q_INVOKABLE void signInWithGoogle();
     Q_INVOKABLE void signInWithOAuthProvider(const QString& provider);
+    // Deep link com.ingema.ingeplus://login-callback?code=… (o ?error=…).
+    Q_INVOKABLE void handleOAuthCallback(const QString& callbackUrl);
+    Q_INVOKABLE void recheckAccountApproval();
     Q_INVOKABLE void signUpWithEmail(const QString& email,
                                      const QString& password,
                                      const QString& nombre,
@@ -186,9 +204,16 @@ signals:
     void mfaOk(const QString& message);
     void mfaFail(const QString& message);
     void oauthStarted(const QString& provider, const QString& url);
+    void oauthStateChanged();
+    void accountPendingChanged();
+    void accountPendingApproval();
 
 private:
     void setUserFromJson(const QJsonObject& user);
+    void consumePlatformOAuthCallback();
+    void setOAuthInProgress(bool active);
+    void failOAuth(const QString& failure, const QString& message);
+    void setAccountPending(bool pending, bool checking);
     void clearSessionMemory();
     void clearSavedSession();
     void clearLegacyActiveSession() const;
@@ -295,6 +320,13 @@ private:
     bool m_autoLoginInProgress = false;
 
     QPointer<QNetworkReply> m_loginReply;
+    bool m_rpcTokenRefreshInFlight = false;
+    std::vector<std::function<void(bool, const QString &)>> m_rpcTokenRefreshWaiters;
+    bool m_oauthInProgress = false;
+    bool m_oauthAwaitingCallback = false; // no cancelar PKCE mientras canjea el código
+    qint64 m_oauthStartedMs = 0;
+    bool m_accountPending = false;
+    bool m_accountPendingChecking = false;
     quint64 m_loginAttempt = 0;
     quint64 m_backendGeneration = 0;
     quint64 m_authGeneration = 0;

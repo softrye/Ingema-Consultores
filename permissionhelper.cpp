@@ -1350,10 +1350,14 @@ bool PermissionHelper::acceptPosition(const QGeoPositionInfo &info)
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const qint64 age = qMax<qint64>(0, now - timestamp);
 
-    qDebug() << "[InGe+ GPS] fix bruto"
-             << rawLatitude << rawLongitude
-             << "accuracy=" << accuracy
-             << "ageMs=" << age;
+    // Android can send batched GPS callbacks at millisecond intervals even
+    // when QGeoPositionInfoSource::setUpdateInterval(1500) was requested.
+    // Do not flood logcat / QML scene graph for each raw callback.
+    static quint64 rawFixes = 0;
+    ++rawFixes;
+    if (rawFixes == 1 || rawFixes % 100 == 0)
+        qDebug() << "[InGe+ GPS] fix bruto sample=" << rawFixes
+                 << "accuracy=" << accuracy << "ageMs=" << age;
 
     if (!qIsFinite(rawLatitude) || !qIsFinite(rawLongitude)
             || rawLatitude < -90.0 || rawLatitude > 90.0
@@ -1371,6 +1375,14 @@ bool PermissionHelper::acceptPosition(const QGeoPositionInfo &info)
 
     if (age > kMaximumFixAgeMs) {
         qDebug() << "[InGe+ GPS] lectura antigua descartada ageMs=" << age;
+        return false;
+    }
+
+    // QML publish throttle: honor explicit one-shot GPS requests, otherwise
+    // never publish more often than once a second (even for moving GPS fixes).
+    if (m_nativeHasFix && !m_immediateRequestPending
+            && m_lastPublishedWallClockMs > 0
+            && now - m_lastPublishedWallClockMs < 1000) {
         return false;
     }
 
@@ -1423,34 +1435,30 @@ bool PermissionHelper::acceptPosition(const QGeoPositionInfo &info)
                          << "count=" << m_suppressedNoiseFixes;
             }
 
-            // Una solicitud inmediata necesita confirmar una lectura fresca,
-            // aunque el usuario esté quieto y no debamos mover el marcador.
-            // Actualizamos metadatos y emitimos la señal sin introducir jitter.
-            if (m_immediateRequestPending) {
-                m_nativeAltitude = qIsFinite(rawCoordinate.altitude())
-                        ? rawCoordinate.altitude() : qQNaN();
-                m_nativeAccuracy = accuracy;
-                m_nativeTimestampMs = timestamp;
-                m_lastPublishedWallClockMs = now;
-                m_nativeProvider = m_positionSource && !m_positionSource->sourceName().isEmpty()
-                        ? m_positionSource->sourceName()
-                        : QStringLiteral("android");
-                setNativeStatus(accuracy <= 50.0
-                                ? QStringLiteral("tracking_precise")
-                                : QStringLiteral("tracking"),
-                                QString());
-                emit nativeLocationChanged();
-                qInfo() << "[InGe+ GPS] lectura puntual confirmada sin mover marcador"
-                        << "accuracy=" << accuracy
-                        << "provider=" << m_nativeProvider;
-                return true;
-            }
-
+            // El filtro de ruido conserva la coordenada anterior, pero la
+            // adquisición fresca debe renovar timestamp/precisión una vez
+            // por segundo: de otro modo el mapa marcaría GPS "stale"
+            // aunque el proveedor siga enviando lecturas válidas.
+            // El throttle superior ya limita esta rama a >=1000 ms,
+            // salvo la solicitud puntual, que siempre responde de inmediato.
+            m_nativeAltitude = qIsFinite(rawCoordinate.altitude())
+                    ? rawCoordinate.altitude() : qQNaN();
+            m_nativeAccuracy = accuracy;
+            m_nativeTimestampMs = timestamp;
+            m_lastPublishedWallClockMs = now;
+            m_nativeProvider = m_positionSource && !m_positionSource->sourceName().isEmpty()
+                    ? m_positionSource->sourceName()
+                    : QStringLiteral("android");
             setNativeStatus(accuracy <= 50.0
                             ? QStringLiteral("tracking_precise")
                             : QStringLiteral("tracking"),
                             QString());
-            return false;
+            emit nativeLocationChanged();
+            if (m_immediateRequestPending)
+                qInfo() << "[InGe+ GPS] lectura puntual confirmada sin mover marcador"
+                        << "accuracy=" << accuracy
+                        << "provider=" << m_nativeProvider;
+            return true;
         }
 
         m_suppressedNoiseFixes = 0;

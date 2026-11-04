@@ -169,6 +169,21 @@ Item {
         }
 
         // ===================== Carga, filtro y auras (regresión)
+        function test_purged_mirrors_are_hidden_without_deleting_drafts() {
+            start(); waitIdle()
+            var id = String(serverRows()[0].id)
+            docStub.drafts = [{instanceId:"retained",remoteCalicataId:id,projectId:pid(1),code:"COPY",syncState:"SYNCED"},
+                              {instanceId:"offline",remoteCalicataId:"",projectId:pid(1),code:"LOCAL",syncState:"LOCAL"}]
+            root.home.revision++
+            compare(root.home.rows.length, 22)
+            CalicataCloud.purgedCalicataIds = [id]
+            tryVerify(function() { return root.home.rows.length === 21 })
+            compare(docStub.drafts.length, 2)
+            for (var i=0;i<root.home.rows.length;i++) verify(root.home.rows[i].remoteId !== id)
+            CalicataCloud.purgedCalicataIds = []
+            tryVerify(function() { return root.home.rows.length === 22 })
+        }
+
         function test_load_eight_projects_single_query() {
             start(); waitIdle()
             compare(root.home.projects.length, 8)

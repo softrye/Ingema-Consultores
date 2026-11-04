@@ -289,6 +289,9 @@ Column {
             var m = /Falta completar: (\w+)\./.exec(problem)
             if (m && tabs[m[1]] !== undefined) section = tabs[m[1]]
             else if (m) section = 0
+            else if (problem.indexOf("Justificación:") === 0) { section = 1; notesField.forceActiveFocus() }
+            else if (problem.indexOf("Detalle del comprobante:") === 0) { section = 1; supportDetailField.focusField() }
+            else if (problem.indexOf("Detalle de pago:") === 0) { section = 2; paymentDetailField.focusField() }
             // El dato faltante del encabezado recibe el foco: se ve y se escribe al instante.
             if (m && m[1] === "concept") conceptField.focusField()
             else if (!m && ctl.amountError(values.amount).length) amountField.focusField()
@@ -682,7 +685,8 @@ Column {
     Rectangle {
         visible: form.modalEditor
         width: parent.width; height: 52 * form.ui.u; radius: 16 * form.ui.u
-        color: S.track
+        // Sticky tabs occlude the scrolled fields in both themes.
+        color: S.dark ? S.surfaceStrong : S.track
         Rectangle {                                  // píldora deslizante del selector
             readonly property real cell: (editorTabs.width - (4 - 1) * editorTabs.spacing) / Math.max(1, 4)
             visible: true
@@ -806,7 +810,7 @@ Column {
         }
         FieldBox {
             width: fieldsGrid.cellWidth; glyph: 0xE116; visible: !form.modalEditor || (form.section === 1 && !form.declarationSupport)
-            RField { id: supportDetailField; width: parent.width; ui: form.ui; formStyle: form.modalEditor; label: "Detalle (opcional)"
+            RField { id: supportDetailField; width: parent.width; ui: form.ui; formStyle: form.modalEditor; label: form.supportTypeCode === "OTHER" ? "Detalle del sustento (obligatorio)" : "Detalle (opcional)"
                      readOnly: !form.writable; onEdited: form.changed() }
         }
         FieldBox {
@@ -824,13 +828,13 @@ Column {
     }
     FieldBox {
         width: parent.width; glyph: 0xE116; visible: !form.modalEditor || form.section === 1
-        Text { text: form.modalEditor ? "Justificación" + (form.declarationSupport ? " · explica el gasto" : "") : "Observaciones"; color: S.muted; font.family: form.ui.fontFamily; font.pixelSize: 13 * form.ui.u }
+        Text { text: (form.modalEditor ? "Justificación" : "Observaciones") + (form.declarationSupport || form.categoryCode === "OTHER" ? " (obligatoria)" : ""); color: S.muted; font.family: form.ui.fontFamily; font.pixelSize: 13 * form.ui.u }
         TextArea {
             id: notesField; width: parent.width; height: 80 * form.ui.u
             placeholderText: "Ingrese una descripción adicional…"; readOnly: !form.writable
             color: S.text; placeholderTextColor: S.faint; font.family: form.ui.fontFamily; font.pixelSize: 15 * form.ui.u
             wrapMode: TextEdit.Wrap; selectByMouse: true; onTextChanged: form.changed()
-            background: Rectangle { radius: 12 * form.ui.u; color: Qt.rgba(1,1,1,0.65); border.width: 1; border.color: S.fieldBorder }
+            background: Rectangle { radius: 12 * form.ui.u; color: S.surfaceStrong; border.width: 1; border.color: S.fieldBorder }
         }
     }
     RCard {

@@ -79,13 +79,16 @@ var syncErrorRed = "#B42334"  // sólo para el aura de error de sincronización
 function ink(alpha) { return dark ? Qt.rgba(1, 1, 1, alpha) : Qt.rgba(21 / 255, 26 / 255, 48 / 255, alpha) }
 
 // Vidrio de superficie: blanco en claro; azul #1C2D50 translúcido en oscuro.
-function glass(alpha) { return dark ? Qt.rgba(12 / 255, 16 / 255, 26 / 255, Math.min(0.90, alpha * 0.70)) : Qt.rgba(1, 1, 1, alpha) }
+var halloween = false
+// Skin Halloween: modo oscuro con acento calabaza y vidrio morado.
+function setSkin(name) { halloween = name === "halloween"; setDark(dark) }
+function glass(alpha) { return dark && halloween ? Qt.rgba(40 / 255, 14 / 255, 56 / 255, Math.min(0.92, alpha * 0.75)) : dark ? Qt.rgba(12 / 255, 16 / 255, 26 / 255, Math.min(0.90, alpha * 0.70)) : Qt.rgba(1, 1, 1, alpha) }
 // Filo/borde del vidrio: blanco en claro; blanco tenue en oscuro.
-function edge(alpha) { return dark ? Qt.rgba(1, 1, 1, alpha * 0.12) : Qt.rgba(1, 1, 1, alpha) }
+function edge(alpha) { return dark && halloween ? Qt.rgba(1, 150 / 255, 50 / 255, alpha * 0.30) : dark ? Qt.rgba(1, 1, 1, alpha * 0.12) : Qt.rgba(1, 1, 1, alpha) }
 // Pastilla de selección (segmentos): blanca en claro; verde suave en oscuro.
-function pill() { return dark ? Qt.rgba(110 / 255, 154 / 255, 66 / 255, 0.30) : "#FFFFFF" }
+function pill() { return halloween ? Qt.rgba(1, 138 / 255, 31 / 255, 0.22) : dark ? Qt.rgba(110 / 255, 154 / 255, 66 / 255, 0.30) : "#FFFFFF" }
 // Tinte claro fijo (r, g, b en 0..255): igual en claro; vidrio oscuro en oscuro.
-function lite(r, g, b, alpha) { return dark ? Qt.rgba(24 / 255, 30 / 255, 44 / 255, Math.min(0.92, alpha * 0.80)) : Qt.rgba(r / 255, g / 255, b / 255, alpha) }
+function lite(r, g, b, alpha) { return halloween ? glass(alpha) : dark ? Qt.rgba(24 / 255, 30 / 255, 44 / 255, Math.min(0.92, alpha * 0.80)) : Qt.rgba(r / 255, g / 255, b / 255, alpha) }
 
 // Tema oscuro: negro #0A0A0A, vidrio azul #1C2D50 y tonos claros de la marca.
 // Los valores se leen al crear cada pantalla; HomeScreen recrea la subapp al cambiar de tema.
@@ -104,14 +107,30 @@ function setDark(on) {
     corporateBlue = dark ? "#6E9A42" : "#0654A2"
     navy = dark ? "#8DB85A" : "#1C2D50"          // íconos (regresar, filtro, menús) en verde
     corporateGreen = dark ? "#A8CF7F" : "#486426"
-    accent = dark ? "#6E9A42" : "#0654A2"
+    accent = dark ? (halloween ? "#FF8A1F" : "#6E9A42") : (halloween ? "#C2410C" : "#0654A2")
     accentSoft = dark ? "#8DB85A" : "#3B82D6"
-    onAccent = "#FFFFFF"
+    onAccent = halloween && dark ? "#2B1047" : "#FFFFFF"
     track = dark ? Qt.rgba(1, 1, 1, 0.12) : "#E3E8F0"
     fieldBorder = dark ? Qt.rgba(141 / 255, 184 / 255, 90 / 255, 0.22) : Qt.rgba(6 / 255, 84 / 255, 162 / 255, 0.10)
     tintSoft = dark ? Qt.rgba(110 / 255, 154 / 255, 66 / 255, 0.16) : Qt.rgba(6 / 255, 84 / 255, 162 / 255, 0.07)
     tintSoftBorder = dark ? Qt.rgba(110 / 255, 154 / 255, 66 / 255, 0.30) : Qt.rgba(6 / 255, 84 / 255, 162 / 255, 0.12)
     cardGlass = dark ? Qt.rgba(12 / 255, 16 / 255, 26 / 255, 0.55) : Qt.rgba(1, 1, 1, 0.62)
+    if (halloween && !dark) {                       // Halloween claro: crema, naranja y morado
+        background = "#FFF8F1"
+        corporateBlue = "#6B2FA0"; navy = "#6B2FA0"; accentSoft = "#E8711A"
+        tintSoft = Qt.rgba(232 / 255, 113 / 255, 26 / 255, 0.10)
+        tintSoftBorder = Qt.rgba(107 / 255, 47 / 255, 160 / 255, 0.18)
+        fieldBorder = Qt.rgba(107 / 255, 47 / 255, 160 / 255, 0.14)
+    }
+    if (halloween && dark) {
+        background = "#170A28"
+        surface = glass(0.90); surfaceStrong = "#2B1047"; popup = "#F52B1047"
+        border = edge(0.95); fieldBorder = edge(0.95)
+        cardGlass = glass(0.88); tintSoft = Qt.rgba(107 / 255, 47 / 255, 160 / 255, 0.24)
+        tintSoftBorder = edge(0.9); track = "#44235F"
+        corporateBlue = "#FFB347"; navy = "#FFB347"; accentSoft = "#FFB347"
+        text = "#FFF1D5"; muted = "#D4BDD9"; faint = "#B49BBE"
+    }
     success = corporateGreen
     danger = dark ? "#FF6B78" : "#C62F3E"
 }
@@ -137,8 +156,17 @@ function statusColor(status) {
     case "OBSERVADO": return danger
     case "EN_REVISION": return dark ? "#8AB8FF" : corporateBlue
     case "APROBADO": return corporateGreen
+    case "REVISADO": return dark ? "#5FC9C0" : "#0E7C74"
+    case "EXPORTADO": return dark ? "#B79BEF" : "#6B3FB5"
+    case "ARCHIVADO": return dark ? "#A3AAB8" : "#5B6272"
     }
     return muted
+}
+// Línea de tiempo completa (orden de RENDITION_REVIEW_STATES de la Web).
+var reviewStates = ["BORRADOR", "EN_REVISION", "OBSERVADO", "REVISADO", "APROBADO", "ARCHIVADO", "EXPORTADO"]
+function reviewStateIndex(status) {
+    var s = String(status || "BORRADOR").toUpperCase()
+    return reviewStates.indexOf(s === "PRESENTADA" ? "EN_REVISION" : s)
 }
 
 // Igual que renditionDocumentName.ts (Web): el código no sustituye al nombre.

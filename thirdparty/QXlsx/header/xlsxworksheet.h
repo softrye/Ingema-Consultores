@@ -192,6 +192,9 @@ public:
     bool isWhiteSpaceVisible() const;
     void setWhiteSpaceVisible(bool visible);
     bool setStartPage(int spagen); // add by liufeijin20181028
+    // InGe+: public, explicit print setup for newly created Calicata Web sheets.
+    // Avoid the legacy preformatted workbook (which leaked stale cell styles).
+    void setCalicataA3PrintLayout();
 
     QVector<CellLocation> getFullCells(int *maxRow, int *maxCol) const;
 

@@ -1548,6 +1548,12 @@ void Worksheet::saveToXmlFile(QIODevice *device) const
         if (!d->Porientation.isEmpty()) {
             writer.writeAttribute(QStringLiteral("orientation"), d->Porientation);
         }
+        // Only the newly generated Calicata Web workbook requests 1 x 1
+        // printing; leave all other QXlsx documents' pageSetup unchanged.
+        if (d->Prid == QLatin1String("inge-cal-a3")) {
+            writer.writeAttribute(QStringLiteral("fitToWidth"), QStringLiteral("1"));
+            writer.writeAttribute(QStringLiteral("fitToHeight"), QStringLiteral("1"));
+        }
 
         if (!d->Pcopies.isEmpty()) {
             writer.writeAttribute(QStringLiteral("copies"), d->Pcopies);
@@ -1593,6 +1599,26 @@ bool Worksheet::setStartPage(int spagen)
     d->PfirstPageNumber = QString::number(spagen);
 
     return true;
+}
+
+// The Web exporter creates each sheet from scratch: A3 landscape, one printed
+// page per 3 m of soil. Reuse QXlsx's existing page setup storage rather than
+// relying on a copied XLSX with unrelated styles/merges.
+void Worksheet::setCalicataA3PrintLayout()
+{
+    Q_D(Worksheet);
+    // QXlsx gates writing <pageSetup> on Prid. This sentinel is never emitted
+    // as an r:id (printerSettings relationship is intentionally optional).
+    d->Prid = QStringLiteral("inge-cal-a3");
+    d->PpaperSize = QStringLiteral("8"); // OOXML A3
+    d->Porientation = QStringLiteral("landscape");
+    d->Pscale = QStringLiteral("100");
+    d->PMleft = QStringLiteral("0.07874015748031496");
+    d->PMright = QStringLiteral("0.07874015748031496");
+    d->PMtop = QStringLiteral("0.5905511811023623");
+    d->PMbotton = QStringLiteral("0.1968503937007874");
+    d->PMheader = QStringLiteral("0.11811023622047245");
+    d->PMfooter = QStringLiteral("0");
 }
 //}}
 

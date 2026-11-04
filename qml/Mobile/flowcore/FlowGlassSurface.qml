@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import InGe.CoreFlow 3.0 as Mobile
+import "../renditions/RStyle.js" as S
 
 // Superficie de material plano de InGe+: color de tema, estado y borde.
 // Sin vidrio, captura, desenfoque ni sombra.
@@ -38,13 +39,14 @@ Rectangle {
                        baseColor.a + (tintColor.a - baseColor.a) * t)
     }
 
-    readonly property color baseColor: effectiveDarkMode ? fallbackDark : fallbackLight
+    readonly property bool halloween: flow.appSkin === "halloween"
+    readonly property color baseColor: halloween ? S.glass(0.95) : effectiveDarkMode ? fallbackDark : fallbackLight
     readonly property color stateColor: pressed
         ? mixColor(baseColor, flow.theme.textPrimary, 0.075)
         : (selected ? mixColor(baseColor, flow.theme.accent, 0.16) : baseColor)
 
     color: overlayTintOpacity > 0 ? mixColor(stateColor, overlayTintColor, overlayTintOpacity) : stateColor
-    border.color: selected ? mixColor(flow.theme.border, flow.theme.accent, 0.48) : flow.theme.border
+    border.color: halloween ? S.edge(selected ? 1.0 : 0.9) : selected ? mixColor(flow.theme.border, flow.theme.accent, 0.48) : flow.theme.border
     border.width: selected ? 1.35 : 1
     antialiasing: true
     clip: true

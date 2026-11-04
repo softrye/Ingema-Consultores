@@ -19,6 +19,8 @@ import InGe.CoreFlow 3.0 as Mobile
 Page {
     id: root
     readonly property var docs: Docs
+    readonly property bool halloween: !!ui && ui.appSkin === "halloween"
+    readonly property bool halloweenBlocked: visible && (exportBusy || foregroundBusy || !homeMode)
     property var flow: Mobile.InGeCoreFlow   // anfitrión V2: motor global único InGeCoreFlow
     property bool flowMotionEnabled: true
     property bool flowReduceMotion: false
@@ -43,8 +45,19 @@ Page {
     function openHomeRow(row) {
         if (!row) return
         if (String(row.remoteId || "").length && String(row.projectId || "").length) {
-            // Mantener el Home hasta recibir una ficha confirmada: una petición
-            // fallida nunca expone un editor parcialmente hidratado.
+            // Con copia local (mapa o lista): abre al instante con sus datos y la
+            // nube revalida en segundo plano; nunca espera a la red ni muestra el
+            // aviso de tiempo agotado. Sin copia local, se hidrata desde la nube.
+            if (String(row.instanceId || "").length) {
+                var local = root._openLocalDraftTab(String(row.instanceId), String(row.fileUrl || ""))
+                if (local) {
+                    root.homeMode = false
+                    var localState = String(local.syncState || "")
+                    if (!local.dirty && localState !== "PENDING" && localState !== "CONFLICT")
+                        root._revalidateInBackground(local, String(row.projectId), String(row.remoteId).toLowerCase())
+                    return
+                }
+            }
             root.openCloudCalicata(String(row.projectId), String(row.remoteId))
             return
         }
@@ -103,7 +116,55 @@ Page {
     function cancelLogoStaging() {
         if (formLoader.item && formLoader.item.logoStaging) formLoader.item.endLogoStaging()
     }
-    onHomeModeChanged: if (!homeMode) { root.ensureFormLoaded(); root.cancelLogoStaging() }
+    onHomeModeChanged: {
+        if (!homeMode) { root.ensureFormLoaded(); root.cancelLogoStaging() }
+        root.siteVisitData = null
+        root.siteVisitShown = !homeMode            // toda ficha abierta entra por Visita de campo
+    }
+
+    // ===== VISITA DE CAMPO (entrada de la ficha) =====
+    // Capa sobre el formulario ya cargado: no destruye ni retrasa la carga de
+    // presencia/medios. El avance sale de CalicataFormPage.siteVisitSnapshot().
+    property bool siteVisitShown: false
+    // Deslizamiento lista <-> mapa del Home de Calicatas (lo lee el Dock global
+    // para su regla de captura por tier).
+    readonly property bool homeSliding: homeMode && !!homeLoader.item && homeLoader.item.pagePos !== undefined
+                                        && homeLoader.item.pagePos > 0.001 && homeLoader.item.pagePos < 0.999
+    property var siteVisitData: null
+    readonly property bool siteVisitActive: siteVisitShown && !homeMode
+    function openSiteVisit() {
+        if (root.homeMode) return false
+        if (formLoader.item && !formLoader.item.commitPendingField()) return false
+        Qt.inputMethod.hide()
+        root.siteVisitData = null
+        root.siteVisitShown = true
+        root.refreshSiteVisit()
+        return true
+    }
+    function refreshSiteVisit() {
+        var form = formLoader.item
+        if (form && typeof form.siteVisitSnapshot === "function") root.siteVisitData = form.siteVisitSnapshot()
+    }
+    // ✕ de la ficha: mismo camino que Atrás desde una sección (confirma, guarda y
+    // vuelve a Visita de campo).
+    function closeFichaToSiteVisit() {
+        var form = formLoader.item
+        if (!form || !form.commitPendingField()) return
+        if (!root.autoSaveCurrentM09(true)) return
+        root.openSiteVisit()
+    }
+    function openSiteVisitSection(section) {
+        var form = formLoader.item
+        if (!form) return
+        root.siteVisitShown = false
+        form.scrollToSection(section)
+    }
+    onCurrentDocChanged: if (root.siteVisitActive) { root.siteVisitData = null; root.refreshSiteVisit() }
+    Timer {                                        // la ficha recién abierta aún hidrata el formulario
+        interval: 150; repeat: true
+        running: root.siteVisitActive && root.siteVisitData === null
+        onTriggered: root.refreshSiteVisit()
+    }
     // Archivadas de un proyecto (mismo listado "Archivadas del proyecto").
     function openArchivedForProject(projectId) {
         var pid = String(projectId || "")
@@ -188,6 +249,7 @@ Page {
             mode: root.healthAuraMode
             dark: root.darkMode
             skin: !!root.ui ? String(root.ui.appSkin || "none") : "none"
+            halloweenController: root.flow.halloweenController
             running: root.visible
             reducedMotion: root.flowReduceMotion
             lowCost: !!root.ui && root.ui.dockLowCostGlass === true
@@ -242,13 +304,13 @@ Page {
     function calAsset(name) { return "qrc:/ui/v2/calicatas/" + name }
     function navAsset(name) { return "qrc:/ui/v2/nav_ficha/" + name }
     function exportAsset(name) { return "qrc:/ui/v2/calicatas_export/" + name }
-    function calBgColor() { return darkMode ? "#0A0A0A" : flow ? flow.theme.background : (darkMode ? "#050D18" : "#F3F5F8") }
-    function calPanelColor() { return darkMode ? Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.62) : flow ? (liquidGlass ? flow.theme.glassSurface : flow.theme.surface) : (darkMode ? "#081827" : "#FFFFFF") }
-    function calPanel2Color() { return darkMode ? "#22355C" : flow ? flow.theme.surfaceSecondary : (darkMode ? "#102235" : "#E8EDF3") }
+    function calBgColor() { return halloween ? RS.background : darkMode ? "#0A0A0A" : flow ? flow.theme.background : (darkMode ? "#050D18" : "#F3F5F8") }
+    function calPanelColor() { return halloween ? RS.glass(0.92) : darkMode ? Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.62) : flow ? (liquidGlass ? flow.theme.glassSurface : flow.theme.surface) : (darkMode ? "#081827" : "#FFFFFF") }
+    function calPanel2Color() { return halloween ? RS.surfaceStrong : darkMode ? "#22355C" : flow ? flow.theme.surfaceSecondary : (darkMode ? "#102235" : "#E8EDF3") }
     function calTextColor() { return darkMode ? "#F2F4F8" : flow ? flow.theme.textPrimary : (darkMode ? "#FFFFFF" : "#1F2937") }
     function calMutedColor() { return darkMode ? "#A3A9B6" : flow ? flow.theme.textSecondary : (darkMode ? "#B9C7DA" : "#667085") }
-    function calBorderColor() { return darkMode ? Qt.rgba(1, 1, 1, 0.10) : flow ? flow.theme.border : (darkMode ? "#2B4157" : "#D6DEE8") }
-    function calAccentColor() { return flow ? flow.theme.accent : "#0654A2" }
+    function calBorderColor() { return halloween ? RS.edge(0.95) : darkMode ? Qt.rgba(1, 1, 1, 0.10) : flow ? flow.theme.border : (darkMode ? "#2B4157" : "#D6DEE8") }
+    function calAccentColor() { return halloween ? RS.accent : flow ? flow.theme.accent : "#0654A2" }
     function showExportProgress(msg) {
         exportProgressText = msg || "Preparando exportación..."
         exportProgressPopup.open()
@@ -364,9 +426,17 @@ Page {
     property string _googleExportPath: ""
     property string _exportOperationId: ""
     readonly property bool foregroundBusy: !!foregroundOperation && !foregroundOperation.result
-    // Dock oculto solo mientras la tarjeta de operación es visible (anti-flash incluido).
-    readonly property bool dockSuppressed: operationOverlay.shown && !!operationOverlay.displayed
-                                           && operationOverlay.displayed.blocking !== false
+    // Operaciones y Visita de campo suprimen el Dock. El mapa fullscreen
+    // utiliza el MISMO Dock mediante InGeCoreFlow.dockOverride (columna
+    // vertical a la derecha), no lo suprime: ocultarlo eliminaba las
+    // cuatro herramientas aprobadas y dejaba solo los botones inferiores.
+    readonly property bool dockSuppressed: (operationOverlay.shown && !!operationOverlay.displayed
+                                            && operationOverlay.displayed.blocking !== false)
+                                           || root.siteVisitActive
+                                           || (!root.homeMode && !!formLoader.item
+                                               && formLoader.item.ubicacionMapCoversDock === true
+                                               && !(root.flow && root.flow.dockOverride
+                                                    && root.flow.dockOverride.vertical === true))
     property bool leaving: false
 
     // Salida segura: suelta todo input antes de que Main destruya la página.
@@ -1021,11 +1091,19 @@ Page {
             root.formValue(form, "runLabCommand")(commandId.substring("calicatas.lab.".length))
         else if (commandId.indexOf("calicatas.profile.") === 0)
             root.formValue(form, "runProfileCommand")(commandId.substring("calicatas.profile.".length))
-        else if (commandId === "calicatas.previous")
-            form.goPreviousStage()
+        else if (commandId === "calicatas.previous") {
+            Qt.callLater(function() {
+                if (formLoader.item===form && !root.homeMode) form.goPreviousStage()
+            })
+        }
         else if (commandId === "calicatas.next") {
             _backAtWorkspace = false
-            form.goNextStage()
+            // Navigation is deferred until after the same input dispatch ends.
+            // Otherwise context publication increments generation mid-tap and
+            // the Dock reports INGE_DOCK_STALE with a valid touch.
+            Qt.callLater(function() {
+                if (formLoader.item===form && !root.homeMode) form.goNextStage()
+            })
         }
         else if (commandId === "calicatas.returnReview")
             form.finishReviewCorrection()
@@ -1074,6 +1152,10 @@ Page {
         }
         if (overflowPopup.opened) { overflowPopup.close(); return true }
         if (exportPopup.opened) { exportPopup.close(); return true }
+        // Visita de campo visible: Atrás vuelve al Home de Calicatas. Antes pasaba
+        // primero por el formulario oculto debajo (cambiaba su etapa sin verse) y
+        // la pantalla parecía no responder.
+        if (root.siteVisitActive) { root.showHome(); return true }
         if (root.homeMode) {
             if (homeLoader.item && homeLoader.item.handleBack()) return true
             _backAtWorkspace = false
@@ -1090,9 +1172,11 @@ Page {
         // el Back pertenece al shell desde cualquier etapa.
         if (!autoSaveCurrentM09(true)) return true
 
-        // Ficha guardada: Atrás vuelve al Home de Calicatas (nunca sale de la app
-        // con la ficha abierta). Desde el Home, Atrás vuelve al Home de InGe+.
+        // Ficha guardada: desde una sección Atrás vuelve a Visita de campo; desde
+        // Visita de campo, al Home de Calicatas (nunca sale de la app con la ficha
+        // abierta). Desde el Home, Atrás vuelve al Home de InGe+.
         _backAtWorkspace = false
+        if (!root.siteVisitShown && root.openSiteVisit()) return true
         root.homeMode = true
         return true
     }
@@ -1289,10 +1373,14 @@ Page {
             {label: "Versión", value: text(h.row_version)}
         ]
     }
+    function closeHealthPanel() {
+        if (healthPanelLoader.item && healthPanelLoader.item.open) healthPanelLoader.item.close()
+    }
     function toggleHealthPanel() {
         if (!healthPanelLoader.item) return
         var panel = healthPanelLoader.item
         if (panel.open) { panel.close(); return }
+        if (root.homeMode && homeLoader.item) homeLoader.item.closeMenus()   // un solo emergente a la vez
         var p = root.homeMode && homeLoader.item ? homeLoader.item.dockCellPoint(3)
             : root.dockAnchor
             ? root.dockAnchor.mapToItem(root, root.dockAnchor.width / 2, 0)
@@ -1447,46 +1535,50 @@ Page {
                 root.selectTab(i)
                 // Cambios locales sin confirmar no se pisan: los lleva el
                 // autosave con CAS (CONFLICT si Web cambió).
+                // Datos locales primero: abre al instante y revalida en segundo plano.
+                hydrateTimeout.stop()
+                root.endOperation(openOp, "OK")
+                root.homeMode = false
                 if (!existing.dirty && String(existing.syncState || "") !== "PENDING"
-                        && String(existing.syncState || "") !== "CONFLICT") {
-                    root._remoteLoadingProjectId = projectId
-                    root._remoteLoadingDocId = root._docInstanceId(existing)
-                    console.info("INGE_CALICATA_HYDRATE_BEGIN projectId=" + projectId + " calicataId=" + calicataId)
-                    root.phaseOperation(openOp, "HYDRATE", "Recuperando datos de Calicatas", "Sincronizando ficha…")
-                    CalicataCloud.loadRemoteDocument(existing, projectId, calicataId)
-                } else {
-                    hydrateTimeout.stop()
-                    root.endOperation(openOp, "OK")
-                    root.homeMode = false
-                }
+                        && String(existing.syncState || "") !== "CONFLICT")
+                    root._revalidateInBackground(existing, projectId, calicataId)
                 return
             }
         }
         // P0: un draft local ya ligado a este calicatas.id (aunque no esté
         // abierto) se reutiliza; nunca se crea otro draft para el mismo UUID.
+        // Sin pestaña abierta (desde el Home o el mapa) también se buscan borradores:
+        // antes no había documento para consultar y siempre se iba a la red.
         var probe = root.currentDoc
+        var tempProbe = probe && probe.listProjectDrafts ? null : root._newDoc()
+        if (tempProbe) probe = tempProbe
         var drafts = probe && probe.listProjectDrafts ? probe.listProjectDrafts(projectId, true) : []
+        if (tempProbe && tempProbe.destroy) tempProbe.destroy()
         for (var d = 0; d < drafts.length; ++d) {
             if (String(drafts[d].remoteCalicataId || "").toLowerCase() !== calicataId) continue
             var reused = root._openLocalDraftTab(String(drafts[d].instanceId), String(drafts[d].fileUrl || ""))
             if (!reused) break
             console.info("INGE_CALICATA_BIND_IDENTITY reuse draft=" + drafts[d].instanceId + " calicataId=" + calicataId)
             var pendingLocal = String(reused.syncState || "") === "PENDING" || String(reused.syncState || "") === "CONFLICT"
-            if (!pendingLocal) {
-                root._remoteLoadingProjectId = projectId
-                root._remoteLoadingDocId = root._docInstanceId(reused)
-                console.info("INGE_CALICATA_HYDRATE_BEGIN projectId=" + projectId + " calicataId=" + calicataId)
-                root.phaseOperation(openOp, "HYDRATE", "Recuperando datos de Calicatas", "Sincronizando ficha…")
-                CalicataCloud.loadRemoteDocument(reused, projectId, calicataId)
-            } else {
-                hydrateTimeout.stop()
-                root.endOperation(openOp, "OK")
-                root.homeMode = false
-            }
+            hydrateTimeout.stop()
+            root.endOperation(openOp, "OK")
+            root.homeMode = false
+            if (!pendingLocal) root._revalidateInBackground(reused, projectId, calicataId)
             return
         }
         root._remoteLoadingProjectId = projectId
         root.loadCloudCalicata({ id: calicataId })
+    }
+
+    // Revalidación de fondo de una ficha ya local (mismo camino que la revalidación
+    // en vivo): sin cubierta ni diálogo; si falla, el documento local sigue intacto.
+    function _revalidateInBackground(doc, projectId, calicataId) {
+        if (!doc || root._remoteLoadingDocId.length) return
+        root._remoteLoadingProjectId = projectId
+        root._remoteLoadingDocId = root._docInstanceId(doc)
+        root._liveRevalidatingDocId = root._remoteLoadingDocId
+        console.info("INGE_CALICATA_HYDRATE_BEGIN background projectId=" + projectId + " calicataId=" + calicataId)
+        CalicataCloud.loadRemoteDocument(doc, projectId, calicataId)
     }
 
     function _openLocalDraftTab(draftId, fileUrl) {
@@ -1551,11 +1643,17 @@ Page {
         var populated = !!root.currentTab && (root.currentTab.dirty
                         || String(h.code || h.codigo || "").trim().length > 0
                         || (root.currentDoc.cortes && root.currentDoc.cortes.length > 0))
-        if (populated) {
-            if (!root.addNewTab()) return
+        var doc = populated && !root.addNewTab() ? null : root.currentDoc
+        if (!doc) {
+            var stuck = root.foregroundOperation
+            if (stuck && stuck.kind === "CALICATA_OPEN" && !stuck.result) {
+                hydrateTimeout.stop()
+                root.endOperation(stuck.id, "ERROR", { title: "No se pudo abrir la ficha",
+                    detail: "No se pudo preparar una pestaña nueva. Tus datos locales se conservan.",
+                    actions: [{ id: "retry", label: "Reintentar" }, { id: "back", label: "Volver" }] })
+            }
+            return
         }
-        var doc = root.currentDoc
-        if (!doc) return
         root._remoteLoadingDocId = root._docInstanceId(doc)
         root._restoreAfterLoadDocId = restoreAfterLoad === true ? root._remoteLoadingDocId : ""
         root.workspaceStatusText = "Abriendo calicata online…"
@@ -1611,6 +1709,13 @@ Page {
     }
 
     function openCoordinatePicker() {
+        // One fullscreen editor and one QtLocation Map for the location stage.
+        // Keep the older picker as fallback only for forms without this API.
+        var locationForm=formLoader.item
+        if (locationForm && typeof locationForm.openLocationEditor==="function") {
+            locationForm.openLocationEditor("move")
+            return
+        }
         if (Qt.platform.os !== "android") {
             if (formLoader.item) formLoader.item.scrollToSection(2)
             root.showMsg("Ubicación", "El mapa nativo está disponible en Android. Edita las coordenadas UTM en Ubicación.")
@@ -2492,7 +2597,7 @@ Page {
         var tid = tabIdCounter++
         if (!doc || !docId.length) {
             console.error("[InGe+ M09] no se pudo crear documento para tid=" + tid)
-            return
+            return false
         }
         _appendDoc(doc)
 
@@ -2512,6 +2617,10 @@ Page {
         selectTab(tabsModel.count - 1)
         _syncTabFromDoc(currentIndex)
         console.info("[InGe+ M09] create tab tid=" + tid + " instanceId=" + docId)
+        // Los llamadores comprueban el resultado (loadCloudCalicata): sin este
+        // true, abrir una ficha con otra ya abierta salía en silencio y el
+        // CALICATA_OPEN esperaba los 45 s del timeout sin entrar en HYDRATE.
+        return true
     }
 
     function _closeTabNow(i) {
@@ -4931,10 +5040,15 @@ Page {
         anchors.fill: parent
         z: 30
         active: !!root.ui
-        // Lista ⇄ ficha: fundido cruzado corto (antes el cambio era instantáneo).
+        // Lista ⇄ ficha: el Home entra con fundido y escala 0,98 -> 1 (300 ms OutCubic).
+        // NumberAnimation, no Animator: con OpacityAnimator la opacidad sólo cambiaba al
+        // final, el Home quedaba invisible todo el fundido y se veía el formulario.
+        readonly property int transitionMs: root.flow && root.flow.reduceMotion ? 0 : 300
         opacity: root.homeMode ? 1 : 0
+        scale: root.homeMode ? 1 : 0.98
         visible: opacity > 0.01
-        Behavior on opacity { OpacityAnimator { duration: 220; easing.type: Easing.OutCubic } }
+        Behavior on opacity { NumberAnimation { duration: homeLoader.transitionMs; easing.type: Easing.OutCubic } }
+        Behavior on scale { NumberAnimation { duration: homeLoader.transitionMs; easing.type: Easing.OutCubic } }
         enabled: root.homeMode
         sourceComponent: Component {
             CalicatasHome {
@@ -4953,7 +5067,9 @@ Page {
         anchors.right: parent.right
         anchors.bottom: bottomBar.top
         active: tabsModel.count > 0 && root._formLoaderReady && !root._suspendFormLoader && root._formWanted
-        visible: active && (!root.homeMode || homeLoader.opacity < 0.99)
+        // Oculto en el Home y bajo Visita de campo (entrar, volver y su fundido): el
+        // formulario rellenado nunca asoma entre capas. Sigue cargado (resumen/medios).
+        visible: active && !root.homeMode && !root.siteVisitActive
         // Continuidad de ficha: el formulario (re)creado aparece con un fade corto.
         onLoaded: root.playFormSwapV600(0.0)
 
@@ -5022,6 +5138,38 @@ Page {
                     if (newTitle.length)
                         tabsModel.setProperty(formIndex, "title", newTitle)
                 }
+            }
+        }
+    }
+
+    // Visita de campo: debajo del Home (z 30) para que su fundido la cubra al volver.
+    Loader {
+        id: siteVisitLoader
+        anchors.fill: parent
+        z: 29
+        active: !!root.ui && (root.siteVisitActive || opacity > 0.01)
+        opacity: root.siteVisitActive ? 1 : 0
+        visible: opacity > 0.01
+        enabled: root.siteVisitActive
+        // Al volver al Home se desliza a la derecha mientras se desvanece.
+        transform: Translate {
+            x: root.siteVisitActive ? 0 : siteVisitLoader.width * 0.12
+            Behavior on x { NumberAnimation { duration: homeLoader.transitionMs; easing.type: Easing.OutCubic } }
+        }
+        // NumberAnimation (no Animator): visible/active leen el valor intermedio; con
+        // OpacityAnimator la opacidad sólo cambiaba al final y la pantalla reaparecía
+        // de golpe tras quedar invisible durante el fundido.
+        Behavior on opacity {
+            NumberAnimation { duration: homeLoader.transitionMs; easing.type: Easing.OutCubic }
+        }
+        sourceComponent: Component {
+            CalicataSiteVisit {
+                ui: root.ui
+                flow: root.flow
+                editor: root
+                snapshot: root.siteVisitData
+                onOpenSection: function(section) { root.openSiteVisitSection(section) }
+                onBack: root.showHome()
             }
         }
     }
@@ -5720,9 +5868,9 @@ Page {
     // alertas): mismo lenguaje que Ficha > General. Superficie limpia; solo
     // el multiarchivo (`glass: true`) usa Liquid Glass, con preset sutil por
     // instancia. Se animan opacity/scale/slideY; el backdrop se captura una vez.
-    readonly property color calGenBlue: darkMode ? "#8DB85A" : Mobile.InGeCoreFlow.colors.ingemaBlue
-    readonly property color calGenBlueSoft: darkMode ? "#102B52" : Mobile.InGeCoreFlow.colors.ingemaBlueWash
-    function calSolidSurface() { return flow ? flow.theme.surface : (darkMode ? "#081827" : "#FFFFFF") }
+    readonly property color calGenBlue: halloween ? RS.accent : darkMode ? "#8DB85A" : Mobile.InGeCoreFlow.colors.ingemaBlue
+    readonly property color calGenBlueSoft: halloween ? RS.tintSoft : darkMode ? "#102B52" : Mobile.InGeCoreFlow.colors.ingemaBlueWash
+    function calSolidSurface() { return halloween ? RS.popup : flow ? flow.theme.surface : (darkMode ? "#081827" : "#FFFFFF") }
 
     // Fondo de los emergentes = el modal del peek "Información de la calicata": una
     // captura congelada 0.5x del contenido de la ventana (hermano del Overlay, nunca
@@ -6070,6 +6218,7 @@ Page {
                 ui: root.ui
                 app: root
                 title: "Estado de Calicatas"
+                frostedFallback: true
                 diagnostics: root.calicataDiagnostics
                 emptyText: root.homeMode ? CalDiag.emptyTextHome(root.homeHealthState) : CalDiag.emptyText(root.healthState)
                 onRunAction: function(incident) { root.runHealthAction(incident) }

@@ -47,6 +47,8 @@ signals:
     void calicataPublishFailed(const QString &documentId, const QString &message);
     void lastErrorChanged();
     void exportResultChanged();
+    // Fin real de la subida a Google Drive de exportReceivedSnapshot (éxito o error).
+    void driveExportFinished(const QString &fileName, bool ok, const QString &error);
 
 private:
     void setLastError(const QString &error);

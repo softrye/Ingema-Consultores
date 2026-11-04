@@ -46,11 +46,12 @@ Window {
     // Tema oscuro (Configuración › Apariencia, preferencia leída por HomeScreen):
     // el Login mantiene sus auras con la paleta Ingema invertida sobre negro.
     readonly property bool darkTheme: authenticatedLayer.darkTheme
-    readonly property color auroraBase: darkTheme ? "#0A0A0A" : navy
-    readonly property color auroraDeep: darkTheme ? "#101A2E" : navy2
-    readonly property color auroraPrimary: darkTheme ? "#8AB8FF" : brandBlue
-    readonly property color auroraAccent: darkTheme ? "#8DB85A" : brandGreen
-    readonly property color ctaColor: darkTheme ? brandGreen : brandBlue        // botón principal
+    readonly property bool halloween: authenticatedLayer.appSkin === "halloween"
+    readonly property color auroraBase: halloween ? "#2B1047" : darkTheme ? "#0A0A0A" : navy
+    readonly property color auroraDeep: halloween ? "#170A28" : darkTheme ? "#101A2E" : navy2
+    readonly property color auroraPrimary: halloween ? "#6B2FA0" : darkTheme ? "#8AB8FF" : brandBlue
+    readonly property color auroraAccent: halloween ? "#FF8A1F" : darkTheme ? "#8DB85A" : brandGreen
+    readonly property color ctaColor: halloween ? "#FF8A1F" : darkTheme ? brandGreen : brandBlue        // botón principal
 
     // ------------------------------------------------------- Dependencias
     readonly property bool authReady: typeof auth !== "undefined" && auth !== null
@@ -63,6 +64,8 @@ Window {
     property string step: "USER"            // USER | PASSWORD | MFA (código de la app autenticadora)
     property bool submitting: false
     property string attemptEmail: ""        // correo exacto en curso
+    // Perfil PENDIENTE de aprobación (AuthSession): pantalla de espera en el Login.
+    readonly property bool accountPending: authReady && auth.accountPending === true
     property string serviceMessage: ""      // fallos que no son credenciales
     property string announcement: ""        // lectores de pantalla
     property bool leavingWelcome: false
@@ -98,10 +101,10 @@ Window {
     readonly property bool authenticatedVisible: screenState === "AUTHENTICATED"
 
     readonly property string greetingName: onboardingReady ? onboarding.greetingName : ""
-    readonly property string greetingFirstLine: returningUser ? "Welcome back," : "Welcome to InGe+,"
+    readonly property string greetingFirstLine: returningUser ? "Hola de nuevo," : "Te damos la bienvenida a InGe+,"
     readonly property string greetingSecondLine: returningUser
-            ? (AccountText.hasVisibleText(greetingName) ? greetingName : "Engineer")
-            : "Engineer"
+            ? (AccountText.hasVisibleText(greetingName) ? greetingName : "colega")
+            : "colega"
 
     // Escala tipográfica respecto de un teléfono de 390 px lógicos.
     readonly property real u: Math.max(0.82, Math.min(width, 520) / 390)
@@ -138,10 +141,9 @@ Window {
     function continueToPassword() {
         if (step !== "USER" || continueFlow.running || submitting)
             return
-        if (!AccountText.hasEmailFormat(userField.input.text)) {
-            announcement = "Ingresa un correo válido."
-            if (!reducedMotion)
-                shakeOnly.restart()
+        if (!AccountText.isAllowedLoginEmail(userField.input.text)) {
+            announcement = "Ingresa un correo de Gmail válido."
+            rejectLogin()                             // auras rojas + temblor, sin cuadro
             return
         }
         attemptEmail = userField.input.text          // exacto, sin recortes
@@ -172,6 +174,31 @@ Window {
         auth.signInWithPassword(attemptEmail, password)
     }
 
+    // Google (Supabase OAuth PKCE en una Custom Tab). La regla @gmail.com sólo
+    // aplica al correo escrito; el correo de Google lo entrega Supabase tal cual.
+    function signInWithGoogle() {
+        if (!authReady || submitting || continueFlow.running)
+            return
+        clearLoginError()
+        serviceMessage = ""
+        announcement = ""
+        attemptEmail = ""
+        passwordField.input.text = ""
+        submitting = true
+        Qt.inputMethod.hide()
+        auth.setRememberFor30Days(true)
+        console.info("INGE_ACCESS_LOGIN google")
+        auth.signInWithGoogle()
+    }
+
+    function recheckApproval() {
+        if (!authReady || submitting)
+            return
+        serviceMessage = ""
+        submitting = true
+        auth.recheckAccountApproval()
+    }
+
     // Verificación en dos pasos: el código de 6 dígitos completa el inicio de sesión.
     function submitMfa() {
         if (!authReady || submitting || step !== "MFA")
@@ -189,7 +216,7 @@ Window {
         auth.cancelMfaLogin()
         mfaField.input.text = ""
         submitting = false
-        step = "PASSWORD"
+        step = AccountText.hasVisibleText(attemptEmail) ? "PASSWORD" : "USER"   // Google: sin contraseña
     }
 
     // Correo verificado del último usuario (cuenta actual de AuthSession).
@@ -202,7 +229,7 @@ Window {
         for (var i = 0; i < accounts.length; ++i)
             if (accounts[i].id === auth.currentAccountId && AccountText.hasEmailFormat(accounts[i].email))
                 return accounts[i].email
-        // Identidad recordada de OnboardingState (misma cuenta que "Welcome back").
+        // Identidad recordada de OnboardingState (misma cuenta que "Hola de nuevo").
         if (onboardingReady && AccountText.hasEmailFormat(onboarding.lastEmail))
             return onboarding.lastEmail
         return ""
@@ -288,13 +315,13 @@ Window {
 
     // Frase del día: determinista por día del año, fija mientras se muestra.
     readonly property var dailyPhrases: [
-        "Starting today, your engineering assistant helps you work smarter every day.",
-        "As your engineering assistant, I hope to be of great help. Keep up the good work.",
-        "Your ideas build tomorrow.",
-        "Precision today. Progress tomorrow.",
-        "Every detail matters.",
-        "Design with purpose. Build with confidence.",
-        "Great engineering begins with curiosity."
+        "Desde hoy, tu asistente de ingeniería te ayuda a trabajar mejor cada día.",
+        "Como tu asistente de ingeniería, espero serte de gran ayuda. Sigue con el buen trabajo.",
+        "Tus ideas construyen el mañana.",
+        "Precisión hoy. Progreso mañana.",
+        "Cada detalle importa.",
+        "Diseña con propósito. Construye con confianza.",
+        "La buena ingeniería empieza con la curiosidad."
     ]
     property string welcomePhrase: ""
     function phraseForToday() {
@@ -323,14 +350,22 @@ Window {
             root.submitting = false
             mfaField.input.text = ""
             root.announcement = message
-            if (root.reducedMotion) errorTintOnly.restart(); else credentialError.restart()
+            root.rejectLogin()
+        }
+        function onAccountPendingApproval() {
+            root.submitting = false
+            root.serviceMessage = ""
+            root.announcement = "Tu cuenta está pendiente de aprobación."
+            console.info("INGE_ACCESS_LOGIN pending")
         }
         function onLoginOk() {
             root.submitting = false
+            root.clearLoginError()
             root.serviceMessage = ""
             root.recordAuthenticatedUser()
             if (root.onboardingReady) {
-                onboarding.rememberAccountEmail(auth.userId, root.attemptEmail)
+                onboarding.rememberAccountEmail(auth.userId,
+                    AccountText.hasVisibleText(root.attemptEmail) ? root.attemptEmail : auth.email)
                 onboarding.unlockSession()
                 onboarding.setSessionTracked(true)
             }
@@ -345,7 +380,7 @@ Window {
             if (failure === "INVALID_CREDENTIALS") {
                 root.announcement = "Contraseña incorrecta. Inténtalo de nuevo."
                 root.serviceMessage = ""
-                if (root.reducedMotion) errorTintOnly.restart(); else credentialError.restart()
+                root.rejectLogin()
                 passwordField.input.forceActiveFocus()
             } else {
                 root.serviceMessage = AccountText.hasVisibleText(message)
@@ -444,36 +479,48 @@ Window {
         NumberAnimation { target: loginAurora; property: "boost"; to: 0.0; duration: 420; easing.type: Easing.OutCubic }
     }
 
-    // ------------------------------- Credenciales inválidas (sin mensaje)
-    SequentialAnimation {
-        id: credentialError
-        ColorAnimation { target: loginAurora; property: "primaryColor"; to: root.auroraAccent; duration: 150; easing.type: Easing.InOutSine }
-        ColorAnimation { target: loginAurora; property: "primaryColor"; to: root.auroraPrimary; duration: 150; easing.type: Easing.InOutSine }
-        ParallelAnimation {
-            NumberAnimation { target: loginAurora; property: "tintAmount"; to: 1.0; duration: 120; easing.type: Easing.OutQuad }
-            SequentialAnimation {
-                NumberAnimation { target: formShake; property: "x"; to: -9 * root.u; duration: 55; easing.type: Easing.OutQuad }
-                NumberAnimation { target: formShake; property: "x"; to: 8 * root.u; duration: 75; easing.type: Easing.InOutQuad }
-                NumberAnimation { target: formShake; property: "x"; to: -5 * root.u; duration: 65; easing.type: Easing.InOutQuad }
-                NumberAnimation { target: formShake; property: "x"; to: 3 * root.u; duration: 55; easing.type: Easing.InOutQuad }
-                NumberAnimation { target: formShake; property: "x"; to: 0; duration: 50; easing.type: Easing.OutQuad }
-            }
+    // ------------- Rechazo del acceso (correo no permitido o credenciales inválidas)
+    // Sin cuadro de diálogo: las auras pasan a rojo (tintAmount) y quedan así
+    // hasta editar el campo; el formulario tiembla ~400 ms. Con reducedMotion,
+    // sólo el rojo.
+    property bool loginErrorHeld: false
+    function rejectLogin() {
+        loginErrorClear.stop()
+        loginErrorHeld = true
+        if (reducedMotion) {
+            formShake.x = 0
+            errorTintOnly.restart()
+        } else {
+            credentialError.restart()
         }
-        NumberAnimation { target: loginAurora; property: "tintAmount"; to: 0.0; duration: 240; easing.type: Easing.InOutSine }
     }
-    SequentialAnimation {
-        id: errorTintOnly
-        NumberAnimation { target: loginAurora; property: "tintAmount"; to: 0.8; duration: 160 }
-        PauseAnimation { duration: 200 }
-        NumberAnimation { target: loginAurora; property: "tintAmount"; to: 0.0; duration: 300 }
+    function clearLoginError() {
+        if (!loginErrorHeld)
+            return
+        loginErrorHeld = false
+        credentialError.stop()
+        errorTintOnly.stop()
+        formShake.x = 0
+        loginErrorClear.restart()
     }
-    SequentialAnimation {
-        id: shakeOnly
-        NumberAnimation { target: formShake; property: "x"; to: -6 * root.u; duration: 60 }
-        NumberAnimation { target: formShake; property: "x"; to: 5 * root.u; duration: 80 }
-        NumberAnimation { target: formShake; property: "x"; to: -3 * root.u; duration: 60 }
-        NumberAnimation { target: formShake; property: "x"; to: 0; duration: 60 }
+    ParallelAnimation {
+        id: credentialError
+        NumberAnimation { target: loginAurora; property: "tintAmount"; to: 1.0; duration: 120; easing.type: Easing.OutQuad }
+        SequentialAnimation {                           // 0→-12→12→-8→8→-4→0 u (≈400 ms)
+            NumberAnimation { target: formShake; property: "x"; to: -12 * root.u; duration: 60; easing.type: Easing.OutQuad }
+            NumberAnimation { target: formShake; property: "x"; to: 12 * root.u; duration: 70; easing.type: Easing.InOutQuad }
+            NumberAnimation { target: formShake; property: "x"; to: -8 * root.u; duration: 70; easing.type: Easing.InOutQuad }
+            NumberAnimation { target: formShake; property: "x"; to: 8 * root.u; duration: 70; easing.type: Easing.InOutQuad }
+            NumberAnimation { target: formShake; property: "x"; to: -4 * root.u; duration: 65; easing.type: Easing.InOutQuad }
+            NumberAnimation { target: formShake; property: "x"; to: 0; duration: 65; easing.type: Easing.OutQuad }
+        }
     }
+    NumberAnimation { id: errorTintOnly; target: loginAurora; property: "tintAmount"; to: 1.0; duration: 160 }
+    NumberAnimation { id: loginErrorClear; target: loginAurora; property: "tintAmount"; to: 0.0; duration: 300; easing.type: Easing.InOutSine }
+    // Las auras vuelven a la normalidad al editar cualquier campo del acceso.
+    Connections { target: userField.input; function onTextEdited() { root.clearLoginError() } }
+    Connections { target: passwordField.input; function onTextEdited() { root.clearLoginError() } }
+    Connections { target: mfaField.input; function onTextEdited() { root.clearLoginError() } }
 
     // ================================================================ LOGIN
     Flickable {
@@ -547,7 +594,7 @@ Window {
                 Item { width: 1; height: 34 * root.u }
 
                 Text {
-                    text: "Login"
+                    text: "Iniciar sesión"
                     color: root.white
                     font.family: rubik.font.family
                     font.pixelSize: 25 * root.u
@@ -570,7 +617,7 @@ Window {
                     id: fieldSlot
                     width: loginForm.width
                     height: 52 * root.u
-                    visible: root.screenState !== "RESTORING_SESSION"
+                    visible: root.screenState !== "RESTORING_SESSION" && !root.accountPending
 
                     LineField {
                         id: userField
@@ -676,8 +723,8 @@ Window {
                     }
                     Text {
                         anchors.centerIn: parent
-                        text: root.step === "PASSWORD" ? "Let's Go" : "Continue"
-                        color: root.white
+                        text: root.step === "PASSWORD" ? "Entrar" : "Continuar"
+                        color: root.halloween ? "#2B1047" : root.white
                         font.family: rubik.font.family
                         font.pixelSize: 19 * root.u
                     }
@@ -690,10 +737,46 @@ Window {
                                                             : root.continueToPassword()
                     }
                     Accessible.role: Accessible.Button
-                    Accessible.name: root.step === "PASSWORD" ? "Let's Go" : "Continue"
+                    Accessible.name: root.step === "PASSWORD" ? "Entrar" : "Continuar"
                     Accessible.onPressAction: root.step === "MFA" ? root.submitMfa()
                                             : root.step === "PASSWORD" ? root.submitPassword()
                                                                       : root.continueToPassword()
+                }
+
+                // Continuar con Google: mismo ancho y radio que el botón principal,
+                // en vidrio claro sobre las auras.
+                Item { width: 1; height: 14 * root.u; visible: googleButton.visible }
+                Rectangle {
+                    id: googleButton
+                    width: loginForm.width
+                    height: 54 * root.u
+                    radius: 15 * root.u
+                    visible: fieldSlot.visible && root.step !== "MFA"
+                    opacity: root.submitting ? 0.6 : 1
+                    color: Qt.rgba(1, 1, 1, googleTap.pressed ? 0.28 : 0.16)
+                    border.width: 1
+                    border.color: Qt.rgba(1, 1, 1, 0.42)
+                    // Marca oficial multicolor, centrada y sin texto visible.
+                    // El botón entero conserva su acción y nombre accesible.
+                    Image {
+                        anchors.centerIn: parent
+                        width: 34 * root.u
+                        height: width
+                        source: "qrc:/images/google_mark.png"
+                        sourceSize: Qt.size(120, 120)
+                        fillMode: Image.PreserveAspectFit
+                        smooth: true
+                        mipmap: true
+                    }
+                    MouseArea {
+                        id: googleTap
+                        anchors.fill: parent
+                        enabled: !root.submitting && !continueFlow.running
+                        onClicked: root.signInWithGoogle()
+                    }
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "Continuar con Google"
+                    Accessible.onPressAction: root.signInWithGoogle()
                 }
 
                 // Fallos que no son de credenciales (conexión, servicio, cuenta).
@@ -707,6 +790,85 @@ Window {
                     font.pixelSize: 14 * root.u
                     wrapMode: Text.WordWrap
                     horizontalAlignment: Text.AlignHCenter
+                }
+                // Cuenta PENDIENTE de aprobación (como en la web): no entra al Home.
+                Rectangle {
+                    id: pendingPanel
+                    width: loginForm.width
+                    height: pendingColumn.implicitHeight + 44 * root.u
+                    radius: 22 * root.u
+                    visible: root.accountPending && root.screenState !== "RESTORING_SESSION"
+                    color: Qt.rgba(1, 1, 1, root.darkTheme ? 0.12 : 0.18)
+                    border.width: 1
+                    border.color: Qt.rgba(1, 1, 1, 0.38)
+                    Accessible.role: Accessible.Dialog
+                    Accessible.name: "Tu cuenta está pendiente de aprobación"
+                    Column {
+                        id: pendingColumn
+                        x: 22 * root.u; y: 22 * root.u
+                        width: parent.width - 44 * root.u
+                        spacing: 12 * root.u
+                        Text {
+                            width: parent.width
+                            text: "Tu cuenta está pendiente de aprobación"
+                            color: root.white
+                            font.family: rubik.font.family
+                            font.pixelSize: 21 * root.u
+                            font.weight: Font.DemiBold
+                            wrapMode: Text.WordWrap
+                            Accessible.role: Accessible.Heading
+                        }
+                        Text {
+                            width: parent.width
+                            text: "Un administrador de InGe+ debe aprobar tu acceso. Te avisaremos al volver a comprobar."
+                                  + (AccountText.hasVisibleText(auth.email)
+                                     ? "\n" + AccountText.displayEmailExact(auth.email, "") : "")
+                            color: Qt.rgba(1, 1, 1, 0.86)
+                            font.family: rubik.font.family
+                            font.pixelSize: 15 * root.u
+                            wrapMode: Text.WordWrap
+                        }
+                        Item { width: 1; height: 4 * root.u }
+                        Rectangle {
+                            width: parent.width
+                            height: 54 * root.u
+                            radius: 15 * root.u
+                            color: root.ctaColor
+                            opacity: root.submitting ? 0.7 : (recheckTap.pressed ? 0.88 : 1)
+                            Text {
+                                anchors.centerIn: parent
+                                text: auth.accountPendingChecking ? "Comprobando…" : "Volver a comprobar"
+                                color: root.halloween ? "#2B1047" : root.white
+                                font.family: rubik.font.family
+                                font.pixelSize: 17 * root.u
+                            }
+                            MouseArea { id: recheckTap; anchors.fill: parent; enabled: !root.submitting; onClicked: root.recheckApproval() }
+                            Accessible.role: Accessible.Button
+                            Accessible.name: "Volver a comprobar"
+                            Accessible.onPressAction: root.recheckApproval()
+                        }
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: "Cerrar sesión"
+                            color: Qt.rgba(1, 1, 1, 0.86)
+                            font.family: rubik.font.family
+                            font.pixelSize: 15 * root.u
+                            font.underline: true
+                            MouseArea { anchors.fill: parent; anchors.margins: -10 * root.u; onClicked: root.signOutToLogin() }
+                            Accessible.role: Accessible.Button
+                            Accessible.name: "Cerrar sesión"
+                        }
+                        Text {
+                            width: parent.width
+                            visible: root.serviceMessage.length > 0
+                            text: root.serviceMessage
+                            color: Qt.rgba(1, 1, 1, 0.78)
+                            font.family: rubik.font.family
+                            font.pixelSize: 14 * root.u
+                            wrapMode: Text.WordWrap
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                    }
                 }
                 Text {
                     width: loginForm.width
@@ -766,7 +928,7 @@ Window {
             Text {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
-                text: "Welcome to InGe+"
+                text: "Te damos la bienvenida a InGe+"
                 color: root.white
                 font.family: rubik.font.family
                 font.weight: Font.DemiBold
@@ -794,7 +956,7 @@ Window {
                 opacity: getStartedTap.pressed ? 0.88 : 1
                 Text {
                     anchors.centerIn: parent
-                    text: "Get Started"
+                    text: "Comenzar"
                     color: root.navy
                     font.family: rubik.font.family
                     font.weight: Font.DemiBold
@@ -807,14 +969,14 @@ Window {
                     onClicked: getStartedFlow.restart()
                 }
                 Accessible.role: Accessible.Button
-                Accessible.name: "Get Started"
+                Accessible.name: "Comenzar"
                 Accessible.onPressAction: getStartedFlow.restart()
             }
             Item { width: 1; height: 30 * root.u }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 textFormat: Text.StyledText
-                text: "Already have an account? <b>Log in</b>"
+                text: "¿Ya tienes cuenta? <b>Inicia sesión</b>"
                 color: root.white
                 font.family: rubik.font.family
                 font.pixelSize: 16 * root.u
@@ -825,7 +987,7 @@ Window {
                     onClicked: root.signOutToLogin()
                 }
                 Accessible.role: Accessible.Button
-                Accessible.name: "Log in con otra cuenta"
+                Accessible.name: "Iniciar sesión con otra cuenta"
             }
         }
     }
@@ -850,9 +1012,16 @@ Window {
     // Home aparecía de golpe tras un fondo vacío. Ahora el Home se prepara de forma
     // invisible (1 % de opacidad, sin recibir toques) mientras se autentica o se
     // muestra la bienvenida, y el fundido empieza cuando ya dibujó sus cuadros.
+    // A12: el Home precalentado (visible a 1 %) durante AUTHENTICATING/FIRST_RUN_WELCOME
+    // dejaba pasar sus popups de Overlay.overlay (que no heredan la opacidad) sobre la
+    // bienvenida. Ahora queda oculto (visible false) hasta AUTHENTICATED y sólo se
+    // funde cuando el Login y la bienvenida (opacos) ya terminaron de salir.
     property bool homeRevealed: false
     property int revealFrames: 0
-    readonly property bool homeWarming: authReady && (submitting || welcomeVisible || authenticatedVisible)
+    readonly property bool homeWarming: authReady && authenticatedVisible
+    readonly property bool accessCleared: loginLayer.opacity === 0 && welcomeLayer.opacity === 0
+    readonly property bool homeShown: authenticatedVisible && homeRevealed && accessCleared
+    onHomeShownChanged: if (homeShown) authenticatedLayer.forceActiveFocus()   // ya habilitado
     function revealHome() {
         revealFrames = 0
         revealFallback.stop()
@@ -884,11 +1053,11 @@ Window {
         fontFamily: rubik.font.family
         iconFamily: lucide.font.family
         systemReducedMotion: root.reducedMotion
-        opacity: root.authenticatedVisible && root.homeRevealed ? 1 : (root.homeWarming ? 0.011 : 0)
-        visible: opacity > 0
-        enabled: root.authenticatedVisible && root.homeRevealed
+        opacity: root.homeShown ? 1 : (root.homeWarming ? 0.011 : 0)
+        visible: root.authenticatedVisible && opacity > 0
+        enabled: root.homeShown
         Behavior on opacity { NumberAnimation { duration: root.reducedMotion ? 0 : 750; easing.type: Easing.InOutCubic } }
-        scale: root.authenticatedVisible && root.homeRevealed ? 1 : 1.08
+        scale: root.homeShown ? 1 : 1.08
         Behavior on scale { NumberAnimation { duration: root.reducedMotion ? 0 : 1100; easing.type: Easing.OutQuint } }
         onSignOutRequested: root.signOutToLogin()
     }

@@ -25,7 +25,9 @@ target_link_libraries(InGeRetroplasma PUBLIC Qt6::Core Qt6::Gui Qt6::Qml Qt6::Qu
 target_compile_features(InGeRetroplasma PUBLIC cxx_std_17)
 qt_add_shaders(InGeRetroplasma rp_shaders
     PREFIX /inge/retroplasma
-    GLSL "100es,300es,120,150"
+    # Misma matriz de compatibilidad GLSL que el resto de InGe+.
+    # terrain.vert y terrain.frag se empaquetan siempre con perfiles idénticos.
+    GLSL "100es,120,150"
     HLSL 50
     MSL 12
     FILES shaders/terrain.vert shaders/terrain.frag

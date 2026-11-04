@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import "RStyle.js" as S
+import ".." as Mobile                          // GlassSurface: Liquid Glass oficial
 
 // Selector de fecha (calendario mensual). Valor en ISO aaaa-mm-dd; las
 // fechas fuera de [minimum, maximum] no se pueden elegir.
@@ -123,7 +124,18 @@ Column {
         x: parent ? (parent.width - width) / 2 : 0
         y: parent ? (parent.height - height) / 2 : 0
         padding: 14 * dateField.ui.u
-        background: Rectangle { radius: 18 * dateField.ui.u; color: S.popup; border.width: 1; border.color: S.border }
+        background: Rectangle {
+            radius: 18 * dateField.ui.u; color: (dateField.ui.liquidGlass !== false && !!dateField.ui.liquidGlassMaterial && !!dateField.ui.cardGlassUi) ? "transparent" : S.popup
+            border.width: (dateField.ui.liquidGlass !== false && !!dateField.ui.liquidGlassMaterial && !!dateField.ui.cardGlassUi) ? 0 : 1; border.color: S.border
+            Mobile.GlassSurface {                // Liquid Glass oficial (preset único del Dock)
+                visible: dateField.ui.liquidGlass !== false && !!dateField.ui.liquidGlassMaterial && !!dateField.ui.cardGlassUi && (textureReady || fallbackOn)
+                ui: dateField.ui.cardGlassUi || null
+                material: dateField.ui.liquidGlassMaterial || null
+                tint: dateField.ui.dockGlassTint                  // oscuro igual que claro y el Dock: sin tinte negro
+                radius: radius
+                margin: 10 * dateField.ui.u
+            }
+        }
         enter: Transition {
             NumberAnimation { property: "opacity"; from: 0; to: 1; duration: dateField.animatePicker && dateField.ui.reducedMotion !== true ? 180 : 0; easing.type: Easing.OutCubic }
         }

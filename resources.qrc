@@ -15,6 +15,7 @@
         <file>images/EXCAVABILIDAD.png</file>
         <file>images/HUMEDAD.png</file>
         <file alias="default_avatar_men.png">images/default_avatar_men.png</file>
+        <file alias="google_mark.png">images/google_mark.png</file>
         <file alias="default_avatar_women.png">images/default_avatar_women.png</file>
         <file>images/LOGO_APP.png</file>
         <file alias="APP_ICON_EXPLORER.ico">images/APP_ICON_EXPLORER.ico</file>
@@ -71,30 +72,19 @@
     <qresource prefix="/qml">
         <file alias="MapWidget.qml">qml/Desktop/MapWidget.qml</file>
         <file alias="Mobile/Main.qml">qml/Mobile/Main.qml</file>
-        <file alias="Mobile/pages/LoginPage.qml">qml/Mobile/pages/LoginPage.qml</file>
-        <file alias="Mobile/pages/RegisterPage.qml">qml/Mobile/pages/RegisterPage.qml</file>
-        <file alias="Mobile/pages/LoginPageForm.qml">qml/Mobile/pages/LoginPageForm.qml</file>
-        <file alias="Mobile/pages/RegisterPageForm.qml">qml/Mobile/pages/RegisterPageForm.qml</file>
-        <file alias="Mobile/pages/HomePage.qml">qml/Mobile/pages/HomePage.qml</file>
-        <file alias="Mobile/pages/HomePageContent.qml">qml/Mobile/pages/HomePageContent.qml</file>
-        <file alias="Mobile/pages/MapPage.qml">qml/Mobile/pages/MapPage.qml</file>
-        <file alias="Mobile/pages/ProfilePage.qml">qml/Mobile/pages/ProfilePage.qml</file>
-        <file alias="Mobile/pages/MapPageContent.qml">qml/Mobile/pages/MapPageContent.qml</file>
-        <file alias="Mobile/pages/ProfilePageContent.qml">qml/Mobile/pages/ProfilePageContent.qml</file>
-        <file alias="Mobile/AppShell.qml">qml/Mobile/AppShell.qml</file>
-        <file alias="Mobile/HeaderBar.qml">qml/Mobile/HeaderBar.qml</file>
-        <file alias="Mobile/BottomNav.qml">qml/Mobile/BottomNav.qml</file>
         <file alias="Mobile/components/FlowIcon.qml">qml/Mobile/components/FlowIcon.qml</file>
-        <file alias="Mobile/components/FlowIconButton.qml">qml/Mobile/components/FlowIconButton.qml</file>
         <file alias="Mobile/lib/IconCatalog.js">qml/Mobile/lib/IconCatalog.js</file>
         <file alias="Mobile/pages/CalicatasEditorPage.qml">qml/Mobile/pages/CalicatasEditorPage.qml</file>
         <file alias="Mobile/pages/CalicatasHome.qml">qml/Mobile/pages/CalicatasHome.qml</file>
+        <file alias="Mobile/pages/CalicataSiteVisit.qml">qml/Mobile/pages/CalicataSiteVisit.qml</file>
         <file alias="Mobile/pages/CalicatasTopoMap.qml">qml/Mobile/pages/CalicatasTopoMap.qml</file>
         <file alias="Mobile/pages/CalicataFormPage.qml">qml/Mobile/pages/CalicataFormPage.qml</file>
     <file alias="Mobile/pages/CalicataReview.qml">qml/Mobile/pages/CalicataReview.qml</file>
     <file alias="Mobile/pages/CalicataSurface.qml">qml/Mobile/pages/CalicataSurface.qml</file>
     <file alias="Mobile/pages/CalicataProfile.qml">qml/Mobile/pages/CalicataProfile.qml</file>
     <file alias="Mobile/pages/CalicataPointPicker.qml">qml/Mobile/pages/CalicataPointPicker.qml</file>
+    <file alias="Mobile/pages/CalicataUbicacionView.qml">qml/Mobile/pages/CalicataUbicacionView.qml</file>
+    <file alias="Mobile/pages/CalicataMapEditor.qml">qml/Mobile/pages/CalicataMapEditor.qml</file>
         <file alias="Mobile/CalicataSaveOpenDialog.qml">qml/Mobile/CalicataSaveOpenDialog.qml</file>
         <file alias="Mobile/lib/GpsBus.js">qml/Mobile/lib/GpsBus.js</file>
             <file alias="Mobile/lib/CalicataRules.js">qml/Mobile/lib/CalicataRules.js</file>

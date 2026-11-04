@@ -1,5 +1,6 @@
 import QtQuick
 import "RStyle.js" as S
+import "../components" as Components             // PresenceAvatars / FieldPresenceHighlight
 
 // Vista inicial aprobada: resumen compacto y gastos expandibles.
 // Finanzas, documentos y revisión conservan sus componentes y contratos.
@@ -322,33 +323,60 @@ Item {
                 text: page.projectLine; color: S.muted; elide: Text.ElideRight
                 font.family: page.ui.fontFamily; font.pixelSize: 12 * page.ui.u
             }
-            Rectangle {                               // comentario del revisor (último), como en la Web
-                readonly property var note: (page.app.reviewNotes || []).length ? page.app.reviewNotes[page.app.reviewNotes.length - 1] : null
+            Row {                                     // estado administrativo con etiqueta y color de la Web
+                id: statusChip
+                objectName: "detailStatusChip"
+                spacing: 6 * page.ui.u
+                readonly property string status: String(page.current.status || "BORRADOR").toUpperCase()
+                Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 10 * page.ui.u; height: width; radius: width / 2
+                            color: S.statusColor(statusChip.status) }
+                Text { anchors.verticalCenter: parent.verticalCenter; text: page.ctl.statusLabel(statusChip.status)
+                       color: S.statusColor(statusChip.status)
+                       font.family: page.ui.fontFamily; font.pixelSize: 12.5 * page.ui.u; font.weight: Font.DemiBold }
+            }
+            Rectangle {                               // banner «Observación del revisor» (get_document_review_observation_v07)
+                id: reviewerBanner
+                objectName: "reviewerBanner"
+                readonly property var note: page.app.reviewNote || null
                 visible: note !== null && String(page.current.status || "") === "OBSERVADO"
-                width: parent.width; height: visible ? noteText.implicitHeight + 16 * page.ui.u : 0
+                         && page.app.dismissedReviewNote !== String(note.id)
+                width: parent.width; height: visible ? noteCol.implicitHeight + 20 * page.ui.u : 0
                 radius: 12 * page.ui.u; color: Qt.rgba(242 / 255, 178 / 255, 27 / 255, S.dark ? 0.18 : 0.14)
                 border.width: 1; border.color: Qt.rgba(242 / 255, 178 / 255, 27 / 255, 0.45)
-                Text { id: noteText; x: 10 * page.ui.u; width: parent.width - 20 * page.ui.u; anchors.verticalCenter: parent.verticalCenter
-                       wrapMode: Text.WordWrap; maximumLineCount: 3; elide: Text.ElideRight; color: S.text
-                       text: parent.note ? "Observación del revisor: " + String(parent.note.body || "") : ""
-                       font.family: page.ui.fontFamily; font.pixelSize: 12.5 * page.ui.u }
                 MouseArea { anchors.fill: parent; onClicked: page.app.dockCommand("renditions.review.notes") }
+                Column {
+                    id: noteCol
+                    x: 10 * page.ui.u; y: 10 * page.ui.u; width: parent.width - 20 * page.ui.u; spacing: 4 * page.ui.u
+                    Item {
+                        width: parent.width; height: Math.max(noteTitle.implicitHeight, 28 * page.ui.u)
+                        Text { id: noteTitle; anchors.verticalCenter: parent.verticalCenter; text: "Observación del revisor"; color: S.text
+                               font.family: page.ui.fontFamily; font.pixelSize: 13 * page.ui.u; font.weight: Font.Bold }
+                        Text {
+                            anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                            text: "Cerrar aviso"; color: S.muted
+                            font.family: page.ui.fontFamily; font.pixelSize: 12 * page.ui.u; font.weight: Font.DemiBold
+                            MouseArea { anchors.fill: parent; anchors.margins: -8 * page.ui.u
+                                        onClicked: page.app.dismissedReviewNote = String(reviewerBanner.note.id) }
+                        }
+                    }
+                    Text { width: parent.width; wrapMode: Text.WordWrap; maximumLineCount: 4; elide: Text.ElideRight; color: S.text
+                           text: reviewerBanner.note ? String(reviewerBanner.note.body || "") : ""
+                           font.family: page.ui.fontFamily; font.pixelSize: 12.5 * page.ui.u }
+                    Text { width: parent.width; elide: Text.ElideRight; color: S.muted
+                           text: reviewerBanner.note ? String(reviewerBanner.note.author || "Revisor") + " · " + S.date(String(reviewerBanner.note.created_at || ""))
+                                 + " · Historial en Observaciones" : ""
+                           font.family: page.ui.fontFamily; font.pixelSize: 11 * page.ui.u }
+                }
             }
             Row {                                     // en vivo: quién más tiene abierta la rendición
                 visible: (page.app.livePeers || []).length > 0
                 spacing: 8 * page.ui.u
-                Row {
-                    spacing: -6 * page.ui.u
-                    Repeater {
-                        model: (page.app.livePeers || []).slice(0, 3)
-                        delegate: Rectangle {
-                            required property var modelData
-                            width: 24 * page.ui.u; height: width; radius: width / 2
-                            color: S.accent; border.width: 2; border.color: S.background
-                            Text { anchors.centerIn: parent; text: String(parent.modelData.initials || "?"); color: S.onAccent
-                                   font.family: page.ui.fontFamily; font.pixelSize: 9.5 * page.ui.u; font.weight: Font.Bold }
-                        }
-                    }
+                Components.PresenceAvatars {
+                    anchors.verticalCenter: parent.verticalCenter
+                    members: page.app.livePeers || []
+                    size: 24 * page.ui.u
+                    rim: S.background
+                    fontFamily: page.ui.fontFamily
                 }
                 Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 7 * page.ui.u; height: width; radius: width / 2
                             color: page.app.liveJoined ? "#3DA35D" : "#E8A21A" }
@@ -357,11 +385,24 @@ Item {
                     text: {
                         var p = page.app.livePeers || []
                         var first = String((p[0] || {}).name || "").split(" ")[0]
-                        return p.length === 1 ? first + " también la tiene abierta" : p.length + " personas la tienen abierta"
+                        var where = String((p[0] || {}).field || "")
+                        if (p.length === 1) return where.length ? first + " está editando " + where : first + " también la tiene abierta"
+                        return p.length + " personas la tienen abierta"
                     }
                     color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 11.5 * page.ui.u
                 }
             }
+        }
+        // Al editar el encabezado desde otra sesión, el propio resumen queda
+        // señalado, sin interceptar toques ni modificar la barra de navegación.
+        Components.FieldPresenceHighlight {
+            anchors.fill: headerText
+            field: "Datos de la rendición"
+            members: page.app.livePeers || []
+            radius: 16 * page.ui.u
+            u: page.ui.u
+            fontFamily: page.ui.fontFamily
+            reducedMotion: page.ui.reducedMotion === true
         }
         // Sin botones de cabecera: Documentos está en la barra de secciones e
         // Información en el Dock (se evitan accesos duplicados).

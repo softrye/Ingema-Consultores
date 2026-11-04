@@ -140,6 +140,10 @@ Item {
                     width: column.width
                     ui: tab.ui
                     color: S.glass(0.80); border.color: S.edge(1); radius: 22 * tab.ui.u
+                    // Un gasto con sustentos también se ilumina cuando otro
+                    // usuario lo edita desde el formulario de gastos.
+                    presenceMembers: tab.app.livePeers || []
+                    presenceFieldKey: tab.app.expensePresenceField(modelData.localId)
                     Item {
                         width: parent.width; height: 40 * tab.ui.u
                         Rectangle { width: 40 * tab.ui.u; height: width; radius: 12 * tab.ui.u; color: S.tintSoft

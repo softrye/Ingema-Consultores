@@ -40,6 +40,17 @@ RenditionFlutterBridge::RenditionFlutterBridge(
       m_syncController(syncController),
       m_exporter(exporter)
 {
+    if (m_exporter) {
+        connect(m_exporter, &AndroidCalicataExporter::driveExportFinished, this,
+                [this](const QString &fileName, bool ok, const QString &error) {
+            sendEvent({{QStringLiteral("type"), QStringLiteral("exportFinished")},
+                       {QStringLiteral("destination"), QStringLiteral("google")},
+                       {QStringLiteral("fileName"), fileName},
+                       {QStringLiteral("ok"), ok},
+                       {QStringLiteral("code"), ok ? QString() : QStringLiteral("EXPORT_FAILED")},
+                       {QStringLiteral("message"), error}});
+        });
+    }
     connect(m_repository, &RenditionRepository::receivedReset, this, [this]() {
         m_lastPublishedState.clear();
         const auto picker = m_calicataPickerDocument;
@@ -524,6 +535,7 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
     // decide los permisos efectivos; Android solo envía la intención con CAS
     // y request_id estables y refresca la ficha tras la respuesta.
     if (operation == QLatin1String("reviewContext") || operation == QLatin1String("reviewObservations")
+        || operation == QLatin1String("reviewObservation") || operation == QLatin1String("reviewExport")
         || operation == QLatin1String("reviewTransition")
         || operation == QLatin1String("reviewRequest") || operation == QLatin1String("reviewDecide")
         || operation == QLatin1String("receive")) {
@@ -538,10 +550,19 @@ void RenditionFlutterBridge::handleCommand(const QString &requestJson)
                       QStringLiteral("Escribe el motivo de la operación."));
             return;
         }
-        if ((operation == QLatin1String("reviewRequest") || operation == QLatin1String("receive"))
+        if ((operation == QLatin1String("reviewRequest") || operation == QLatin1String("receive")
+             || operation == QLatin1String("reviewExport"))
             && arguments.value(QStringLiteral("requestId")).toString().isEmpty()) {
             sendError(requestId, QStringLiteral("REQUEST_ID_REQUIRED"),
                       QStringLiteral("Falta el identificador idempotente de la solicitud."));
+            return;
+        }
+        if (operation == QLatin1String("reviewExport")
+            && (arguments.value(QStringLiteral("versionId")).toString().isEmpty()
+                || (arguments.value(QStringLiteral("format")) != QLatin1String("PDF")
+                    && arguments.value(QStringLiteral("format")) != QLatin1String("EXCEL")))) {
+            sendError(requestId, QStringLiteral("SNAPSHOT_REQUIRED"),
+                      QStringLiteral("La versión aprobada no está disponible para exportar."));
             return;
         }
         m_receivedRequests.insert(requestId, arguments);

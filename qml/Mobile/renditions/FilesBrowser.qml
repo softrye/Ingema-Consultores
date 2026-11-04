@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import "RStyle.js" as S
 
 // Archivero (sólo lectura) y Papelera global de Files v07 (Web PR #5/#6).
@@ -13,6 +12,15 @@ Item {
     objectName: "filesBrowser"
     property var app
     property string mode: "archive"                       // archive | trash
+    onModeChanged: {
+        if (contractState !== "READY") return
+        closeRecovery()
+        expandedId = ""
+        parentId = ""
+        breadcrumb = []
+        items = []
+        if (!loading) load("", false)
+    }
     property bool compact: false                          // popup 3D Touch del Dock (filas finas)
     property string expandedId: ""                        // fila desplegada con sus acciones
     // Nombre visible de los documentos inteligentes (.rend → nombre de la rendición),
@@ -102,10 +110,14 @@ Item {
         loading = true
         loadError = ""
         var life = page.life
-        app.call(archive ? "filesArchive" : "filesTrash", { parentId: parent, afterId: append ? nextId : "" },
+        var requestedMode = mode
+        // mode is the source value; its derived `archive` binding may still
+        // carry the previous mode while onModeChanged is being delivered.
+        app.call(mode === "archive" ? "filesArchive" : "filesTrash", { parentId: parent, afterId: append ? nextId : "" },
                  "filesPage:" + mode, function(ok, result, code, message) {
             if (!life.alive) return
             page.loading = false
+            if (requestedMode !== page.mode) { page.load("", false); return }
             if (!ok) {
                 page.loadError = String(code).indexOf("FORBIDDEN") >= 0 || String(code) === "42501"
                         ? "Tu cuenta no tiene acceso a " + (page.archive ? "el Archivero." : "la Papelera global.")
@@ -464,7 +476,7 @@ Item {
             height: Math.min(parent.height - 20 * page.ui.u, sheetColumn.implicitHeight + 44 * page.ui.u)
             y: (parent.height - height) / 2
             radius: 26 * page.ui.u
-            color: S.dark ? Qt.rgba(18 / 255, 22 / 255, 32 / 255, 0.97) : S.glass(0.94)
+            color: S.halloween ? S.popup : S.dark ? Qt.rgba(18 / 255, 22 / 255, 32 / 255, 0.97) : S.glass(0.94)
             border.width: 1
             border.color: S.edge(1)
             scale: page.recovering !== null ? 1 : 0.92

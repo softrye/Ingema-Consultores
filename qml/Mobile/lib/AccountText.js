@@ -130,6 +130,22 @@ function hasEmailFormat(value) {
     return /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(probe)
 }
 
+// Dominios permitidos en el Login (orden de DIOS). Ampliar sólo esta lista.
+var allowedEmailDomains = ["gmail.com"]
+
+// Correo aceptable antes de enviarlo a Supabase: ^[^\s@,;]+@<dominio>$ con un
+// dominio de allowedEmailDomains. Sólo valida el texto tal cual (sin recortar
+// ni autocorregir): «gmailcon», «gmail.co», comas o espacios no pasan.
+function isAllowedLoginEmail(value) {
+    var text = originalText(value, "")
+    for (var i = 0; i < allowedEmailDomains.length; ++i) {
+        var domain = allowedEmailDomains[i].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+        if (new RegExp("^[^\\s@,;]+@" + domain + "$").test(text))
+            return true
+    }
+    return false
+}
+
 // Primer nombre para el saludo, desde un nombre de perfil verificado.
 // Nunca deriva un nombre de un correo.
 function greetingFirstName(value) {
