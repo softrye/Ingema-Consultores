@@ -1,0 +1,39 @@
+{
+  "project_id": "7fb77795-9986-4b99-8b59-55f1266891d4",
+  "observed": "2026-11-04",
+  "read_only": true,
+  "cases": [
+    {
+      "label": "c+00+11",
+      "read_only": "on",
+      "rpc_response": {
+        "name": "c+00+11.calicata",
+        "space_id": "53a2e43c-0ccd-4e76-8f16-940ca1e86ee0",
+        "lifecycle": "ACTIVE",
+        "target_id": "c5a8cece-b1a6-4f29-988e-826be10a6c82",
+        "project_id": "7fb77795-9986-4b99-8b59-55f1266891d4",
+        "result_code": "IDEMPOTENT_REPLAY",
+        "target_type": "CALICATA",
+        "node_version": 1,
+        "parent_node_id": "f212e604-4a7a-4bc0-a04c-9748e78e933a",
+        "document_node_id": "1272e209-cd62-4ffc-9bb4-8413e3a3a1ac"
+      }
+    },
+    {
+      "label": "root Smart Document",
+      "read_only": "on",
+      "rpc_response": {
+        "name": "QA IA laptop 2026-10-15.calicata",
+        "space_id": "53a2e43c-0ccd-4e76-8f16-940ca1e86ee0",
+        "lifecycle": "ACTIVE",
+        "target_id": "fbd8ec81-3f0b-4c8d-9998-99b2002c33bc",
+        "project_id": "7fb77795-9986-4b99-8b59-55f1266891d4",
+        "result_code": "IDEMPOTENT_REPLAY",
+        "target_type": "CALICATA",
+        "node_version": 1,
+        "parent_node_id": null,
+        "document_node_id": "417a298d-3ad7-42ab-8ba7-599d55128e85"
+      }
+    }
+  ]
+}

@@ -1117,15 +1117,34 @@ QString CalicataCloudService::syncDocument(CalicataDocument *document, const QSt
             const QString resultCode = trimmedText(smart.value(QStringLiteral("result_code"))).toUpper();
             const QString name = trimmedText(smart.value(QStringLiteral("name")));
             const qint64 nodeVersion = smart.value(QStringLiteral("node_version")).toLongLong();
+            // document_nodes.parent_id is nullable: an existing Smart Document
+            // may legitimately live at the workspace root. Missing columns,
+            // empty strings and malformed non-null UUIDs are still rejected.
+            const bool validParentNode = smart.contains(QStringLiteral("parent_node_id"))
+                && (smart.value(QStringLiteral("parent_node_id")).isNull() || !parentNodeId.isEmpty());
             const bool validLifecycle = QSet<QString>{QStringLiteral("ACTIVE"), QStringLiteral("ARCHIVED"),
                                                       QStringLiteral("TRASHED")}.contains(lifecycle);
             const bool validResult = resultCode == QLatin1String("CREATED")
                 || resultCode == QLatin1String("IDEMPOTENT_REPLAY");
-            if (documentNodeId.isEmpty() || spaceId.isEmpty() || parentNodeId.isEmpty()
-                || projectId != ctx->projectId || targetId != ctx->remoteId
-                || targetType != QLatin1String("CALICATA") || name.isEmpty()
-                || nodeVersion < 1 || !validLifecycle || !validResult) {
-                fail({}, QStringLiteral("El servidor devolvió un Smart Document de Calicata incoherente."));
+            QStringList invalidFields;
+            if (documentNodeId.isEmpty()) invalidFields.append(QStringLiteral("document_node_id"));
+            if (spaceId.isEmpty()) invalidFields.append(QStringLiteral("space_id"));
+            if (!validParentNode) invalidFields.append(QStringLiteral("parent_node_id"));
+            if (projectId != ctx->projectId) invalidFields.append(QStringLiteral("project_id"));
+            if (targetId != ctx->remoteId) invalidFields.append(QStringLiteral("target_id"));
+            if (targetType != QLatin1String("CALICATA")) invalidFields.append(QStringLiteral("target_type"));
+            if (name.isEmpty()) invalidFields.append(QStringLiteral("name"));
+            if (nodeVersion < 1) invalidFields.append(QStringLiteral("node_version"));
+            if (!validLifecycle) invalidFields.append(QStringLiteral("lifecycle"));
+            if (!validResult) invalidFields.append(QStringLiteral("result_code"));
+            if (!invalidFields.isEmpty()) {
+                const QString responseShape = document.isArray() ? QStringLiteral("array")
+                    : document.isObject() ? QStringLiteral("object") : QStringLiteral("null");
+                qWarning().noquote() << "INGE_CALICATA_SMART_DOCUMENT_INVALID fields=" << invalidFields.join(QLatin1Char(','))
+                                    << "shape=" << responseShape
+                                    << "rows=" << (document.isArray() ? document.array().size() : document.isObject() ? 1 : 0);
+                fail(QStringLiteral("SMART_DOCUMENT_INVALID_CONTRACT"),
+                     QStringLiteral("El servidor devolvió un Smart Document de Calicata incoherente. Referencia: CAL-SMART-CONTRACT."));
                 return;
             }
 
@@ -1136,7 +1155,8 @@ QString CalicataCloudService::syncDocument(CalicataDocument *document, const QSt
             result[QStringLiteral("status")] = canonicalStatus(ctx->header.value(QStringLiteral("status")));
             result[QStringLiteral("document_node_id")] = documentNodeId;
             result[QStringLiteral("space_id")] = spaceId;
-            result[QStringLiteral("parent_node_id")] = parentNodeId;
+            result[QStringLiteral("parent_node_id")] = smart.value(QStringLiteral("parent_node_id")).isNull()
+                ? QVariant() : QVariant(parentNodeId);
             result[QStringLiteral("node_version")] = nodeVersion;
             result[QStringLiteral("name")] = name;
             result[QStringLiteral("lifecycle")] = lifecycle;
