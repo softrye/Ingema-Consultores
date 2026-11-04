@@ -15,7 +15,8 @@ inline bool requiresReviewReason(const QString &operation, const QVariantMap &ar
 {
     if (operation == QLatin1String("reviewTransition"))
         return arguments.value(QStringLiteral("nextState")).toString() != QLatin1String("BORRADOR");
-    return operation == QLatin1String("reviewRequest") || operation == QLatin1String("reviewDecide");
+    return operation == QLatin1String("reviewRequest") || operation == QLatin1String("reviewDecide")
+        || operation == QLatin1String("reviewExport");
 }
 
 inline QVariant nullable(const QString &value)
@@ -41,6 +42,21 @@ inline bool call(const QString &operation, const QVariantMap &arguments,
         // Historial de observaciones del revisor (DocumentReviewObservation de la Web).
         *rpc = QStringLiteral("list_rendition_review_observations_v08");
         *params = {{QStringLiteral("p_rendition_id"), arg("renditionId")}};
+    } else if (operation == QLatin1String("reviewObservation")) {
+        // Comentario vigente del revisor (banner de la Web, modo "banner").
+        *rpc = QStringLiteral("get_document_review_observation_v07");
+        *params = {{QStringLiteral("p_domain"), QStringLiteral("RENDITION")},
+                   {QStringLiteral("p_id"), arg("renditionId")},
+                   {QStringLiteral("p_project_id"), nullable(arguments.value(QStringLiteral("projectId")).toString())}};
+    } else if (operation == QLatin1String("reviewExport")) {
+        // «Registrar una exportación» (Web): conserva el estado APROBADO (v09).
+        *rpc = QStringLiteral("record_rendition_export_v03");
+        *params = {{QStringLiteral("p_rendition_id"), arg("renditionId")},
+                   {QStringLiteral("p_version_id"), arg("versionId")},
+                   {QStringLiteral("p_expected_row_version"), arg("expectedRowVersion").toLongLong()},
+                   {QStringLiteral("p_request_id"), arg("requestId")},
+                   {QStringLiteral("p_format"), arg("format")},
+                   {QStringLiteral("p_reason"), arg("reason").toString().trimmed()}};
     } else if (operation == QLatin1String("reviewTransition")) {
         *rpc = QStringLiteral("transition_rendition_review_v03");
         *params = {{QStringLiteral("p_rendition_id"), arg("renditionId")},

@@ -29,6 +29,9 @@
 #include <QPointer>
 #include <QThreadPool>
 #include <QUuid>
+#include <QCryptographicHash>
+#include <QRandomGenerator>
+#include <QGuiApplication>
 #include <algorithm>
 
 #ifdef Q_OS_ANDROID
@@ -472,6 +475,98 @@ AuthSession::AuthSession(SupabaseClient* api, QObject* parent)
     m_avatarUrlTimer = new QTimer(this);
     m_avatarUrlTimer->setSingleShot(true);
     connect(m_avatarUrlTimer, &QTimer::timeout, this, &AuthSession::refreshPrivateAvatarUrl);
+
+    // El deep link puede llegar unos fotogramas DESPUÉS de onResume/Qt Active.
+    // No tratar el primer Active como cancelación: el callback Activity primero
+    // debe entregar la URI. Si no llega, diagnosticar callback ausente, no
+    // atribuir una cancelación del usuario sin evidencia de access_denied.
+    if (qGuiApp) {
+        connect(qGuiApp, &QGuiApplication::applicationStateChanged, this,
+                [this](Qt::ApplicationState state) {
+            if (state != Qt::ApplicationActive) return;
+            QTimer::singleShot(0, this, &AuthSession::consumePlatformOAuthCallback);
+            const qint64 started = m_oauthStartedMs;
+            QTimer::singleShot(5000, this, [this, started]() {
+                if (started != m_oauthStartedMs || !m_oauthAwaitingCallback
+                    || !m_oauthInProgress || !qGuiApp
+                    || qGuiApp->applicationState() != Qt::ApplicationActive) return;
+                consumePlatformOAuthCallback();
+                if (!m_oauthAwaitingCallback || !m_oauthInProgress
+                    || QDateTime::currentMSecsSinceEpoch() - m_oauthStartedMs < 4500) return;
+                // Volver a Qt sin recibir el deep link NO demuestra que Google
+                // fue cancelado: podría faltar redirect URL en Supabase o el
+                // navegador podría no haber despachado el intent. No confundir
+                // un callback perdido con una cancelación expresa access_denied.
+                QSettings settings;
+                settings.remove(QLatin1String("auth/oauth_pkce_verifier"));
+                settings.remove(QLatin1String("auth/oauth_pkce_provider"));
+                failOAuth(QStringLiteral("OAUTH_CALLBACK_MISSING"),
+                          QStringLiteral("Google no devolvió el enlace de acceso a InGe+. Revisa el redireccionamiento de Supabase y vuelve a intentarlo."));
+            });
+        });
+    }
+    QTimer::singleShot(0, this, &AuthSession::consumePlatformOAuthCallback);
+}
+
+// ===================== Google (Supabase OAuth PKCE) =====================
+// El code_verifier se genera aquí y nunca sale del dispositivo; solo viaja su
+// hash (code_challenge). Sin service_role ni secretos de cliente en la app.
+static const char* kOAuthVerifierKey  = "auth/oauth_pkce_verifier";
+static const char* kOAuthProviderKey  = "auth/oauth_pkce_provider";
+static const char* kOAuthRedirectUrl  = "com.ingema.ingeplus://login-callback";
+
+static QString newPkceVerifier()
+{
+    static const char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    QString verifier;
+    verifier.reserve(64);
+    for (int i = 0; i < 64; ++i)
+        verifier.append(QLatin1Char(alphabet[QRandomGenerator::system()->bounded(66)]));
+    return verifier;
+}
+
+void AuthSession::setOAuthInProgress(bool active)
+{
+    if (active)
+        m_oauthStartedMs = QDateTime::currentMSecsSinceEpoch();
+    if (m_oauthInProgress == active)
+        return;
+    m_oauthInProgress = active;
+    emit oauthStateChanged();
+}
+
+void AuthSession::failOAuth(const QString& failure, const QString& message)
+{
+    m_oauthAwaitingCallback = false;
+    setOAuthInProgress(false);
+    qWarning().noquote() << QStringLiteral("[Auth] OAUTH_RESULT=%1").arg(failure);
+    setLastLoginFailure(failure);
+    emit loginFail(message);
+}
+
+void AuthSession::setAccountPending(bool pending, bool checking)
+{
+    if (m_accountPending == pending && m_accountPendingChecking == checking)
+        return;
+    m_accountPending = pending;
+    m_accountPendingChecking = pending && checking;
+    emit accountPendingChanged();
+}
+
+void AuthSession::consumePlatformOAuthCallback()
+{
+#ifdef Q_OS_ANDROID
+    const QJniObject value = QJniObject::callStaticObjectMethod(
+        "com/ingema/ingeplus/InGeQtActivity", "takeOAuthCallback", "()Ljava/lang/String;");
+    const QString callback = value.isValid() ? value.toString() : QString();
+    if (!callback.isEmpty()) {
+        handleOAuthCallback(callback);
+        return;
+    }
+#endif
+    // El primer resume puede preceder al intent callback. La cancelación se
+    // comprueba de forma diferida en applicationStateChanged, no aquí.
 }
 
 
@@ -488,14 +583,150 @@ void AuthSession::signInWithOAuthProvider(const QString& provider)
         return;
     }
 
+    const QString providerId = provider.trimmed().toLower();
+    const QString verifier = newPkceVerifier();
+    const QByteArray challenge = QCryptographicHash::hash(verifier.toLatin1(), QCryptographicHash::Sha256)
+        .toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals);
+    {
+        QSettings settings;
+        settings.setValue(QLatin1String(kOAuthVerifierKey), verifier);
+        settings.setValue(QLatin1String(kOAuthProviderKey), providerId);
+    }
+
     QUrl url = m_api->authUrl(QStringLiteral("authorize"));
     QUrlQuery q;
-    q.addQueryItem(QStringLiteral("provider"), provider.trimmed().toLower());
-    q.addQueryItem(QStringLiteral("redirect_to"), QStringLiteral("com.ingema.ingeplus://login-callback"));
+    q.addQueryItem(QStringLiteral("provider"), providerId);
+    q.addQueryItem(QStringLiteral("redirect_to"), QLatin1String(kOAuthRedirectUrl));
+    q.addQueryItem(QStringLiteral("code_challenge"), QString::fromLatin1(challenge));
+    q.addQueryItem(QStringLiteral("code_challenge_method"), QStringLiteral("s256"));
     url.setQuery(q);
 
-    QDesktopServices::openUrl(url);
-    emit oauthStarted(provider, url.toString());
+    // Login nuevo: invalida respuestas en vuelo de otro intento.
+    setLastLoginFailure(QString());
+    beginAuthOperation("oauth", /*cancelPasswordLogin=*/true);
+    m_pendingSwitchAccountId.clear();
+    setAccountPending(false, false);
+
+    bool opened = false;
+#ifdef Q_OS_ANDROID
+    opened = QJniObject::callStaticMethod<jboolean>(
+        "com/ingema/ingeplus/InGeQtActivity", "openOAuthUrl", "(Ljava/lang/String;)Z",
+        QJniObject::fromString(url.toString(QUrl::FullyEncoded)).object<jstring>());
+#else
+    opened = QDesktopServices::openUrl(url);
+#endif
+    if (!opened) {
+        QSettings().remove(QLatin1String(kOAuthVerifierKey));
+        failOAuth(QStringLiteral("CONFIG_ERROR"),
+                  QStringLiteral("No se pudo abrir el inicio de sesión con Google."));
+        return;
+    }
+    qInfo().noquote() << QStringLiteral("[Auth] OAUTH_STARTED provider=%1").arg(providerId);
+    m_oauthAwaitingCallback = true;
+    setOAuthInProgress(true);
+    emit oauthStarted(providerId, url.toString());
+}
+
+void AuthSession::handleOAuthCallback(const QString& callbackUrl)
+{
+    const QUrl callback(callbackUrl);
+    if (callback.scheme() != QStringLiteral("com.ingema.ingeplus")
+        || callback.host() != QStringLiteral("login-callback"))
+        return;
+    m_oauthAwaitingCallback = false;
+
+    // Supabase devuelve ?code=… (PKCE) o ?error=…; algunos errores llegan en el fragmento.
+    const QUrlQuery query(callback);
+    const QUrlQuery fragment(callback.fragment());
+    auto value = [&](const QString& key) {
+        return query.hasQueryItem(key) ? query.queryItemValue(key, QUrl::FullyDecoded)
+                                       : fragment.queryItemValue(key, QUrl::FullyDecoded);
+    };
+
+    QSettings settings;
+    const QString verifier = settings.value(QLatin1String(kOAuthVerifierKey)).toString();
+    settings.remove(QLatin1String(kOAuthVerifierKey));       // un solo uso
+    settings.remove(QLatin1String(kOAuthProviderKey));
+
+    const QString error = value(QStringLiteral("error"));
+    if (!error.isEmpty()) {
+        const QString description = value(QStringLiteral("error_description")).trimmed();
+        failOAuth(error == QStringLiteral("access_denied") ? QStringLiteral("OAUTH_CANCELLED")
+                                                           : QStringLiteral("OAUTH_ERROR"),
+                  description.isEmpty() ? QStringLiteral("Google no autorizó el inicio de sesión.")
+                                        : QStringLiteral("Google: %1").arg(sanitizedAuthField(description, 160)));
+        return;
+    }
+    const QString code = value(QStringLiteral("code"));
+    if (!m_api || code.isEmpty() || verifier.isEmpty()) {
+        failOAuth(QStringLiteral("OAUTH_EXPIRED"),
+                  QStringLiteral("El inicio de sesión con Google expiró. Inténtalo de nuevo."));
+        return;
+    }
+
+    // POST /auth/v1/token?grant_type=pkce {auth_code, code_verifier}: misma
+    // respuesta que el login por contraseña (tokens + user).
+    const quint64 generation = beginAuthOperation("oauth_exchange", /*cancelPasswordLogin=*/true);
+    setOAuthInProgress(true);
+    QUrl url = m_api->authUrl(QStringLiteral("token"));
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("grant_type"), QStringLiteral("pkce"));
+    url.setQuery(q);
+    QNetworkRequest req = m_api->makeRequest(url, QString(), /*transferTimeoutMs=*/30000);
+    req.setRawHeader("Accept", "application/json");
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+    const QJsonObject body{{QStringLiteral("auth_code"), code},
+                           {QStringLiteral("code_verifier"), verifier}};
+    qInfo().noquote() << "[Auth] OAUTH_EXCHANGE_STARTED";
+    auto* reply = m_api->nam()->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, generation]() {
+        const auto netErr = reply->error();
+        const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray raw = reply->readAll();
+        reply->deleteLater();
+        if (!authOperationCurrent(generation, "oauthExchange"))
+            return;
+        if (netErr != QNetworkReply::NoError || http < 200 || http >= 300) {
+            const AuthFailureDiagnostic diagnostic = classifyAuthFailure(raw, http, netErr);
+            failOAuth(diagnostic.failure, diagnostic.userMessage);
+            return;
+        }
+        const QJsonDocument doc = QJsonDocument::fromJson(raw);
+        if (!doc.isObject()) {
+            failOAuth(QStringLiteral("INVALID_RESPONSE"), QStringLiteral("Respuesta inválida de Supabase Auth."));
+            return;
+        }
+        const QJsonObject o = doc.object();
+        setOAuthInProgress(false);
+        qInfo().noquote() << "[Auth] OAUTH_RESULT=SUCCESS";
+        setLastLoginFailure(QString());
+        m_loginEmailExact.clear();                  // el correo exacto lo da Google (user.email)
+        if (m_rememberFor30Days)
+            m_rememberUntilUtc = QDateTime::currentDateTimeUtc().addDays(30);
+        else
+            m_rememberUntilUtc = QDateTime();
+        // 2FA igual que con contraseña: la sesión aal1 espera el código TOTP.
+        const QString mfaFactor = verifiedTotpFactor(o.value(QStringLiteral("user")).toObject());
+        if (!mfaFactor.isEmpty()) {
+            qInfo().noquote() << "[Auth] LOGIN_MFA_REQUIRED";
+            m_mfaPendingSession = o;
+            m_mfaPendingFactor = mfaFactor;
+            emit mfaChanged();
+            emit mfaRequired();
+            return;
+        }
+        finishAuthSuccess(o, /*emitLoginSignal=*/true);
+    });
+}
+
+// Pantalla «pendiente de aprobación»: vuelve a leer el perfil con la sesión en memoria.
+void AuthSession::recheckAccountApproval()
+{
+    if (!m_accountPending || m_accessToken.isEmpty() || m_userId.isEmpty())
+        return;
+    setAccountPending(true, true);
+    loadBackendProfile(/*emitLoginSignal=*/true, /*accountSwitch=*/false, /*autoLogin=*/false);
 }
 
 void AuthSession::setLastLoginFailure(const QString& failure)
@@ -1916,6 +2147,7 @@ void AuthSession::clearSessionMemory()
     m_avatarLocalFile.clear();
     m_avatarPath.clear();
     clearBackendState();
+    setAccountPending(false, false);
 }
 
 void AuthSession::clearBackendState()
@@ -2119,6 +2351,16 @@ void AuthSession::loadBackendProfile(bool emitLoginSignal,
         emit userInfoChanged();
 
         if (!profileActive()) {
+            // PENDIENTE (como en la web): no es un rechazo. La sesión queda en
+            // memoria (no se guarda ni entra a multicuenta) para volver a comprobar.
+            if (m_profileStatus == QStringLiteral("PENDIENTE")
+                && emitLoginSignal && !accountSwitch && !autoLogin) {
+                qInfo().noquote() << "[Auth] LOGIN_RESULT=ACCOUNT_PENDING";
+                setLastLoginFailure(QStringLiteral("ACCOUNT_PENDING"));
+                setAccountPending(true, false);
+                emit accountPendingApproval();
+                return;
+            }
             const QString state = m_profileStatus.isEmpty()
                 ? QStringLiteral("SIN_PERFIL_ACTIVO") : m_profileStatus;
             failBackendAuthorization(
@@ -2138,6 +2380,7 @@ void AuthSession::completeAuthorizedLogin(bool emitLoginSignal,
     if (m_rememberFor30Days && !m_rememberUntilUtc.isValid())
         m_rememberUntilUtc = QDateTime::currentDateTimeUtc().addDays(30);
 
+    setAccountPending(false, false);
     saveToDisk();
     emit userInfoChanged();
     emit backendProfileChanged();
@@ -2453,6 +2696,81 @@ void AuthSession::finishProjectAccessItem(int index,
 
     if (index + 1 < m_assignedProjects.size())
         loadProjectCapabilities(index + 1, generation);
+}
+
+void AuthSession::refreshAccessTokenForRpc(std::function<void(bool, const QString &)> done)
+{
+    if (!done) return;
+    if (!m_api || !logged() || m_refreshToken.isEmpty()) {
+        done(false, QStringLiteral("AUTH_REQUIRED"));
+        return;
+    }
+
+    m_rpcTokenRefreshWaiters.emplace_back(std::move(done));
+    if (m_rpcTokenRefreshInFlight) return; // una única rotación para todos los RPC 401
+    m_rpcTokenRefreshInFlight = true;
+
+    const QString owner = m_userId;
+    const quint64 generation = m_authGeneration;
+    const quint64 accountGeneration = m_accountGeneration;
+    const QString originalRefreshToken = m_refreshToken;
+    QUrl url = m_api->authUrl(QStringLiteral("token"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("grant_type"), QStringLiteral("refresh_token"));
+    url.setQuery(query);
+    QNetworkRequest request = m_api->makeRequest(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    request.setRawHeader("Accept", "application/json");
+    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+    const QJsonObject body{{QStringLiteral("refresh_token"), originalRefreshToken}};
+    QNetworkReply *reply = m_api->nam()->post(request,
+        QJsonDocument(body).toJson(QJsonDocument::Compact));
+    QTimer::singleShot(30000, reply, [reply]() {
+        if (!reply->isFinished()) reply->abort();
+    });
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, owner, generation, accountGeneration, originalRefreshToken]() {
+        const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const auto networkError = reply->error();
+        const QByteArray raw = reply->isOpen() ? reply->readAll() : QByteArray();
+        reply->deleteLater();
+        bool ok = false;
+        QString code = QStringLiteral("NETWORK_AMBIGUOUS");
+
+        if (generation != m_authGeneration || accountGeneration != m_accountGeneration
+            || owner != m_userId || !logged()) {
+            code = QStringLiteral("ACCOUNT_CHANGED");
+        } else if (m_refreshToken != originalRefreshToken && !m_accessToken.isEmpty()) {
+            // Otra restauración válida ya rotó el token; no pisar esa sesión.
+            ok = true;
+        } else if (http >= 200 && http < 300 && networkError == QNetworkReply::NoError) {
+            const QJsonObject result = QJsonDocument::fromJson(raw).object();
+            const QString access = result.value(QStringLiteral("access_token")).toString();
+            const QString refresh = result.value(QStringLiteral("refresh_token")).toString();
+            const QJsonObject user = result.value(QStringLiteral("user")).toObject();
+            const QString resultUserId = user.value(QStringLiteral("id")).toString();
+            const int expires = result.value(QStringLiteral("expires_in")).toInt();
+            if (!access.isEmpty() && !refresh.isEmpty()
+                && resultUserId == owner && expires > 0) {
+                m_accessToken = access;
+                m_refreshToken = refresh;
+                m_expiresAtUtc = QDateTime::currentDateTimeUtc().addSecs(expires);
+                saveToDisk(); // actualiza la sesión guardada sin reautenticar al usuario
+                ok = true;
+            } else {
+                code = QStringLiteral("INVALID_RESPONSE");
+            }
+        } else if (http == 400 || http == 401 || http == 403) {
+            code = QStringLiteral("AUTH_REQUIRED");
+        }
+        qInfo().noquote() << "INGE_AUTH_RPC_REFRESH"
+                          << "result=" << (ok ? "OK" : code)
+                          << "httpStatus=" << http;
+        m_rpcTokenRefreshInFlight = false;
+        auto waiters = std::move(m_rpcTokenRefreshWaiters);
+        m_rpcTokenRefreshWaiters.clear();
+        for (auto &waiter : waiters) if (waiter) waiter(ok, code);
+    });
 }
 
 void AuthSession::refreshSessionWithRefreshTokenInternal(bool accountSwitch, bool autoLogin)

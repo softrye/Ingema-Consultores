@@ -22,7 +22,7 @@ void RenditionRepository::accessReceivedAttachment(const QString &, const QStrin
 void RenditionRepository::listRenditions(int, const QString &, const QString &) { record(QStringLiteral("listRenditions")); }
 void RenditionRepository::getRendition(const QString &id) { record(QStringLiteral("getRendition"), {{QStringLiteral("id"), id}}); }
 void RenditionRepository::listProjects() { record(QStringLiteral("listProjects")); }
-void RenditionRepository::createRendition(const QString &requestId, const QString &, const QString &, const QVariantList &, const QString &, const QString &)
+void RenditionRepository::createRendition(const QString &requestId, const QString &, const QString &, const QVariantList &, const QString &, const QString &, const QString &)
 { record(QStringLiteral("createRendition"), {{QStringLiteral("requestId"), requestId}}); }
 void RenditionRepository::editRendition(const QString &id, qint64 version, const QString &, const QString &, const QVariantList &, const QString &, const QString &, qint64)
 { record(QStringLiteral("editRendition"), {{QStringLiteral("id"), id}, {QStringLiteral("version"), version}}); }

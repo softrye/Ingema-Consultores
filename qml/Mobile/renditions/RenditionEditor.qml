@@ -10,8 +10,11 @@ Item {
     id: page
     readonly property bool editingInProgress: true
     property var app
+    readonly property string presenceField: "Datos de la rendición"   // presencia en vivo
     property var original: null
     property bool embedded: false              // dentro de la hoja «Nueva rendición»
+    // Hoja de vidrio «Nueva rendición»: superficies interiores más ligeras (vidrio interior claro).
+    function innerGlass(alpha) { return S.glass(embedded ? alpha * 0.5 : alpha) }
     readonly property var ui: app.ui
     readonly property var ctl: app.ctl
     readonly property bool editing: original !== null && original !== undefined
@@ -371,7 +374,7 @@ Item {
                             Rectangle {
                                 anchors.fill: parent
                                 radius: 20 * page.ui.u
-                                color: tileTap.pressed ? S.glass(0.75) : S.glass(0.92)
+                                color: tileTap.pressed ? page.innerGlass(0.75) : page.innerGlass(0.92)
                                 border.width: 1
                                 border.color: Qt.rgba(tile.tone.r, tile.tone.g, tile.tone.b, tile.checked ? 0.85 : 0.30)
                             }
@@ -427,7 +430,7 @@ Item {
                             required property var modelData
                             readonly property bool on: page.activePreset === modelData.k
                             width: (presetRow.width - 2 * presetRow.spacing) / 3; height: 48 * page.ui.u; radius: 14 * page.ui.u
-                            color: on ? Qt.rgba(6 / 255, 84 / 255, 162 / 255, 0.10) : S.glass(0.9)
+                            color: on ? Qt.rgba(6 / 255, 84 / 255, 162 / 255, 0.10) : page.innerGlass(0.9)
                             border.width: on ? 2 : 1; border.color: on ? S.accent : S.fieldBorder
                             Behavior on color { ColorAnimation { duration: 160 } }
                             Text { anchors.centerIn: parent; text: presetCell.modelData.l; color: presetCell.on ? S.accent : S.text
@@ -452,7 +455,7 @@ Item {
                             id: stepDate
                             required property var modelData
                             width: (stepDates.width - stepDates.spacing) / 2; height: 64 * page.ui.u; radius: 16 * page.ui.u
-                            color: stepDateTap.pressed ? S.glass(0.7) : S.glass(0.9)
+                            color: stepDateTap.pressed ? page.innerGlass(0.7) : page.innerGlass(0.9)
                             border.width: 1; border.color: S.fieldBorder
                             Column {
                                 x: 14 * page.ui.u; anchors.verticalCenter: parent.verticalCenter; spacing: 2 * page.ui.u
@@ -486,7 +489,7 @@ Item {
                 }
                 Rectangle {
                     width: parent.width; height: 68 * page.ui.u; radius: 16 * page.ui.u
-                    color: stepFolderTap.pressed ? S.glass(0.7) : S.glass(0.9)
+                    color: stepFolderTap.pressed ? page.innerGlass(0.7) : page.innerGlass(0.9)
                     border.width: page.folder.length ? 1 : 1.5
                     border.color: page.folder.length ? S.fieldBorder : S.accentSoft
                     Text { x: 14 * page.ui.u; anchors.verticalCenter: parent.verticalCenter; text: String.fromCharCode(0xE0D7); color: S.accent
@@ -534,7 +537,7 @@ Item {
                             width: periodRow.dateWidth
                             height: periodRow.blockHeight
                             radius: 18 * page.ui.u
-                            color: dateTap.pressed ? S.glass(0.7) : S.glass(0.9)
+                            color: dateTap.pressed ? page.innerGlass(0.7) : page.innerGlass(0.9)
                             border.width: 1.5
                             border.color: Qt.rgba(dateBox.tone.r, dateBox.tone.g, dateBox.tone.b, 0.55)
                             Column {
@@ -565,7 +568,7 @@ Item {
                         Rectangle {                        // Carpeta documental (selector real InGe Drive)
                             width: parent.width; height: 96 * page.ui.u
                             radius: 18 * page.ui.u
-                            color: folderBoxTap.pressed ? S.glass(0.7) : S.glass(0.9)
+                            color: folderBoxTap.pressed ? page.innerGlass(0.7) : page.innerGlass(0.9)
                             border.width: 1.5; border.color: Qt.rgba(46 / 255, 184 / 255, 114 / 255, 0.50)
                             opacity: page.writable && page.primary.length > 0 ? 1 : 0.6
                             Text { x: 12 * page.ui.u; anchors.verticalCenter: parent.verticalCenter; text: String.fromCharCode(0xE0D7); color: S.navy
@@ -592,7 +595,7 @@ Item {
                         Rectangle {                        // Nombre de la rendición (editable)
                             width: parent.width; height: 96 * page.ui.u
                             radius: 18 * page.ui.u
-                            color: S.glass(0.9)
+                            color: page.innerGlass(0.9)
                             border.width: 1.5
                             border.color: nameInput.activeFocus ? S.accentSoft : Qt.rgba(59 / 255, 130 / 255, 214 / 255, 0.45)
                             Text { x: 12 * page.ui.u; anchors.verticalCenter: parent.verticalCenter; text: String.fromCharCode(0xE0CC); color: S.navy
@@ -706,7 +709,8 @@ Item {
                 color: S.text; wrapMode: Text.WordWrap
                 font.family: page.ui.fontFamily; font.pixelSize: 15 * page.ui.u
             }
-            Row {
+            Flow {
+                width: parent.width
                 spacing: 10 * page.ui.u
                 RButton { ui: page.ui; glyph: 0xE06E; label: "Subir"; enabledButton: page.path.length > 0 && !page.browsingBusy; onActivated: page.folderUp() }
                 RButton {

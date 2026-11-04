@@ -258,7 +258,7 @@ if(INGE_BUILD_MOBILE)
     # Enlazarlo hace que androiddeployqt empaquete el módulo QML QtLocation y el plugin.
     find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Location)
     if(QT_VERSION_MAJOR GREATER_EQUAL 6)
-        find_package(Qt6 REQUIRED COMPONENTS QuickDialogs2)
+        find_package(Qt6 REQUIRED COMPONENTS QuickDialogs2 Multimedia)
     endif()
     set(INGE_MOBILE_CALICATAS_QRC "${INGE_PROJECT_ROOT}/resources_mobile_calicatas.qrc")
 
@@ -293,12 +293,16 @@ if(INGE_BUILD_MOBILE)
         "${INGE_PROJECT_ROOT}/src/documents/nothingdocuments.cpp"
         "${INGE_PROJECT_ROOT}/src/cpp/supabaserealtimechannel.h"
         "${INGE_PROJECT_ROOT}/src/cpp/supabaserealtimechannel.cpp"
+        "${INGE_PROJECT_ROOT}/src/cpp/presenceidentity.h"
+        "${INGE_PROJECT_ROOT}/src/cpp/presenceidentity.cpp"
         "${INGE_PROJECT_ROOT}/src/documents/nothingfileops.h"
         "${INGE_PROJECT_ROOT}/src/documents/nothingfileops.cpp"
         "${INGE_PROJECT_ROOT}/betadiagnostics.h"
         "${INGE_PROJECT_ROOT}/betadiagnostics.cpp"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionrepository.h"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionrepository.cpp"
+        "${INGE_PROJECT_ROOT}/src/cpp/accessrequestsclient.h"
+        "${INGE_PROJECT_ROOT}/src/cpp/accessrequestsclient.cpp"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionlocalstore.h"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionlocalstore.cpp"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionlocalstore_working.cpp"
@@ -538,7 +542,7 @@ if(INGE_BUILD_MOBILE)
 
         if(QT_VERSION_MAJOR GREATER_EQUAL 6)
             target_include_directories(AppCalicatasMobile PRIVATE "${INGE_PROJECT_ROOT}/src/documents" "${INGE_PROJECT_ROOT}/src/cpp")
-            target_link_libraries(AppCalicatasMobile PRIVATE Qt6::GuiPrivate Qt6::QuickDialogs2)
+            target_link_libraries(AppCalicatasMobile PRIVATE Qt6::GuiPrivate Qt6::QuickDialogs2 Qt6::Multimedia)
         endif()
 
         if(ANDROID)
@@ -588,9 +592,12 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/EarthGlassAction.qml"
             "${MOBILE_QML_DIR}/AddToolPanel.qml"
             "${MOBILE_QML_DIR}/GlassSurface.qml"
+            "${MOBILE_QML_DIR}/DockGlassPanel.qml"
             # Calicatas: editor original restaurado y sus dependencias reales.
             "${MOBILE_QML_DIR}/CalicataSaveOpenDialog.qml"
             "${MOBILE_QML_DIR}/components/FlowIcon.qml"
+            "${MOBILE_QML_DIR}/components/PresenceAvatars.qml"
+            "${MOBILE_QML_DIR}/components/FieldPresenceHighlight.qml"
             "${MOBILE_QML_DIR}/documents/NothingButton.qml"
             "${MOBILE_QML_DIR}/documents/NothingDocumentsRoot.qml"
             "${MOBILE_QML_DIR}/documents/NothingEntry.qml"
@@ -624,8 +631,11 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/pages/CalicataOperationOverlay.qml"
             "${MOBILE_QML_DIR}/pages/CalicataPhotoEditor.qml"
             "${MOBILE_QML_DIR}/pages/CalicataPointPicker.qml"
+            "${MOBILE_QML_DIR}/pages/CalicataUbicacionView.qml"
+            "${MOBILE_QML_DIR}/pages/CalicataMapEditor.qml"
             "${MOBILE_QML_DIR}/pages/CalicataProfile.qml"
             "${MOBILE_QML_DIR}/pages/CalicataReview.qml"
+            "${MOBILE_QML_DIR}/pages/CalicataSiteVisit.qml"
             "${MOBILE_QML_DIR}/pages/CalicataSurface.qml"
             "${MOBILE_QML_DIR}/pages/CalicatasEditorPage.qml"
             "${MOBILE_QML_DIR}/pages/CalicatasHome.qml"
@@ -672,6 +682,10 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/renditions/RExpenseQuickForm.qml"
             "${MOBILE_QML_DIR}/renditions/REditableTile.qml"
             "${MOBILE_QML_DIR}/renditions/RPackedLayout.qml"
+            "${MOBILE_QML_DIR}/halloween/HalloweenLogic.js"
+            "${MOBILE_QML_DIR}/halloween/HalloweenController.qml"
+            "${MOBILE_QML_DIR}/halloween/HalloweenLayer.qml"
+            "${MOBILE_QML_DIR}/halloween/HalloweenScare.qml"
             "${MOBILE_QML_DIR}/settings/SettingsApp.qml"
             "${MOBILE_QML_DIR}/settings/SettingsPage.qml"
             "${MOBILE_QML_DIR}/settings/SettingsGroup.qml"
@@ -785,6 +799,12 @@ if(INGE_BUILD_MOBILE)
         qt_add_shaders(AppCalicatasMobile "inge_access_shaders"
             PREFIX "/InGe/Mobile"
             BASE "${MOBILE_QML_DIR}"
+            # ShaderEffect usa el vertex por defecto de Qt Quick: GLSL ES 100.
+            # Mantener los fragment shaders (aurora/glass) en el mismo perfil;
+            # GLSL 300 es puede provocar L0001 al enlazar con ese vertex en Mali.
+            GLSL "100es,120,150"
+            HLSL 50
+            MSL 12
             FILES
                 "${MOBILE_QML_DIR}/shaders/aurora.frag"
                 "${MOBILE_QML_DIR}/shaders/glass.frag"

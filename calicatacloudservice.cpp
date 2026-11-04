@@ -9,7 +9,10 @@
 #include <QRandomGenerator>
 #include <QSslSocket>
 #include <QDateTime>
+#include <QImage>
+#include <QPointF>
 #include <QImageIOHandler>
+#include <QNetworkAccessManager>
 #include <QImageReader>
 #include <QDir>
 #include <QFile>
@@ -23,6 +26,7 @@
 #include <QPointer>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QSettings>
 #include <QSet>
 #include <QStandardPaths>
 #include <QTimer>
@@ -31,6 +35,7 @@
 #include <QUuid>
 #include <QtMath>
 
+#include "src/cpp/presenceidentity.h"
 #include <functional>
 #include <memory>
 
@@ -312,6 +317,14 @@ void CalicataCloudService::syncAccountContext()
     if (owner == m_contextOwner) return;
     m_contextOwner = owner;
     ++m_contextEpoch;
+    m_mediaFlushing = false;
+    m_purgedCalicataIds.clear();
+    if (!owner.isEmpty()) {
+        const QStringList known = QSettings().value(QStringLiteral("calicatas/purged/") + owner).toStringList();
+        for (const QString &id : known) if (!normalizedUuid(id).isEmpty()) m_purgedCalicataIds.insert(normalizedUuid(id));
+    }
+    m_projectReadIds.clear();
+    emit purgedCalicatasChanged();
     m_projects.clear();
     m_projectsRefreshPending = false;
     m_projectCalicatas.clear();
@@ -321,6 +334,70 @@ void CalicataCloudService::syncAccountContext()
     leavePresence();
     emit projectsChanged();
     emit projectCalicatasChanged();
+}
+
+void CalicataCloudService::readCalicataState(const QString &projectId, const QString &calicataId,
+                                            MediaStateCallback done)
+{
+    syncAccountContext();
+    const QString pid = normalizedUuid(projectId), cid = normalizedUuid(calicataId);
+    if (pid.isEmpty() || (!calicataId.isEmpty() && cid.isEmpty())) {
+        done(false, {}, QStringLiteral("INVALID_CALICATA_ID"));
+        return;
+    }
+    const QString key = QString::number(m_contextEpoch) + QLatin1Char(':') + pid + QLatin1Char(':') + cid;
+    if (m_mediaStateRequests.contains(key)) { m_mediaStateRequests[key].append(std::move(done)); return; }
+    m_mediaStateRequests[key].append(std::move(done));
+    postRpc(QStringLiteral("get_my_calicata_media_read_state_v01"),
+            {{QStringLiteral("p_project_id"), pid},
+             {QStringLiteral("p_calicata_id"), cid.isEmpty() ? QVariant() : QVariant(cid)}},
+            [this, key, pid, cid](bool ok, const QJsonDocument &document, const QString &code, const QString &message) {
+        const QVariantMap info = firstRow(document);
+        const QString state = info.value(QStringLiteral("state")).toString();
+        QString error = code.isEmpty() ? message : code;
+        if (ok && (cid.isEmpty() ? !info.contains(QStringLiteral("calicatas"))
+                                : (state != QLatin1String("ACTIVE") && state != QLatin1String("PURGED")
+                                   && state != QLatin1String("FROZEN")))) {
+            ok = false;
+            error = QStringLiteral("INVALID_CALICATA_READ_STATE");
+        }
+        if (ok) {
+            QSet<QString> next = m_purgedCalicataIds;
+            if (cid.isEmpty()) {
+                for (const QString &old : m_projectReadIds.value(pid)) next.remove(old);
+                QSet<QString> known;
+                for (const QVariant &value : info.value(QStringLiteral("calicatas")).toList()) {
+                    const QVariantMap row = value.toMap();
+                    const QString id = normalizedUuid(row.value(QStringLiteral("calicata_id")).toString());
+                    if (id.isEmpty()) continue;
+                    known.insert(id);
+                    if (row.value(QStringLiteral("state")).toString() == QLatin1String("PURGED")) next.insert(id);
+                    else next.remove(id);
+                }
+                m_projectReadIds[pid] = known;
+            } else {
+                m_projectReadIds[pid].insert(cid);
+                if (state == QLatin1String("PURGED")) next.insert(cid);
+                else next.remove(cid);
+            }
+            if (next != m_purgedCalicataIds) {
+                m_purgedCalicataIds = next;
+                if (!m_contextOwner.isEmpty())
+                    QSettings().setValue(QStringLiteral("calicatas/purged/") + m_contextOwner, m_purgedCalicataIds.values());
+                if (m_purgedCalicataIds.contains(m_rtCalicataId)) leavePresence();
+                emit purgedCalicatasChanged();
+            }
+        } else if (code != QLatin1String("ACCOUNT_CHANGED")) {
+            setLastError(error);
+        }
+        const auto waiting = m_mediaStateRequests.take(key);
+        for (const auto &callback : waiting) callback(ok, info, error);
+    });
+}
+
+void CalicataCloudService::refreshCalicataReadStates(const QString &projectId)
+{
+    readCalicataState(projectId, {}, [](bool, const QVariantMap &, const QString &) {});
 }
 
 void CalicataCloudService::beginRequest()
@@ -414,7 +491,8 @@ void CalicataCloudService::postRpc(const QString &rpcName, const QVariantMap &ar
         request, QJsonDocument::fromVariant(arguments).toJson(QJsonDocument::Compact));
     beginRequest();
     QTimer::singleShot(30000, reply, [reply]() { if (!reply->isFinished()) reply->abort(); });
-    connect(reply, &QNetworkReply::finished, this, [this, reply, epoch, callback = std::move(callback)]() mutable {
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, epoch, rpcName, callback = std::move(callback)]() mutable {
         endRequest();
         const QByteArray raw = reply->isOpen() ? reply->readAll() : QByteArray{};
         const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -429,6 +507,12 @@ void CalicataCloudService::postRpc(const QString &rpcName, const QVariantMap &ar
         const QJsonDocument document = QJsonDocument::fromJson(raw, &parseError);
         if (networkError != QNetworkReply::NoError || http < 200 || http >= 300) {
             const QString code = http == 401 ? QStringLiteral("AUTH_REQUIRED") : responseCode(document);
+            // Diagnóstico real del preflight sin divulgar JWT, rutas ni bytes.
+            if (rpcName == QLatin1String("get_my_calicata_media_read_state_v01"))
+                qWarning().noquote() << "INGE_CAL_MEDIA_READ_STATE_RPC_FAILED"
+                                     << "httpStatus=" << http
+                                     << "qtNetworkError=" << int(networkError)
+                                     << "backendCode=" << (code.isEmpty() ? QStringLiteral("NONE") : code);
             callback(false, document, code,
                      responseMessage(document, networkMessage.isEmpty()
                          ? QStringLiteral("HTTP_%1").arg(http) : networkMessage));
@@ -625,6 +709,8 @@ void CalicataCloudService::refreshProjects()
         }
         m_projects = projects;
         setLastError({});
+        for (const QVariant &project : std::as_const(m_projects))
+            refreshCalicataReadStates(project.toMap().value(QStringLiteral("id")).toString());
         emit projectsChanged();
         emit projectsLoaded(int(m_projects.size()));
     });
@@ -632,6 +718,7 @@ void CalicataCloudService::refreshProjects()
 
 void CalicataCloudService::listProjectCalicatas(const QString &projectId)
 {
+    refreshCalicataReadStates(projectId);
     const quint64 requestId = ++m_projectListRequest;
     const QString pid = normalizedUuid(projectId);
     auto *ctx = appContext();
@@ -749,6 +836,19 @@ void CalicataCloudService::loadRemoteDocument(CalicataDocument *document,
         if (target->header() != originalHeader || target->cortes() != originalCortes
             || target->observaciones() != originalObservations) {
             emit remoteLoadFailed(localId, QStringLiteral("La ficha cambió durante la carga. Los cambios locales se conservan."));
+            return;
+        }
+        // Un reconnect con remoteRevision=0 significa "revisión desconocida",
+        // no una base versión cero. Nunca hidratar una versión más vieja que
+        // la confirmada localmente: se conserva íntegro el documento actual.
+        const qint64 serverRevision = remoteRoot.value(QStringLiteral("row_version")).toLongLong();
+        const qint64 localRevision = originalHeader.value(QStringLiteral("remoteRowVersion")).toLongLong();
+        if (localRevision > 0 && serverRevision < localRevision) {
+            qWarning().noquote() << "INGE_LIVE_REVALIDATE_STALE_REMOTE"
+                                 << "localRevision=" << localRevision
+                                 << "serverRevision=" << serverRevision;
+            emit remoteLoadFailed(localId,
+                QStringLiteral("La versión remota es anterior a la confirmada en este equipo; no se reemplazó."));
             return;
         }
         const qint64 networkMs = elapsed->elapsed();
@@ -1126,15 +1226,34 @@ QString CalicataCloudService::syncDocument(CalicataDocument *document, const QSt
             const QString resultCode = trimmedText(smart.value(QStringLiteral("result_code"))).toUpper();
             const QString name = trimmedText(smart.value(QStringLiteral("name")));
             const qint64 nodeVersion = smart.value(QStringLiteral("node_version")).toLongLong();
+            // document_nodes.parent_id is nullable: an existing Smart Document
+            // may legitimately live at the workspace root. Missing columns,
+            // empty strings and malformed non-null UUIDs are still rejected.
+            const bool validParentNode = smart.contains(QStringLiteral("parent_node_id"))
+                && (smart.value(QStringLiteral("parent_node_id")).isNull() || !parentNodeId.isEmpty());
             const bool validLifecycle = QSet<QString>{QStringLiteral("ACTIVE"), QStringLiteral("ARCHIVED"),
                                                       QStringLiteral("TRASHED")}.contains(lifecycle);
             const bool validResult = resultCode == QLatin1String("CREATED")
                 || resultCode == QLatin1String("IDEMPOTENT_REPLAY");
-            if (documentNodeId.isEmpty() || spaceId.isEmpty() || parentNodeId.isEmpty()
-                || projectId != ctx->projectId || targetId != ctx->remoteId
-                || targetType != QLatin1String("CALICATA") || name.isEmpty()
-                || nodeVersion < 1 || !validLifecycle || !validResult) {
-                fail({}, QStringLiteral("El servidor devolvió un Smart Document de Calicata incoherente."));
+            QStringList invalidFields;
+            if (documentNodeId.isEmpty()) invalidFields.append(QStringLiteral("document_node_id"));
+            if (spaceId.isEmpty()) invalidFields.append(QStringLiteral("space_id"));
+            if (!validParentNode) invalidFields.append(QStringLiteral("parent_node_id"));
+            if (projectId != ctx->projectId) invalidFields.append(QStringLiteral("project_id"));
+            if (targetId != ctx->remoteId) invalidFields.append(QStringLiteral("target_id"));
+            if (targetType != QLatin1String("CALICATA")) invalidFields.append(QStringLiteral("target_type"));
+            if (name.isEmpty()) invalidFields.append(QStringLiteral("name"));
+            if (nodeVersion < 1) invalidFields.append(QStringLiteral("node_version"));
+            if (!validLifecycle) invalidFields.append(QStringLiteral("lifecycle"));
+            if (!validResult) invalidFields.append(QStringLiteral("result_code"));
+            if (!invalidFields.isEmpty()) {
+                const QString responseShape = document.isArray() ? QStringLiteral("array")
+                    : document.isObject() ? QStringLiteral("object") : QStringLiteral("null");
+                qWarning().noquote() << "INGE_CALICATA_SMART_DOCUMENT_INVALID fields=" << invalidFields.join(QLatin1Char(','))
+                                    << "shape=" << responseShape
+                                    << "rows=" << (document.isArray() ? document.array().size() : document.isObject() ? 1 : 0);
+                fail(QStringLiteral("SMART_DOCUMENT_INVALID_CONTRACT"),
+                     QStringLiteral("El servidor devolvió un Smart Document de Calicata incoherente. Referencia: CAL-SMART-CONTRACT."));
                 return;
             }
 
@@ -1145,7 +1264,8 @@ QString CalicataCloudService::syncDocument(CalicataDocument *document, const QSt
             result[QStringLiteral("status")] = canonicalStatus(ctx->header.value(QStringLiteral("status")));
             result[QStringLiteral("document_node_id")] = documentNodeId;
             result[QStringLiteral("space_id")] = spaceId;
-            result[QStringLiteral("parent_node_id")] = parentNodeId;
+            result[QStringLiteral("parent_node_id")] = smart.value(QStringLiteral("parent_node_id")).isNull()
+                ? QVariant() : QVariant(parentNodeId);
             result[QStringLiteral("node_version")] = nodeVersion;
             result[QStringLiteral("name")] = name;
             result[QStringLiteral("lifecycle")] = lifecycle;
@@ -2316,6 +2436,17 @@ namespace {
 const QString kMediaBucket = QStringLiteral("calicata-media");
 constexpr int kMaxMediaAttempts = 8;
 
+// Storage answers HTTP 400 {"statusCode":"404","error":"not_found"} when the
+// row points to an object that no longer exists: that is not a read failure.
+bool storageObjectMissing(int http, const QJsonObject &body)
+{
+    if (http == 404) return true;
+    if (http != 400) return false;
+    return body.value(QStringLiteral("statusCode")).toVariant().toString() == QLatin1String("404")
+        || body.value(QStringLiteral("error")).toString().compare(QLatin1String("not_found"), Qt::CaseInsensitive) == 0
+        || body.value(QStringLiteral("message")).toString().contains(QLatin1String("not found"), Qt::CaseInsensitive);
+}
+
 QString mediaOutboxPath(const QString &userId)
 {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -2601,11 +2732,20 @@ void CalicataCloudService::bindMediaIdentity(CalicataDocument *document)
     flushMedia();
 }
 
+int CalicataCloudService::pendingMediaCount() const
+{
+    int count = 0;
+    for (const QVariant &value : m_mediaOutbox)
+        if (value.toMap().value(QStringLiteral("state")).toString() != QLatin1String("PURGED")) ++count;
+    return count;
+}
+
 QVariantList CalicataCloudService::mediaEntriesFor(const QString &localDocumentId) const
 {
     QVariantList result;
     for (const QVariant &value : m_mediaOutbox)
-        if (value.toMap().value(QStringLiteral("local_document_id")) == localDocumentId) result << value;
+        if (value.toMap().value(QStringLiteral("local_document_id")) == localDocumentId
+            && value.toMap().value(QStringLiteral("state")).toString() != QLatin1String("PURGED")) result << value;
     return result;
 }
 
@@ -2732,6 +2872,38 @@ void CalicataCloudService::uploadStorageObject(const QString &path, const QStrin
 }
 
 void CalicataCloudService::processMediaEntry(int index)
+{
+    syncAccountContext();
+    const QVariantMap entry = m_mediaOutbox.at(index).toMap();
+    const QString entryId = entry.value(QStringLiteral("id")).toString();
+    const quint64 epoch = m_contextEpoch;
+    m_mediaFlushing = true;
+    QVariantMap checking = entry;
+    checking[QStringLiteral("state")] = QStringLiteral("SYNCING");
+    m_mediaOutbox[index] = checking;
+    saveMediaOutbox();
+    readCalicataState(entry.value(QStringLiteral("project_id")).toString(),
+                      entry.value(QStringLiteral("calicata_id")).toString(),
+                      [this, entryId, epoch](bool ok, const QVariantMap &info, const QString &error) {
+        if (epoch != m_contextEpoch) return;
+        int current = -1;
+        for (int i = 0; i < m_mediaOutbox.size(); ++i)
+            if (m_mediaOutbox.at(i).toMap().value(QStringLiteral("id")).toString() == entryId) { current = i; break; }
+        if (current < 0) { m_mediaFlushing = false; flushMedia(); return; }
+        const QString state = info.value(QStringLiteral("state")).toString();
+        if (!ok || state != QLatin1String("ACTIVE")) {
+            const QString terminal = state == QLatin1String("PURGED") ? QStringLiteral("PURGED") : QStringLiteral("FAILED");
+            // Keep the outbox entry and original files; never resurrect a purged domain.
+            m_mediaFlushing = false;
+            finishMediaEntry(entryId, terminal, state == QLatin1String("PURGED") ? QString() : error.isEmpty() ? state : error, {});
+            flushMedia();
+            return;
+        }
+        processMediaEntryReady(current);
+    });
+}
+
+void CalicataCloudService::processMediaEntryReady(int index)
 {
     QVariantMap entry = m_mediaOutbox.at(index).toMap();
     const QString entryId = entry.value(QStringLiteral("id")).toString();
@@ -3061,6 +3233,38 @@ void CalicataCloudService::downloadStorageObject(const QString &path, const QStr
                                                  std::function<void(bool, const QString &)> done,
                                                  const QString &bucket)
 {
+    if (!bucket.isEmpty() && bucket != kMediaBucket) {
+        downloadStorageObjectReady(path, destAbs, std::move(done), bucket);
+        return;
+    }
+    static const QRegularExpression identity(QStringLiteral("^projects/([0-9a-fA-F-]{36})/calicatas/([0-9a-fA-F-]{36})/media/([0-9a-fA-F-]{36})/"));
+    const auto match = identity.match(path);
+    if (!match.hasMatch()) { done(false, QStringLiteral("INVALID_MEDIA_PATH")); return; }
+    readCalicataState(match.captured(1), match.captured(2),
+                     [this, path, destAbs, bucket, mediaId = normalizedUuid(match.captured(3)), done](bool ok, const QVariantMap &info, const QString &error) {
+        if (!ok) { done(false, error); return; }
+        const QString state = info.value(QStringLiteral("state")).toString();
+        if (state == QLatin1String("PURGED")) { done(false, QStringLiteral("PURGED")); return; }
+        if (state != QLatin1String("ACTIVE")) { done(false, state); return; }
+        for (const QVariant &value : info.value(QStringLiteral("media")).toList()) {
+            const QVariantMap media = value.toMap();
+            if (media.value(QStringLiteral("media_id")).toString() != mediaId) continue;
+            const bool original = path.contains(QStringLiteral("/original/"));
+            const QString activeVersion = media.value(QStringLiteral("version_id")).toString();
+            const bool activeDerivative = !original && !activeVersion.isEmpty() && path.contains(activeVersion);
+            if ((original && media.value(QStringLiteral("original_state")).toString() == QLatin1String("MISSING"))
+                || (activeDerivative && media.value(QStringLiteral("derivative_state")).toString() == QLatin1String("MISSING"))) {
+                done(false, QStringLiteral("OBJECT_NOT_FOUND")); return;
+            }
+        }
+        downloadStorageObjectReady(path, destAbs, done, bucket);
+    });
+}
+
+void CalicataCloudService::downloadStorageObjectReady(const QString &path, const QString &destAbs,
+                                                      std::function<void(bool, const QString &)> done,
+                                                      const QString &bucket)
+{
     syncAccountContext();
     const quint64 epoch = m_contextEpoch;
     auto *ctx = appContext();
@@ -3091,7 +3295,17 @@ void CalicataCloudService::downloadStorageObject(const QString &path, const QStr
         QString signedPath = object.value(QStringLiteral("signedURL")).toString();
         if (signedPath.isEmpty()) signedPath = object.value(QStringLiteral("signedUrl")).toString();
         if (http < 200 || http >= 300 || signedPath.isEmpty()) {
-            done(false, http == 0 ? networkMessage : QStringLiteral("HTTP_%1").arg(http)); return;
+            // Storage puede devolver HTTP 400 con code=ResourceLocked cuando
+            // una policy provoca SQLSTATE 55P03. No confundirlo con objeto
+            // inexistente ni con una foto corrupta (fallo temporal de backend).
+            const QString storageCode = object.value(QStringLiteral("code")).toString(
+                object.value(QStringLiteral("error")).toString());
+            const bool resourceLocked = storageCode == QLatin1String("ResourceLocked")
+                || object.value(QStringLiteral("statusCode")).toVariant().toString() == QLatin1String("423");
+            done(false, storageObjectMissing(http, object) ? QStringLiteral("OBJECT_NOT_FOUND")
+                      : resourceLocked ? QStringLiteral("STORAGE_RESOURCE_LOCKED")
+                      : http == 0 ? networkMessage : QStringLiteral("HTTP_%1").arg(http));
+            return;
         }
         if (signedPath.startsWith(QLatin1Char('/'))) signedPath = signedPath.mid(1);
         const QUrl url = signedPath.startsWith(QLatin1String("http")) ? QUrl(signedPath)
@@ -3108,7 +3322,8 @@ void CalicataCloudService::downloadStorageObject(const QString &path, const QStr
             download->deleteLater();
             if (epoch != m_contextEpoch) { done(false, QStringLiteral("ACCOUNT_CHANGED")); return; }
             if (status < 200 || status >= 300 || bytes.isEmpty()) {
-                done(false, status == 0 ? networkMessage : QStringLiteral("HTTP_%1").arg(status)); return;
+                done(false, storageObjectMissing(status, QJsonDocument::fromJson(bytes).object()) ? QStringLiteral("OBJECT_NOT_FOUND")
+                          : status == 0 ? networkMessage : QStringLiteral("HTTP_%1").arg(status)); return;
             }
             QDir().mkpath(QFileInfo(destAbs).absolutePath());
             QSaveFile file(destAbs);
@@ -3120,10 +3335,213 @@ void CalicataCloudService::downloadStorageObject(const QString &path, const QStr
     });
 }
 
+// Visita de campo: foto real cercana a la calicata desde Wikimedia Commons
+// (API pública, sin clave ni scraping). Una descarga por calicata; sin red o sin
+// resultados se usa la copia guardada o no se emite nada (queda el fondo actual).
+// Extensión futura: video de fondo (Pexels) cuando exista su clave, mismo patrón de caché.
+void CalicataCloudService::requestSitePhoto(const QString &key, double latitude, double longitude)
+{
+    auto *api = appContext() ? appContext()->supabase() : nullptr;
+    if (key.isEmpty() || !api || !qIsFinite(latitude) || !qIsFinite(longitude)
+        || qAbs(latitude) > 90 || qAbs(longitude) > 180) return;
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/calicata-site-photos");
+    const QString safeKey = QString::fromLatin1(QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha1).toHex().left(20));
+    const QString imagePath = dir + QLatin1Char('/') + safeKey + QStringLiteral(".jpg");
+    const QString metaPath = dir + QLatin1Char('/') + safeKey + QStringLiteral(".json");
+    QJsonObject cached;
+    { QFile meta(metaPath); if (meta.open(QIODevice::ReadOnly)) cached = QJsonDocument::fromJson(meta.readAll()).object(); }
+    const bool haveCached = QFileInfo::exists(imagePath) && !cached.isEmpty();
+    const auto emitCached = [this, key, imagePath, cached]() {
+        emit sitePhotoReady(key, QUrl::fromLocalFile(imagePath).toString(), cached.value(QStringLiteral("credit")).toString());
+    };
+    // ~200 m: la misma calicata no vuelve a pedir la foto.
+    if (haveCached && qAbs(cached.value(QStringLiteral("lat")).toDouble() - latitude) < 0.002
+        && qAbs(cached.value(QStringLiteral("lon")).toDouble() - longitude) < 0.002) {
+        QTimer::singleShot(0, this, emitCached);
+        return;
+    }
+    if (m_sitePhotoRequests.contains(key)) return;
+    m_sitePhotoRequests.insert(key);
+    QPointer<QNetworkAccessManager> nam(api->nam());
+    const auto get = [nam](const QUrl &url, QObject *context, std::function<void(bool, const QByteArray &)> done) {
+        if (!nam) { done(false, {}); return; }
+        QNetworkRequest request(url);
+        request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("InGePlus/1.0 (Android)"));
+        request.setTransferTimeout(20000);
+        QNetworkReply *reply = nam->get(request);
+        QObject::connect(reply, &QNetworkReply::finished, context, [reply, done]() {
+            const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const QByteArray bytes = reply->readAll();
+            reply->deleteLater();
+            done(reply->error() == QNetworkReply::NoError && http >= 200 && http < 300, bytes);
+        });
+    };
+    const auto fail = [this, key, haveCached, emitCached]() {
+        m_sitePhotoRequests.remove(key);
+        if (haveCached) emitCached();          // sin red: la versión guardada
+    };
+    // Candidatos en orden (2026-11-02): GeoData limita el radio a 10 km, así que
+    // la búsqueda amplia a ~25 km repite 10 km en cuatro puntos desplazados 17 km.
+    // En cada anillo: archivo geolocalizado de Commons y, si no hay, la imagen de
+    // la página de Wikipedia (es) más cercana (prop=pageimages). Antes sólo se
+    // probaba Commons a 10 km: en zonas sin fotos geolocalizadas no había fondo.
+    struct Probe { bool wiki; double lat; double lon; };
+    QList<Probe> probes;
+    const double dLat = 17.0 / 111.0;
+    const double dLon = dLat / qMax(0.2, qCos(qDegreesToRadians(latitude)));
+    const QList<QPointF> centers{{latitude, longitude}, {latitude + dLat, longitude}, {latitude - dLat, longitude},
+                                 {latitude, longitude + dLon}, {latitude, longitude - dLon}};
+    for (bool wiki : {false, true})
+        probes.append({wiki, latitude, longitude});
+    for (bool wiki : {false, true})
+        for (int i = 1; i < centers.size(); ++i)
+            probes.append({wiki, centers.at(i).x(), centers.at(i).y()});
+    const QUrl commonsApi(QStringLiteral("https://commons.wikimedia.org/w/api.php"));
+    const QUrl wikiApi(QStringLiteral("https://es.wikipedia.org/w/api.php"));
+    const auto save = [=](const QString &thumb, const QString &title, const QString &credit) {
+        get(QUrl(thumb), this, [=](bool imageOk, const QByteArray &imageBytes) {
+            if (!imageOk || imageBytes.isEmpty() || !QImage::fromData(imageBytes).width()) { fail(); return; }
+            QDir().mkpath(dir);
+            QSaveFile file(imagePath);
+            if (!file.open(QIODevice::WriteOnly) || file.write(imageBytes) != imageBytes.size() || !file.commit()) { fail(); return; }
+            QSaveFile meta(metaPath);
+            const QJsonObject record{{QStringLiteral("lat"), latitude}, {QStringLiteral("lon"), longitude},
+                                     {QStringLiteral("title"), title}, {QStringLiteral("credit"), credit}};
+            if (meta.open(QIODevice::WriteOnly)) { meta.write(QJsonDocument(record).toJson(QJsonDocument::Compact)); meta.commit(); }
+            m_sitePhotoRequests.remove(key);
+            emit sitePhotoReady(key, QUrl::fromLocalFile(imagePath).toString(), credit);
+        });
+    };
+    const auto commonsFile = [=](const QString &title) {
+        QUrl infoUrl(commonsApi);
+        QUrlQuery info;
+        info.addQueryItem(QStringLiteral("action"), QStringLiteral("query"));
+        info.addQueryItem(QStringLiteral("titles"), title);
+        info.addQueryItem(QStringLiteral("prop"), QStringLiteral("imageinfo"));
+        info.addQueryItem(QStringLiteral("iiprop"), QStringLiteral("url|extmetadata"));
+        info.addQueryItem(QStringLiteral("iiurlwidth"), QStringLiteral("1080"));
+        info.addQueryItem(QStringLiteral("format"), QStringLiteral("json"));
+        infoUrl.setQuery(info);
+        get(infoUrl, this, [=](bool infoOk, const QByteArray &infoBytes) {
+            const QJsonObject pages = QJsonDocument::fromJson(infoBytes).object().value(QStringLiteral("query")).toObject()
+                                          .value(QStringLiteral("pages")).toObject();
+            const QJsonArray infos = pages.isEmpty() ? QJsonArray()
+                : pages.begin().value().toObject().value(QStringLiteral("imageinfo")).toArray();
+            const QJsonObject image = infos.isEmpty() ? QJsonObject() : infos.at(0).toObject();
+            const QString thumb = image.value(QStringLiteral("thumburl")).toString();
+            if (!infoOk || !thumb.startsWith(QLatin1String("https://"))) { fail(); return; }
+            const QJsonObject metadata = image.value(QStringLiteral("extmetadata")).toObject();
+            const auto plain = [&metadata](const char *field) {
+                QString text = metadata.value(QLatin1String(field)).toObject().value(QStringLiteral("value")).toString();
+                return text.remove(QRegularExpression(QStringLiteral("<[^>]*>"))).simplified();
+            };
+            QStringList parts;
+            const QString author = plain("Artist"), license = plain("LicenseShortName");
+            if (!author.isEmpty()) parts << author.left(60);
+            if (!license.isEmpty()) parts << license;
+            parts << QStringLiteral("Wikimedia Commons");
+            save(thumb, title, QStringLiteral("Foto: ") + parts.join(QStringLiteral(" · ")));
+        });
+    };
+    auto step = std::make_shared<std::function<void(int)>>();
+    // La cadena se guarda débil en sí misma; cada respuesta pendiente la retiene.
+    const std::weak_ptr<std::function<void(int)>> weakStep = step;
+    *step = [=](int index) {
+        const auto self = weakStep.lock();
+        if (!self) return;
+        if (index >= probes.size()) { fail(); return; }
+        const Probe probe = probes.at(index);
+        const QString coord = QStringLiteral("%1|%2").arg(probe.lat, 0, 'f', 6).arg(probe.lon, 0, 'f', 6);
+        QUrl url(probe.wiki ? wikiApi : commonsApi);
+        QUrlQuery query;
+        query.addQueryItem(QStringLiteral("action"), QStringLiteral("query"));
+        query.addQueryItem(QStringLiteral("format"), QStringLiteral("json"));
+        if (probe.wiki) {
+            query.addQueryItem(QStringLiteral("generator"), QStringLiteral("geosearch"));
+            query.addQueryItem(QStringLiteral("ggscoord"), coord);
+            query.addQueryItem(QStringLiteral("ggsradius"), QStringLiteral("10000"));
+            query.addQueryItem(QStringLiteral("ggslimit"), QStringLiteral("20"));
+            query.addQueryItem(QStringLiteral("prop"), QStringLiteral("pageimages|coordinates"));
+            query.addQueryItem(QStringLiteral("piprop"), QStringLiteral("thumbnail"));
+            query.addQueryItem(QStringLiteral("pithumbsize"), QStringLiteral("1080"));
+            query.addQueryItem(QStringLiteral("pilimit"), QStringLiteral("20"));
+        } else {
+            query.addQueryItem(QStringLiteral("list"), QStringLiteral("geosearch"));
+            query.addQueryItem(QStringLiteral("gscoord"), coord);
+            query.addQueryItem(QStringLiteral("gsradius"), QStringLiteral("10000"));
+            query.addQueryItem(QStringLiteral("gsnamespace"), QStringLiteral("6"));
+            query.addQueryItem(QStringLiteral("gslimit"), QStringLiteral("20"));
+        }
+        url.setQuery(query);
+        get(url, this, [=](bool ok, const QByteArray &bytes) {
+            const QJsonObject result = QJsonDocument::fromJson(bytes).object().value(QStringLiteral("query")).toObject();
+            if (ok && probe.wiki) {
+                // Página con imagen más cercana a la calicata (no al punto desplazado).
+                QString thumb, title;
+                double best = 1e18;
+                const QJsonObject pages = result.value(QStringLiteral("pages")).toObject();
+                for (auto it = pages.begin(); it != pages.end(); ++it) {
+                    const QJsonObject page = it.value().toObject();
+                    const QString source = page.value(QStringLiteral("thumbnail")).toObject().value(QStringLiteral("source")).toString();
+                    const QJsonArray coords = page.value(QStringLiteral("coordinates")).toArray();
+                    if (!source.startsWith(QLatin1String("https://")) || coords.isEmpty()) continue;
+                    const double la = coords.at(0).toObject().value(QStringLiteral("lat")).toDouble();
+                    const double lo = coords.at(0).toObject().value(QStringLiteral("lon")).toDouble();
+                    const double dist = (la - latitude) * (la - latitude) + (lo - longitude) * (lo - longitude);
+                    if (dist < best) { best = dist; thumb = source; title = page.value(QStringLiteral("title")).toString(); }
+                }
+                if (!thumb.isEmpty()) {
+                    save(thumb, title, QStringLiteral("Imagen: «%1» · Wikipedia").arg(title.left(60)));
+                    return;
+                }
+            } else if (ok) {
+                const QJsonArray hits = result.value(QStringLiteral("geosearch")).toArray();
+                for (const QJsonValue &hit : hits) {         // ordenados por distancia: la foto más cercana
+                    const QString candidate = hit.toObject().value(QStringLiteral("title")).toString();
+                    if (candidate.contains(QRegularExpression(QStringLiteral("\\.(jpe?g|png|webp)$"), QRegularExpression::CaseInsensitiveOption))) {
+                        commonsFile(candidate);
+                        return;
+                    }
+                }
+            }
+            (*self)(index + 1);
+        });
+    };
+    (*step)(0);
+}
+
 // Web -> Android: the slot's media in use (newest non-discarded, as Web's
 // read) and its active revision are downloaded into the local cache and
 // adopted as original + derivative. Never overwrites an unpublished local edit.
 void CalicataCloudService::downloadRemotePhoto(CalicataDocument *document, int idx, const QString &versionId)
+{
+    if (!document || document->closed() || idx < 1 || idx > 3) return;
+    const QPointer<CalicataDocument> target(document);
+    const QString localId = document->instanceId();
+    const QString pid = normalizedUuid(document->header().value(QStringLiteral("projectId")).toString());
+    const QString cid = normalizedUuid(document->header().value(QStringLiteral("remoteCalicataId")).toString());
+    if (pid.isEmpty() || cid.isEmpty()) return;
+    readCalicataState(pid, cid, [this, target, localId, pid, cid, idx, versionId](bool ok, const QVariantMap &info, const QString &error) {
+        if (!target || target->closed()
+            || normalizedUuid(target->header().value(QStringLiteral("projectId")).toString()) != pid
+            || normalizedUuid(target->header().value(QStringLiteral("remoteCalicataId")).toString()) != cid) return;
+        const QString state = info.value(QStringLiteral("state")).toString();
+        if (ok && state == QLatin1String("PURGED")) {
+            emit mediaSyncChanged(localId, idx, QStringLiteral("REMOTE_PURGED"), {}, {}); return;
+        }
+        // FROZEN: purga pendiente. Sin lectura ni re-subida; la copia local se conserva
+        // y el estado es pendiente, no un error de medios (aura roja falsa).
+        if (ok && state == QLatin1String("FROZEN")) {
+            emit mediaSyncChanged(localId, idx, QStringLiteral("REMOTE_MISSING"), {}, {}); return;
+        }
+        if (!ok || state != QLatin1String("ACTIVE")) {
+            emit mediaSyncChanged(localId, idx, QStringLiteral("REMOTE_FAILED"), error.isEmpty() ? state : error, {}); return;
+        }
+        downloadRemotePhotoReady(target, idx, versionId);
+    });
+}
+
+void CalicataCloudService::downloadRemotePhotoReady(CalicataDocument *document, int idx, const QString &versionId)
 {
     if (!document || idx < 1 || idx > 3) return;
     const QString localId = document->instanceId();
@@ -3172,7 +3590,12 @@ void CalicataCloudService::downloadRemotePhoto(CalicataDocument *document, int i
                                                                 + QFileInfo(originalPath).suffix());
             const QString derivativePath = version.value(QStringLiteral("derivative_storage_path")).toString();
             downloadStorageObject(originalPath, originalAbs, [this, doc, idx, localId, mediaId, activeVersion, derivativePath, cacheDir, originalAbs, version, media](bool okOriginal, const QString &error) {
-                if (!okOriginal || !doc) { emit mediaSyncChanged(localId, idx, QStringLiteral("REMOTE_FAILED"), error, {}); return; }
+                if (!doc) return;
+                if (!okOriginal && (error == QLatin1String("OBJECT_NOT_FOUND") || error == QLatin1String("PURGED"))) {
+                    emit mediaSyncChanged(localId, idx, error == QLatin1String("PURGED")
+                        ? QStringLiteral("REMOTE_PURGED") : QStringLiteral("REMOTE_MISSING"), {}, {}); return;
+                }
+                if (!okOriginal) { emit mediaSyncChanged(localId, idx, QStringLiteral("REMOTE_FAILED"), error, {}); return; }
                 const QString derivedAbs = derivativePath.isEmpty() ? QString()
                     : QDir(cacheDir).filePath(QStringLiteral("remote_derivada_") + activeVersion + QLatin1Char('.') + QFileInfo(derivativePath).suffix());
                 auto adopt = [this, doc, idx, localId, mediaId, activeVersion, originalAbs, version, media](const QString &derived) {
@@ -3189,8 +3612,11 @@ void CalicataCloudService::downloadRemotePhoto(CalicataDocument *document, int i
                                           adopted ? QString() : QStringLiteral("Hay una edición local sin publicar; no se reemplazó."), {});
                 };
                 if (derivedAbs.isEmpty()) { adopt({}); return; }
-                downloadStorageObject(derivativePath, derivedAbs, [adopt, derivedAbs](bool okDerived, const QString &) {
-                    adopt(okDerived ? derivedAbs : QString());
+                downloadStorageObject(derivativePath, derivedAbs, [this, adopt, derivedAbs, localId, idx](bool okDerived, const QString &error) {
+                    if (okDerived) { adopt(derivedAbs); return; }
+                    const QString state = error == QLatin1String("PURGED") ? QStringLiteral("REMOTE_PURGED")
+                        : error == QLatin1String("OBJECT_NOT_FOUND") ? QStringLiteral("REMOTE_MISSING") : QStringLiteral("REMOTE_FAILED");
+                    emit mediaSyncChanged(localId, idx, state, error, {});
                 });
             });
         };
@@ -3251,6 +3677,28 @@ void CalicataCloudService::discardCloudPhotoVersion(CalicataDocument *document, 
 // the local Recursos cache; also lists its cloud history (Web listLogoOriginals).
 void CalicataCloudService::loadRemoteLogos(CalicataDocument *document, const QString &resourcesDir)
 {
+    if (!document || document->closed() || resourcesDir.isEmpty()) return;
+    const QPointer<CalicataDocument> target(document);
+    const QString localId = document->instanceId();
+    const QString pid = normalizedUuid(document->header().value(QStringLiteral("projectId")).toString());
+    const QString cid = normalizedUuid(document->header().value(QStringLiteral("remoteCalicataId")).toString());
+    if (pid.isEmpty() || cid.isEmpty()) return;
+    readCalicataState(pid, cid, [this, target, localId, pid, cid, resourcesDir](bool ok, const QVariantMap &info, const QString &error) {
+        if (!target || target->closed()
+            || normalizedUuid(target->header().value(QStringLiteral("projectId")).toString()) != pid
+            || normalizedUuid(target->header().value(QStringLiteral("remoteCalicataId")).toString()) != cid) return;
+        const QString state = info.value(QStringLiteral("state")).toString();
+        if (!ok || state != QLatin1String("ACTIVE")) {
+            for (const QString &category : {QStringLiteral("PROJECT"), QStringLiteral("ENTITY")})
+                emit remoteLogoReadFailed(localId, category, error.isEmpty() ? state : error);
+            return;
+        }
+        loadRemoteLogosReady(target, resourcesDir, info);
+    });
+}
+
+void CalicataCloudService::loadRemoteLogosReady(CalicataDocument *document, const QString &resourcesDir, const QVariantMap &readState)
+{
     if (!document) return;
     const QVariantMap header = document->header();
     const QString projectId = normalizedUuid(header.value(QStringLiteral("projectId")).toString());
@@ -3286,11 +3734,11 @@ void CalicataCloudService::loadRemoteLogos(CalicataDocument *document, const QSt
         historyQuery.removeAllQueryItems(QStringLiteral("limit"));
         QUrl historyUrl(url);
         historyUrl.setQuery(historyQuery);
-        getJson(url, [this, localId, category, resourcesDir, historyUrl, isCurrent](bool ok, const QJsonDocument &active, const QString &code, const QString &message) {
+        getJson(url, [this, target, localId, category, resourcesDir, historyUrl, isCurrent, readState](bool ok, const QJsonDocument &active, const QString &code, const QString &message) {
             if (!isCurrent()) return;
             if (!ok) { emit remoteLogoReadFailed(localId, category, code + QStringLiteral(": ") + message); return; }
             const QVariantMap current = firstRow(active);
-            getJson(historyUrl, [this, localId, category, resourcesDir, current, isCurrent](bool historyOk, const QJsonDocument &historyDocument, const QString &hc, const QString &hm) {
+            getJson(historyUrl, [this, target, localId, category, resourcesDir, current, isCurrent, readState](bool historyOk, const QJsonDocument &historyDocument, const QString &hc, const QString &hm) {
             if (!isCurrent()) return;
             if (!historyOk) { emit remoteLogoReadFailed(localId, category, hc + QStringLiteral(": ") + hm); return; }
             QVariantList history = rows(historyDocument);
@@ -3300,6 +3748,13 @@ void CalicataCloudService::loadRemoteLogos(CalicataDocument *document, const QSt
                 history.prepend(current); // identifica exactamente los bytes que se entregan
             }
             if (current.isEmpty()) { emit remoteLogoLoaded(localId, category, QString(), history); return; }
+            for (const QVariant &value : readState.value(QStringLiteral("media")).toList()) {
+                const QVariantMap media = value.toMap();
+                if (media.value(QStringLiteral("media_id")) == current.value(QStringLiteral("media_id"))
+                    && media.value(QStringLiteral("original_state")).toString() == QLatin1String("MISSING")) {
+                    emit remoteLogoReadFailed(localId, category, QStringLiteral("OBJECT_NOT_FOUND")); return;
+                }
+            }
             const QString path = current.value(QStringLiteral("original_storage_path")).toString();
             if (current.value(QStringLiteral("original_bucket")).toString() != kMediaBucket) {
                 emit remoteLogoReadFailed(localId, category, QStringLiteral("INVALID_MEDIA_BUCKET")); return;
@@ -3308,8 +3763,11 @@ void CalicataCloudService::loadRemoteLogos(CalicataDocument *document, const QSt
                 .arg(category.toLower(), normalizedUuid(current.value(QStringLiteral("media_id")).toString()),
                      QFileInfo(path).suffix()));
             if (QImageReader(dest).canRead()) { emit remoteLogoLoaded(localId, category, dest, history); return; }
-            downloadStorageObject(path, dest, [this, localId, category, dest, history, isCurrent](bool okDownload, const QString &error) {
+            downloadStorageObject(path, dest, [this, target, localId, category, dest, history, isCurrent](bool okDownload, const QString &error) {
                 if (!isCurrent()) return;
+                if (!okDownload && error == QLatin1String("OBJECT_NOT_FOUND")) {
+                    emit remoteLogoReadFailed(localId, category, error); return;
+                }
                 if (!okDownload || !QImageReader(dest).canRead()) {
                     emit remoteLogoReadFailed(localId, category, okDownload ? QStringLiteral("INVALID_IMAGE") : error); return;
                 }
@@ -3474,7 +3932,10 @@ void CalicataCloudService::setPresenceField(const QString &field)
     const QString trimmed = field.trimmed().left(80);   // PRESENCE_FIELD_MAX_LENGTH
     if (trimmed == m_rtField) return;
     m_rtField = trimmed;
-    if (m_presenceState == QLatin1String("JOINED")) rtTrack();
+    const quint64 generation = ++m_rtFieldGen;
+    QTimer::singleShot(180, this, [this, generation]() {          // PRESENCE_FIELD_SETTLE_MS
+        if (generation == m_rtFieldGen && m_presenceState == QLatin1String("JOINED")) rtTrack();
+    });
 }
 
 void CalicataCloudService::rtConnect()
@@ -3520,7 +3981,12 @@ void CalicataCloudService::rtConnect()
         rtScheduleRetry();
     });
     connect(socket, &QSslSocket::errorOccurred, this, [this, socket](QAbstractSocket::SocketError) {
-        if (socket == m_rtSocket) socket->abort();
+        if (socket != m_rtSocket) return;
+        // A failed TCP/TLS startup need not emit disconnected (it never connected).
+        // Release the attempt here; otherwise joinPresence sees a stale socket forever.
+        qWarning() << "INGE_LIVE_CONNECT_FAILED code=" << int(socket->error());
+        rtDisconnect(false);
+        rtScheduleRetry();
     });
     socket->connectToHostEncrypted(host, quint16(base.port(443)));
 }
@@ -3741,6 +4207,9 @@ void CalicataCloudService::rtTrack()
     meta[QStringLiteral("name")] = name.left(60);   // PRESENCE_NAME_MAX_LENGTH
     meta[QStringLiteral("field")] = m_rtField.isEmpty() ? QVariant() : QVariant(m_rtField);
     meta[QStringLiteral("joinedAt")] = m_rtJoinedAt;
+    // Opcional (la Web la ignora): referencia storage://avatars del perfil, nunca una URL firmada.
+    const QString avatarRef = PresenceIdentity::selfAvatarRef();
+    if (!avatarRef.isEmpty()) meta[QStringLiteral("avatarUrl")] = avatarRef;
     rtSendJson({{QStringLiteral("topic"), presenceTopic(m_rtCalicataId)}, {QStringLiteral("event"), QStringLiteral("presence")},
                 {QStringLiteral("payload"), QVariantMap{{QStringLiteral("type"), QStringLiteral("presence")},
                                                          {QStringLiteral("event"), QStringLiteral("track")},
@@ -3765,7 +4234,11 @@ void CalicataCloudService::rtRebuildMembers()
                                {QStringLiteral("initial"), name.isEmpty() ? QStringLiteral("?") : name.left(1).toUpper()},
                                {QStringLiteral("mode"), field.isEmpty() ? QStringLiteral("VIEWING") : QStringLiteral("EDITING")},
                                {QStringLiteral("field"), field}, {QStringLiteral("self"), it.key() == self},
-                               {QStringLiteral("joinedAt"), meta.value(QStringLiteral("joinedAt"))}};
+                               {QStringLiteral("joinedAt"), meta.value(QStringLiteral("joinedAt"))},
+                               {QStringLiteral("initials"), PresenceIdentity::initialsFor(name)},
+                               {QStringLiteral("color"), PresenceIdentity::colorFor(it.key())},
+                               {QStringLiteral("avatarSource"), PresenceAvatarCache::instance()->source(
+                                    meta.value(QStringLiteral("avatarUrl")).toString())}};
     }
     if (members == m_presenceMembers) return;
     m_presenceMembers = members;

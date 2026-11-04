@@ -70,6 +70,10 @@
         <intent>
             <action android:name="android.media.action.IMAGE_CAPTURE"/>
         </intent>
+        <!-- Inicio con Google: navegadores con Custom Tabs. -->
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService"/>
+        </intent>
     </queries>
 
     <application
@@ -108,6 +112,23 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Deep link del inicio de sesión con Google (Supabase OAuth PKCE):
+             com.ingema.ingeplus://login-callback. Sin UI; entrega la URI a
+             InGeQtActivity y cierra la Custom Tab. -->
+        <activity
+            android:name="com.ingema.ingeplus.InGeOAuthCallbackActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="com.ingema.ingeplus" android:host="login-callback"/>
             </intent-filter>
         </activity>
 

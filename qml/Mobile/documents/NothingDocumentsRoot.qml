@@ -6,7 +6,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import InGe.Mobile as MobileBackend
 import "../flowcore" as FlowCore
-import "../components" as Components
+import "../renditions" as Renditions
+import "../renditions/RStyle.js" as S
 import "../pages" as Pages
 
 Rectangle {
@@ -21,6 +22,7 @@ Rectangle {
     // Solo la subapp Calicatas enruta <código>.calicata.json; InGeDrive general no cambia.
     property bool routeCalicataJson: false
     property bool pendingOpenDrive: false
+    readonly property bool halloween: flow.appSkin === "halloween"
     property bool systemDark: false
     property bool motionAllowed: true
     required property var flow
@@ -29,15 +31,24 @@ Rectangle {
         id: driveGlassBackdrop
         anchors.fill: parent
         color: root.color
+        Renditions.RendicionesSyncBackdrop {
+            anchors.fill: parent
+            visible: root.halloween
+            dark: root.dark
+            skin: root.flow.appSkin
+            halloweenController: root.flow.halloweenController
+            reducedMotion: !root.motionAllowed
+            running: root.visible
+        }
     }
     property real bottomSafeInset: 0
     property bool contextEnabled: true
-    readonly property bool dark: files.theme === "dark" || (files.theme === "system" && systemDark)
+    readonly property bool dark: halloween || files.theme === "dark" || (files.theme === "system" && systemDark)
     // Identidad INGEMA: el modo oscuro propio de InGeDrive usa Deep/Navy y
     // el tinte derivado de Blue; el claro consume FlowTheme directamente.
-    readonly property color surface: dark ? root.flow.colors.ingemaNavy : root.flow.theme.surfaceSecondary
+    readonly property color surface: halloween ? S.glass(0.92) : dark ? root.flow.colors.ingemaNavy : root.flow.theme.surfaceSecondary
     readonly property color ink: dark ? "#ffffff" : root.flow.theme.textPrimary
-    readonly property color accent: dark ? root.flow.colors.ingemaBlueTint : root.flow.theme.accent
+    readonly property color accent: halloween ? S.accent : dark ? root.flow.colors.ingemaBlueTint : root.flow.theme.accent
     readonly property color muted: dark ? root.flow.colors.ingemaPaperTertiary : root.flow.theme.textTertiary
     readonly property color danger: dark ? "#FF8A91" : root.flow.theme.error
     readonly property bool home: files.route === "home"
@@ -82,7 +93,7 @@ Rectangle {
         to: 1
         duration: root.flow.normalDuration
     }
-    color: dark ? (files.oled ? "#000000" : root.flow.colors.ingemaDeep) : root.flow.theme.surfaceElevated
+    color: halloween ? S.background : dark ? (files.oled ? "#000000" : root.flow.colors.ingemaDeep) : root.flow.theme.surfaceElevated
     clip: true
 
     MobileBackend.NothingDocuments {

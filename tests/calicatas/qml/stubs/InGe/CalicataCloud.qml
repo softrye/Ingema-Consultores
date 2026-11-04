@@ -7,6 +7,7 @@ QtObject {
     id: cloud
     property var projects: []
     property int pendingMediaCount: 0
+    property var purgedCalicataIds: []
 
     // Configuración de cada escenario.
     property var serverProjects: []
@@ -28,6 +29,7 @@ QtObject {
     signal calicataCoverReady(string calicataId, url localUrl)
 
     function reset() {
+        purgedCalicataIds = []
         projects = []; pendingMediaCount = 0; serverProjects = []; serverRows = []
         projectsMode = "ok"; listMode = "ok"; delayMs = 40
         refreshCalls = 0; listCalls = 0; editorListCalls = 0; lastListIds = []

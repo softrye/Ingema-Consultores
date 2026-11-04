@@ -23,6 +23,12 @@ Item {
     property var app
     property string renditionLocalId: ""
     property string expenseLocalId: ""
+    // Presencia en vivo: sector que este editor publica mientras tiene el foco.
+    readonly property string presenceField: {
+        var label = app && typeof app.expensePresenceField === "function"
+                    ? app.expensePresenceField(savedId.length ? savedId : expenseLocalId) : ""
+        return label.length ? label : "Nuevo gasto"
+    }
     property string initialSection: ""          // general | receipt | payment | supports
     property var prefill: null                  // propuesta de InGe IA (revisada por el usuario aquí)
     readonly property var ui: app.ui
@@ -1204,7 +1210,7 @@ Item {
                         RField { id: supportNumberField; width: parent.width; ui: page.ui; formStyle: true; glyph: 0xE0EF
                                  label: "Número de comprobante"; placeholder: "Ingrese número…"; readOnly: !page.writable; onEdited: page.changed() }
                         RField { id: supportDetailField; width: parent.width; ui: page.ui; formStyle: true; glyph: 0xE0CC
-                                 label: "Detalle del comprobante (opcional)"; placeholder: "Serie, emisor u otro dato…"; readOnly: !page.writable; onEdited: page.changed() }
+                                 label: page.supportTypeCode === "OTHER" ? "Detalle del comprobante (obligatorio)" : "Detalle del comprobante (opcional)"; placeholder: "Serie, emisor u otro dato…"; readOnly: !page.writable; onEdited: page.changed() }
                         Notice { ui: page.ui; text: "El comprobante debe ser válido y corresponder al gasto realizado." }
                     }
                 }
@@ -1236,6 +1242,7 @@ Item {
                             Repeater {
                                 model: { page.app.st; return page.catalogOptions("PAYMENT_METHOD") }
                                 delegate: Rectangle {
+                                    id: payOption
                                     required property var modelData
                                     readonly property bool selected: page.paymentMethodCode === modelData.value
                                     readonly property string key: (modelData.label + " " + modelData.value).toLowerCase()
@@ -1255,14 +1262,14 @@ Item {
                                         Text {
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             // banknote · smartphone · repeat (transferencia) · credit-card (Lucide verificados)
-                                            text: String.fromCharCode(parent.parent.key.indexOf("efectivo") >= 0 || parent.parent.key.indexOf("cash") >= 0 ? 0xE052
-                                                  : parent.parent.key.indexOf("yape") >= 0 || parent.parent.key.indexOf("plin") >= 0 ? 0xE163
-                                                  : parent.parent.key.indexOf("transfer") >= 0 || parent.parent.key.indexOf("depósito") >= 0 ? 0xE146 : 0xE0AA)
-                                            color: parent.parent.selected ? S.onAccent : S.navy
+                                            text: String.fromCharCode(payOption.key.indexOf("efectivo") >= 0 || payOption.key.indexOf("cash") >= 0 ? 0xE052
+                                                  : payOption.key.indexOf("yape") >= 0 || payOption.key.indexOf("plin") >= 0 ? 0xE163
+                                                  : payOption.key.indexOf("transfer") >= 0 || payOption.key.indexOf("depósito") >= 0 ? 0xE146 : 0xE0AA)
+                                            color: payOption.selected ? S.onAccent : S.navy
                                             font.family: page.ui.iconFamily; font.pixelSize: 24 * page.ui.u
                                         }
                                         Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; text: modelData.label
-                                               color: parent.parent.selected ? S.onAccent : S.text; elide: Text.ElideRight
+                                               color: payOption.selected ? S.onAccent : S.text; elide: Text.ElideRight
                                                font.family: page.ui.fontFamily; font.pixelSize: 12 * page.ui.u }
                                     }
                                     MouseArea { id: payTap; anchors.fill: parent; enabled: page.writable
@@ -1447,7 +1454,7 @@ Item {
                         }
                     }
                     SectionCard {
-                        ui: page.ui; heading: "Justificación"; subtitle: "Relación del gasto con el trabajo (opcional)."
+                        ui: page.ui; heading: "Justificación"; subtitle: page.categoryCode === "OTHER" || page.supportTypeCode === "DECLARATION_WITHOUT_SUPPORT" ? "Obligatoria: explica la relación del gasto con el trabajo." : "Relación del gasto con el trabajo (opcional)."
                         TextArea {
                             id: justificationField
                             width: parent.width
@@ -1490,6 +1497,7 @@ Item {
         id: toolMenu
         objectName: "toolMenu"
         ui: page.ui
+        liquidUi: page.ui && page.ui.cardGlassUi ? page.ui.cardGlassUi : null   // Liquid Glass oficial
         cardWidth: 340 * page.ui.u
         MenuTitle { ui: page.ui; text: page.toolTitle }
         Rectangle { width: parent.width; height: 1; color: S.ink(0.10) }

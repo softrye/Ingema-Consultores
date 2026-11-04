@@ -1,4 +1,5 @@
 #include "calicatavalidation.h"
+#include "calicataexportpagination.h"
 #include "androidcalicataexporter.h"
 #include "src/cpp/renditionsnapshotexporter.h"
 #include "src/cpp/renditionexportservice.h"
@@ -32,11 +33,13 @@
 #include <QPdfWriter>
 #include <QSaveFile>
 #include <QPointer>
+#include <QSet>
 #include <QDesktopServices>
 #include <QCryptographicHash>
 #include <memory>
 #include <array>
 #include <vector>
+#include <utility>
 #include <cmath>
 #include <algorithm>
 #include <QUuid>
@@ -2116,21 +2119,7 @@ bool fillOfficialCalicataTemplate(QXlsx::Document &xlsx,
     return true;
 }
 
-bool copyOfficialTemplate(const QString &outPath, QString *error)
-{
-    const QString resource = QStringLiteral(":/templates/Calicata_Formato.xlsx");
-    if (!QFileInfo::exists(resource)) {
-        if (error) *error = QStringLiteral("No se encontro la plantilla embebida: ") + resource;
-        return false;
-    }
-
-    QFile::remove(outPath);
-    if (!QFile::copy(resource, outPath)) {
-        if (error) *error = QStringLiteral("No se pudo copiar la plantilla oficial a: ") + outPath;
-        return false;
-    }
-    return true;
-}
+#include "calicatawebpagedexcel.inc"
 
 #endif
 
@@ -2712,64 +2701,54 @@ QString AndroidCalicataExporter::exportStateToXlsx(const QVariantMap &state, con
         return QString();
     }
 
-    const QString workingTemplatePath = QDir(outputDir).filePath(
-        outputInfo.completeBaseName() + QStringLiteral("_template_work.xlsx"));
-    auto removeWorkingTemplate = [&workingTemplatePath]() {
-        if (QFileInfo::exists(workingTemplatePath) && !QFile::remove(workingTemplatePath)) {
-            qWarning().noquote()
-                << "No se pudo eliminar la plantilla temporal de exportacion:"
-                << workingTemplatePath;
-        }
-    };
-    auto logExportDiagnostics = [&outputDir, &workingTemplatePath, &outPath](
-                                    const QString &reason,
-                                    const QString &probeError = QString()) {
-        const QFileInfo outputDirInfo(outputDir);
-        const QFileInfo workingTemplateInfo(workingTemplatePath);
+    // The Web generates a fresh workbook, not a filled legacy template.
+    // Keep the caller's error diagnostics without leaving temporary templates.
+    const auto logExportDiagnostics = [&outPath, &outputDir](
+                                          const QString &reason,
+                                          const QString &probeError = QString()) {
         qWarning().noquote()
-            << "Diagnostico de exportacion Excel:" << reason
-            << "\n  input template:" << workingTemplatePath
-            << "\n  output:" << outPath
-            << "\n  output directory exists:" << outputDirInfo.exists()
-            << "\n  output directory writable:" << outputDirInfo.isWritable()
-            << "\n  template exists:" << workingTemplateInfo.exists()
-            << "\n  template readable:" << workingTemplateInfo.isReadable()
-            << "\n  template writable:" << workingTemplateInfo.isWritable()
-            << "\n  template permissions:" << workingTemplateInfo.permissions()
-            << "\n  probe error:" << (probeError.isEmpty() ? QStringLiteral("<none>") : probeError);
+            << "INGE_CAL_XLSX_WEB_EXPORT_FAILED" << reason
+            << "outputDir=" << outputDir
+            << "output=" << outPath
+            << "error=" << probeError;
     };
 
-    QString templateError;
-    if (!copyOfficialTemplate(workingTemplatePath, &templateError)) {
-        setLastError(templateError);
+    QString paginationError;
+    const QVector<CalicataExportPages::Page> pages =
+        CalicataExportPages::paginate(header, cortesFromState(state), &paginationError);
+    if (pages.isEmpty()) {
+        setLastError(paginationError);
         return QString();
     }
 
-    QXlsx::Document xlsx(workingTemplatePath);
-    if (!xlsx.load()) {
-        removeWorkingTemplate();
-        setLastError(QStringLiteral("QXlsx no pudo abrir la plantilla oficial copiada: ") + workingTemplatePath);
-        return QString();
+    QXlsx::Document xlsx;
+    for (const CalicataExportPages::Page &page : pages) {
+        const QString name = QStringLiteral("Calicata %1").arg(page.number);
+        if (!xlsx.addSheet(name)) {
+            setLastError(QStringLiteral("No se pudo crear la hoja Excel: ") + name);
+            return QString();
+        }
     }
 
     QString fillError;
     ReportImages reportImages;
     if (!prepareReportImages(state, resourcesBasePathFromState(state), &reportImages, &fillError)) {
-        removeWorkingTemplate();
         setLastError(fillError);
         return {};
     }
-    if (!fillOfficialCalicataTemplate(xlsx, state, reportImages, &fillError)) {
-        removeWorkingTemplate();
-        setLastError(fillError);
-        return QString();
+    // Web exportExcel.ts: each worksheet starts blank, with no legacy
+    // merges, ghost borders or background objects from Calicata_Formato.xlsx.
+    for (const CalicataExportPages::Page &page : pages) {
+        if (!fillWebPaginatedSheet(xlsx, state, reportImages, page, &fillError)) {
+                setLastError(fillError);
+            return QString();
+        }
     }
 
     QFile staleOutput(outPath);
     if (staleOutput.exists() && !staleOutput.remove()) {
         logExportDiagnostics(QStringLiteral("No se pudo eliminar el archivo de salida preexistente."),
                              staleOutput.errorString());
-        removeWorkingTemplate();
         setLastError(QStringLiteral("No se pudo preparar el archivo Excel de salida: ")
                      + staleOutput.errorString());
         return QString();
@@ -2790,7 +2769,6 @@ QString AndroidCalicataExporter::exportStateToXlsx(const QVariantMap &state, con
     if (!probeError.isEmpty()) {
         logExportDiagnostics(QStringLiteral("La prueba de escritura del archivo de salida fallo."),
                              probeError);
-        removeWorkingTemplate();
         setLastError(QStringLiteral("No se puede escribir el Excel en la carpeta de exportacion: ")
                      + probeError);
         return QString();
@@ -2800,12 +2778,10 @@ QString AndroidCalicataExporter::exportStateToXlsx(const QVariantMap &state, con
     if (!xlsx.saveAs(generatingPath) || !QFile::rename(generatingPath, outPath)) {
         logExportDiagnostics(QStringLiteral("QXlsx saveAs fallo despues de una prueba de escritura exitosa."));
         QFile::remove(outPath);
-        removeWorkingTemplate();
-        setLastError(QStringLiteral("No se pudo guardar el Excel basado en la plantilla: ") + outPath);
+        setLastError(QStringLiteral("No se pudo guardar el Excel con el formato de la web: ") + outPath);
         return QString();
     }
 
-    removeWorkingTemplate();
 
     m_exportResult = {{"success",false},{"fileName",QFileInfo(outPath).fileName()},
         {"localPhysicalPath",outPath},{"displayPath",outPath},{"syncState","PENDING_SYNC"},{"error",QString()}};
@@ -2976,9 +2952,18 @@ QString AndroidCalicataExporter::exportReceivedSnapshot(const QVariantMap &recei
     if (destination != QLatin1String("phone") && appContext() && appContext()->auth() && appContext()->supabase()) {
         auto *exports = RenditionExportService::shared(appContext()->supabase(), appContext()->auth());
         const QString renditionId = received.value("rendition_id", header.value("id")).toString();
+        // El servicio repite los fallos reintentables: se avisa una vez por resultado.
+        const QPointer<AndroidCalicataExporter> guard(this);
+        const QString fileName = QFileInfo(path).fileName();
+        const auto reported = std::make_shared<QSet<bool>>();
+        const auto driveDone = [guard, fileName, reported](bool ok, const QString &error) {
+            if (!guard || reported->contains(ok)) return;
+            reported->insert(ok);
+            emit guard->driveExportFinished(fileName, ok, error);
+        };
         const bool queued = destination == QLatin1String("google")
-            ? exports->enqueueDocument(path, project, "Export/Rendiciones/" + renditionId + "/" + model.versionId + "/" + QFileInfo(path).fileName(),
-                                       {}, {}, {}, QStringLiteral("GOOGLE_DRIVE"), true)
+            ? exports->enqueueDocument(path, project, "Export/Rendiciones/" + renditionId + "/" + model.versionId + "/" + fileName,
+                                       driveDone, {}, {}, QStringLiteral("GOOGLE_DRIVE"), true)
             : exports->enqueue(path, project, renditionId, model.versionId, format);
         if (!queued)
             setLastError(QStringLiteral("Archivo creado localmente; no se pudo registrar su subida. Conserva el archivo y reintenta."));
@@ -3282,259 +3267,27 @@ QString pdfExcavationSize(const QVariantMap &header)
 }
 } // namespace
 
+#ifdef INGE_HAS_QXLSX
+#include "calicatawebpagedpdf.inc"
+#endif
+
 QString AndroidCalicataExporter::exportCalicataToPdf(const QVariantMap &state, const QString &resourcesBase)
 {
+#ifdef INGE_HAS_QXLSX
     setLastError({});
-    const QVariantMap header = state.value(QStringLiteral("header")).toMap();
-    const QVariantList cortes = state.value(QStringLiteral("cortes")).toList();
-    const QString hash = QString::fromLatin1(QCryptographicHash::hash(
-        QJsonDocument::fromVariant(state).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256).toHex().left(20));
-    const QString code = safeFileName(pdfText(header, {"code", "codigo", "calicata"}));
-    const QString outPath = QDir(defaultExportDir()).filePath(code + QLatin1Char('_') + hash + QStringLiteral(".pdf"));
-    // Imágenes antes de crear el archivo: una imagen activada que no se puede leer
-    // detiene la exportación con su nombre (nunca un PDF incompleto en silencio).
-    ReportImages reportImages;
-    QString imageError;
-    if (!prepareReportImages(state, resourcesBase, &reportImages, &imageError)) {
-        setLastError(imageError);
-        return {};
-    }
-    if (QFileInfo(outPath).size() > 0) return outPath;   // identical ficha already rendered
-    if (!QDir().mkpath(QFileInfo(outPath).absolutePath())) {
-        setLastError(QStringLiteral("No se pudo crear la carpeta del PDF."));
-        return {};
-    }
-
-    QSaveFile output(outPath);
-    if (!output.open(QIODevice::WriteOnly)) {
-        setLastError(QStringLiteral("No se pudo crear el PDF: ") + output.errorString());
-        return {};
-    }
-    QPdfWriter pdf(&output);
-    pdf.setPageSize(QPageSize(QPageSize::A4));
-    pdf.setResolution(150);
-    pdf.setTitle(QStringLiteral("Calicata ") + code);
-    pdf.setCreator(QStringLiteral("InGe+ Android"));
-    QPainter p;
-    if (!p.begin(&pdf)) { setLastError(QStringLiteral("No se pudo crear el PDF.")); return {}; }
-    const int W = pdf.width(), H = pdf.height(), M = 60;
-    int y = M;
-    QFont title(QStringLiteral("sans-serif")); title.setPixelSize(34); title.setBold(true);
-    QFont label(QStringLiteral("sans-serif")); label.setPixelSize(18); label.setBold(true);
-    QFont body(QStringLiteral("sans-serif")); body.setPixelSize(18);
-    QFont small(QStringLiteral("sans-serif")); small.setPixelSize(14);
-    // Encabezado corrido y número de página en cada hoja del PDF.
-    const QString runningTitle = QStringLiteral("Calicata ") + pdfText(header, {"code", "codigo"})
-        + QStringLiteral(" · ") + exportProjectName(header);
-    int pageNumber = 1;
-    bool pageFailed = false;
-    const auto drawFooter = [&]() {
-        p.save();
-        p.setFont(small);
-        p.setPen(QColor(96, 104, 112));
-        const QRect footer(M, H - M + 10, W - 2 * M, 30);
-        p.drawText(footer, Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine, runningTitle);
-        p.drawText(footer, Qt::AlignRight | Qt::AlignVCenter, QStringLiteral("Página %1").arg(pageNumber));
-        p.restore();
-    };
-    const auto newPageIfNeeded = [&](int needed) {
-        if (y + needed <= H - M) return;
-        drawFooter();
-        if (!pdf.newPage()) {
-            pageFailed = true;
-            return;
-        }
-        ++pageNumber;
-        y = M;
-        p.save();
-        p.setFont(small);
-        p.setPen(QColor(96, 104, 112));
-        p.drawText(QRect(M, y, W - 2 * M, 26), Qt::AlignLeft | Qt::TextSingleLine, runningTitle);
-        p.restore();
-        y += 40;
-    };
-    const auto drawImage = [&](const QImage &image, const QRect &box) {
-        if (image.isNull()) return;
-        const QSize fitted = image.size().scaled(box.size(), Qt::KeepAspectRatio);
-        p.drawImage(QRect(box.topLeft() + QPoint((box.width() - fitted.width()) / 2, (box.height() - fitted.height()) / 2), fitted), image);
-    };
-
-    // Encabezado: logos del proyecto y de la entidad + título.
-    drawImage(reportImages[1], QRect(M, y, 220, 90));          // logo del proyecto
-    drawImage(reportImages[0], QRect(W - M - 220, y, 220, 90)); // logo de la entidad
-    p.setFont(title);
-    p.drawText(QRect(M, y, W - 2 * M, 90), Qt::AlignCenter, QStringLiteral("REGISTRO DE CALICATA ") + pdfText(header, {"code", "codigo"}));
-    y += 110;
-    p.setFont(body);
-    p.drawText(QRect(M, y, W - 2 * M, 60), Qt::TextWordWrap, exportProjectName(header));
-    y += 64;
-
-    // Nivel freático: profundidad registrada o el estado declarado (nunca inventado).
-    QString waterTable = pdfText(header, {"groundwater_depth_m", "water_table_depth"});
-    if (waterTable == QStringLiteral("—")) {
-        const QString status = header.value(QStringLiteral("water_table_status")).toString().trimmed().toUpper();
-        if (status == QLatin1String("ENCONTRADO")) waterTable = QStringLiteral("Encontrado (sin profundidad)");
-        else if (status == QLatin1String("NO_ENCONTRADO")) waterTable = QStringLiteral("No encontrado");
-        else if (status == QLatin1String("NO_EVALUADO")) waterTable = QStringLiteral("No evaluado");
-    }
-    const QList<QPair<QString, QString>> fields = {
-        {QStringLiteral("Título / testificación"), pdfText(header, {"description"})},
-        {QStringLiteral("Estado"), pdfText(header, {"status"})},
-        {QStringLiteral("Progresiva"), pdfText(header, {"progresiva", "pk"})},
-        {QStringLiteral("Lado de la vía"), pdfText(header, {"location", "lado_via"})},
-        {QStringLiteral("Ubicación / tramo"), pdfText(header, {"ubicacion", "tramo"})},
-        {QStringLiteral("UTM · zona / datum"), pdfText(header, {"zona", "utm_zone"}) + QStringLiteral(" / ") + pdfText(header, {"datum"})},
-        {QStringLiteral("Este / Norte (m)"), pdfText(header, {"utm_x", "easting"}) + QStringLiteral(" / ") + pdfText(header, {"utm_y", "northing"})},
-        {QStringLiteral("Altitud (m.s.n.m.)"), pdfText(header, {"utm_z", "altitude_m", "altitud"})
-            + (header.value(QStringLiteral("altitude_source")).toString() == QLatin1String("GPS_ELIPSOIDAL")
-               ? QStringLiteral(" (GPS elipsoidal, no m.s.n.m.)") : QString())},
-        {QStringLiteral("Fecha inicio / fin"), pdfText(header, {"start_date", "fecha_inicio"}) + QStringLiteral(" / ") + pdfText(header, {"end_date", "fecha_fin"})},
-        {QStringLiteral("Supervisor"), pdfText(header, {"supervisor"})},
-        {QStringLiteral("Maquinaria"), pdfText(header, {"machine", "maquina"})},
-        {QStringLiteral("Profundidad (m)"), pdfText(header, {"depth_m", "final_depth_m"})},
-        {QStringLiteral("Largo × ancho (m)"), pdfExcavationSize(header)},
-        {QStringLiteral("Nivel freático (m)"), waterTable},
-    };
-    const int half = (W - 2 * M) / 2;
-    for (int i = 0; i < fields.size(); ++i) {
-        const int col = i % 2, x = M + col * half;
-        if (col == 0 && i > 0) { y += 50; newPageIfNeeded(50); }
-        p.setFont(label); p.drawText(QRect(x, y, half - 10, 24), Qt::AlignLeft, fields.at(i).first);
-        p.setFont(body);  p.drawText(QRect(x, y + 22, half - 10, 26), Qt::AlignLeft | Qt::TextSingleLine, fields.at(i).second);
-    }
-    y += 70;
-
-    // Perfil estratigráfico + laboratorio por estrato (misma fuente: el estrato).
-    static const QStringList humidity = {QStringLiteral("Seco"), QStringLiteral("Bajo"), QStringLiteral("Medio"), QStringLiteral("Agua")};
-    QList<QPair<QString, int>> columns = {
-        {QStringLiteral("De–A (m)"), 150}, {QStringLiteral("Descripción"), 520}, {QStringLiteral("Humedad"), 110},
-        {QStringLiteral("Muestra"), 110}, {QStringLiteral("SUCS"), 100}, {QStringLiteral("AASHTO"), 110},
-        {QStringLiteral("Nº4/10/40/200"), 220}, {QStringLiteral("LL/LP/IP"), 140}};
-    const int tableWidth = W - 2 * M;
-    int baseWidth = 0, usedWidth = 0;
-    for (const auto &column : columns) baseWidth += column.second;
-    for (int i = 0; i < columns.size(); ++i) {
-        columns[i].second = i == columns.size() - 1 ? tableWidth - usedWidth
-            : qMax(1, qRound(double(columns[i].second) * tableWidth / baseWidth));
-        usedWidth += columns[i].second;
-    }
-    const auto drawRow = [&](const QStringList &cells, bool bold) {
-        p.setFont(bold ? label : body);
-        std::vector<std::unique_ptr<QTextLayout>> layouts;
-        int maxLines = 1;
-        qreal lineHeight = 24;
-        for (int c = 0; c < cells.size(); ++c) {
-            auto layout = std::make_unique<QTextLayout>(cells.at(c), p.font());
-            QTextOption option;
-            option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
-            layout->setTextOption(option);
-            layout->beginLayout();
-            for (;;) {
-                QTextLine line = layout->createLine();
-                if (!line.isValid()) break;
-                line.setLineWidth(columns.at(c).second - 8);
-                lineHeight = qMax(lineHeight, line.height());
-            }
-            layout->endLayout();
-            maxLines = qMax(maxLines, layout->lineCount());
-            layouts.push_back(std::move(layout));
-        }
-        // Continue an oversized stratum by whole text lines; no clipped content.
-        const int totalHeight = int(std::ceil(maxLines * lineHeight)) + 12;
-        if (totalHeight <= H - 2 * M - 40)
-            newPageIfNeeded(totalHeight); // Preserve whole rows when they fit a page.
-        for (int firstLine = 0; firstLine < maxLines;) {
-            newPageIfNeeded(int(std::ceil(lineHeight)) + 12);
-            if (pageFailed) return;
-            const int count = qMin(maxLines - firstLine, qMax(1, int((H - M - y - 12) / lineHeight)));
-            const int height = int(std::ceil(count * lineHeight)) + 12;
-            int x = M;
-            for (int c = 0; c < cells.size(); ++c) {
-                p.drawRect(QRect(x, y, columns.at(c).second, height));
-                const QTextLayout &layout = *layouts.at(c);
-                for (int l = firstLine; l < qMin(firstLine + count, layout.lineCount()); ++l) {
-                    const QTextLine line = layout.lineAt(l);
-                    line.draw(&p, QPointF(x + 4, y + 6 + (l - firstLine) * lineHeight) - line.position());
-                }
-                x += columns.at(c).second;
-            }
-            y += height;
-            firstLine += count;
-        }
-    };
-    newPageIfNeeded(80);
-    p.setFont(label); p.drawText(M, y, QStringLiteral("PERFIL ESTRATIGRÁFICO Y LABORATORIO")); y += 16;
-    QStringList head; for (const auto &c : columns) head << c.first;
-    drawRow(head, true);
-    for (const QVariant &value : cortes) {
-        const QVariantMap row = value.toMap();
-        bool ok = false; const int hum = row.value(QStringLiteral("humedad")).toInt(&ok);
-        const QString ll = row.value(QStringLiteral("wl")).toString(), lp = row.value(QStringLiteral("lp")).toString();
-        bool okLl = false, okLp = false; const double ip = ll.toDouble(&okLl) - lp.toDouble(&okLp);
-        drawRow({row.value(QStringLiteral("de")).toString() + QStringLiteral("–") + row.value(QStringLiteral("a")).toString(),
-                 row.value(QStringLiteral("descripcion")).toString(),
-                 ok && hum >= 0 && hum < humidity.size() ? humidity.at(hum) : QStringLiteral("—"),
-                 pdfText(row, {"tipoText", "tipo_muestra"}),
-                 exportClassificationFor(row).label, exportClassificationFor(row).aashto,
-                 QStringList{pdfText(row, {"passing_no4"}), pdfText(row, {"g2"}), pdfText(row, {"g04"}), pdfText(row, {"g008"})}.join(QStringLiteral(" / ")),
-                 QStringList{pdfText(row, {"wl"}), pdfText(row, {"lp"}), okLl && okLp ? QString::number(ip, 'f', 2) : QStringLiteral("—")}.join(QStringLiteral(" / "))},
-                false);
-    }
-    y += 20;
-
-    // Observaciones generales (no la testificación).
-    const QString observations = state.value(QStringLiteral("observaciones")).toString().trimmed();
-    p.setFont(label); newPageIfNeeded(80); p.drawText(M, y + 20, QStringLiteral("OBSERVACIONES")); y += 30;
-    p.setFont(body);
-    const QStringList paragraphs = (observations.isEmpty() ? QStringLiteral("—") : observations).split(QLatin1Char('\n'));
-    for (const QString &paragraph : paragraphs) {
-        QTextLayout layout(paragraph.isEmpty() ? QStringLiteral(" ") : paragraph, body);
-        QTextOption option;
-        option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
-        layout.setTextOption(option);
-        layout.beginLayout();
-        for (;;) {
-            QTextLine line = layout.createLine();
-            if (!line.isValid()) break;
-            line.setLineWidth(W - 2 * M);
-        }
-        layout.endLayout();
-        for (int l = 0; l < layout.lineCount(); ++l) {
-            const QTextLine line = layout.lineAt(l);
-            const int height = int(std::ceil(line.height()));
-            newPageIfNeeded(height);
-            if (pageFailed) break;
-            line.draw(&p, QPointF(M, y) - line.position());
-            y += height;
-        }
-        y += 6;
-    }
-    y += 14;
-
-    // Fotografías publicadas (derivadas en uso).
-    static const QStringList photoTitles = {QStringLiteral("Zona de ejecución"), QStringLiteral("Interior de calicata"), QStringLiteral("Acopios")};
-    for (int i = 1; i <= 3; ++i) {
-        const QImage &photo = reportImages[i + 1];
-        if (photo.isNull()) continue;   // categoría sin foto
-        const int photoHeight = qMin(580, H - 2 * M - 120);
-        newPageIfNeeded(photoHeight + 40);
-        p.setFont(label); p.drawText(M, y + 20, photoTitles.at(i - 1)); y += 30;
-        drawImage(photo, QRect(M, y, W - 2 * M, photoHeight));
-        y += photoHeight + 10;
-    }
-    drawFooter();
-    const bool painted = p.end();
-    if (pageFailed || !painted) {
-        output.cancelWriting();
-        setLastError(QStringLiteral("No se pudo completar la paginación o escritura del PDF."));
-        return {};
-    }
-    if (!output.commit()) {
-        setLastError(QStringLiteral("No se pudo guardar el PDF: ") + output.errorString());
-        return {};
-    }
-    setLastError({});
-    return outPath;
+    QString error;
+    const QString code = safeFileName(canonicalCalicataCode(
+        headerFromState(state), state.value(QStringLiteral("timestamp")).toMap()));
+    const QString output=renderWebCalicataPdf(state,resourcesBase,defaultExportDir(),code,&error);
+    if (output.isEmpty())
+        setLastError(error.isEmpty() ? QStringLiteral("No se pudo exportar el PDF de la calicata.") : error);
+    return output;
+#else
+    Q_UNUSED(state);
+    Q_UNUSED(resourcesBase);
+    setLastError(QStringLiteral("QXlsx es necesario para la ficha PDF idéntica a su Excel."));
+    return {};
+#endif
 }
 
 bool AndroidCalicataExporter::publishCalicataPdf(const QVariantMap &state, const QString &pdfPath)

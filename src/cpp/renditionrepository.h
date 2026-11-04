@@ -231,7 +231,8 @@ private:
     void callRpc(const QString &operation,
                  const QString &rpcName,
                  const QVariantMap &arguments,
-                 SuccessHandler onSuccess);
+                 SuccessHandler onSuccess,
+                 bool tokenRefreshAttempted = false);
     bool requireV02(const QString &operation);
     void signObject(const QString &operation, const QString &requestId, const QString &bucket,
                     const QString &path, const QString &fileName);

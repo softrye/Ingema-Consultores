@@ -1,0 +1,7 @@
+find_package(Qt6 6.9 REQUIRED COMPONENTS Core Gui Qml Quick Multimedia)
+add_executable(halloween-runtime runtime.cpp)
+target_link_libraries(halloween-runtime PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Multimedia Qt6::Test)
+set_property(TARGET halloween-runtime PROPERTY AUTORCC ON)
+target_sources(halloween-runtime PRIVATE ../../resources_mobile_brand.qrc)
+add_test(NAME halloween-runtime COMMAND halloween-runtime "${CMAKE_CURRENT_SOURCE_DIR}/../../qml/Mobile/halloween")
+set_tests_properties(halloween-runtime PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

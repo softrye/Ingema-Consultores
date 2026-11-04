@@ -986,7 +986,8 @@ SupabaseClient *RenditionRepository::supabase() const
 void RenditionRepository::callRpc(const QString &operation,
                                   const QString &rpcName,
                                   const QVariantMap &arguments,
-                                  SuccessHandler onSuccess)
+                                  SuccessHandler onSuccess,
+                                  bool tokenRefreshAttempted)
 {
     SupabaseClient *client = supabase();
     AuthSession *session = appContext() ? appContext()->auth() : nullptr;
@@ -997,9 +998,33 @@ void RenditionRepository::callRpc(const QString &operation,
         return;
     }
 
+    const QString requestOwner = session->userId();
+    const quint64 requestEpochBeforeRefresh = m_requestEpoch;
+    // Evita lanzar varias RPC con JWT a punto de caducar. El AuthSession
+    // agrupa todas las solicitudes de refresco en una única rotación.
+    if (!tokenRefreshAttempted && session->accessTokenNearExpiry()) {
+        const QPointer<RenditionRepository> guard(this);
+        session->refreshAccessTokenForRpc(
+            [guard, operation, rpcName, arguments, requestOwner, requestEpochBeforeRefresh,
+             onSuccess = std::move(onSuccess)](bool ok, const QString &error) mutable {
+            if (!guard || guard->m_requestEpoch != requestEpochBeforeRefresh) return;
+            auto *auth = appContext() ? appContext()->auth() : nullptr;
+            if (!auth || auth->userId() != requestOwner) return;
+            if (ok) {
+                guard->callRpc(operation, rpcName, arguments, std::move(onSuccess), true);
+            } else {
+                const QString code = error.isEmpty() ? QStringLiteral("AUTH_REQUIRED") : error;
+                emit guard->transportObserved(int(RenditionConnectivity::classify(code)));
+                guard->setLastError(code);
+                emit guard->operationFailed(operation, code, code);
+            }
+        });
+        return;
+    }
+
+    const QString tokenUsed = session->accessToken();
     QNetworkRequest request = client->makeRequest(
-        client->restUrl(QStringLiteral("rpc/") + rpcName),
-        session->accessToken());
+        client->restUrl(QStringLiteral("rpc/") + rpcName), tokenUsed);
     request.setRawHeader("Prefer", "return=representation");
     request.setRawHeader("x-ingeplus-platform", "ANDROID");
     request.setRawHeader("X-Client-Info", "InGePlus-Android/1.0");
@@ -1016,7 +1041,8 @@ void RenditionRepository::callRpc(const QString &operation,
     setLastError({});
 
     connect(reply, &QNetworkReply::finished, this,
-            [this, reply = QPointer<QNetworkReply>(reply), operation, requestEpoch,
+            [this, reply = QPointer<QNetworkReply>(reply), operation, rpcName, arguments,
+             requestEpoch, requestOwner, tokenUsed, tokenRefreshAttempted,
              startedMs, onSuccess = std::move(onSuccess)]() mutable {
         endRequest();
         if (!reply)
@@ -1038,8 +1064,37 @@ void RenditionRepository::callRpc(const QString &operation,
         const qint64 elapsedMs = QDateTime::currentMSecsSinceEpoch() - startedMs;
         if (networkError != QNetworkReply::NoError || status >= 500 || elapsedMs >= 2000)
             qInfo().noquote() << "INGE_RENDITIONS_RPC op=" << operation
-                              << "http=" << status << "networkError=" << int(networkError)
+                              << "httpStatus=" << status << "qtNetworkError=" << int(networkError)
                               << "elapsedMs=" << elapsedMs;
+
+        // En Qt, NetworkError=401 significa InternalServerError, NO HTTP 401.
+        // Solo el status HTTP 401 permite refrescar y reintentar exactamente una vez.
+        if (status == 401 && !tokenRefreshAttempted) {
+            auto *auth = appContext() ? appContext()->auth() : nullptr;
+            if (auth && auth->logged() && auth->userId() == requestOwner) {
+                const QPointer<RenditionRepository> guard(this);
+                auto retry = [guard, requestEpoch, requestOwner, operation, rpcName, arguments,
+                              onSuccess = std::move(onSuccess)](bool ok, const QString &failure) mutable {
+                    if (!guard || requestEpoch != guard->m_requestEpoch) return;
+                    auto *session = appContext() ? appContext()->auth() : nullptr;
+                    if (!session || session->userId() != requestOwner) return;
+                    if (ok) {
+                        guard->callRpc(operation, rpcName, arguments, std::move(onSuccess), true);
+                    } else {
+                        const QString code = failure.isEmpty()
+                            ? QStringLiteral("AUTH_REQUIRED") : failure;
+                        emit guard->transportObserved(int(RenditionConnectivity::classify(code)));
+                        guard->setLastError(code);
+                        emit guard->operationFailed(operation, code, code);
+                    }
+                };
+                if (!auth->accessToken().isEmpty() && auth->accessToken() != tokenUsed)
+                    retry(true, {});
+                else
+                    auth->refreshAccessTokenForRpc(std::move(retry));
+                return;
+            }
+        }
         emit transportObserved(int(RenditionConnectivity::classifyHttp(
             status, networkError != QNetworkReply::NoError)));
 

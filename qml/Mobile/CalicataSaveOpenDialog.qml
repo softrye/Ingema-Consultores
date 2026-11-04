@@ -314,7 +314,7 @@ Dialog {
         }
 
         Button {
-            text: "OK"
+            text: "Aceptar"
             enabled: (dlg.mode === "save")
                      ? dlg._saveNameOk
                      : dlg.selectedFile.length > 0

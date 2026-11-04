@@ -319,14 +319,25 @@ TestCase {
         wait(30)
         compare(modeledCard(documents, "a"), before)
     }
+    function test_hiddenShellRetainsTextureProducer() {
+        var shell = createTemporaryObject(shellComponent, test)
+        verify(shell !== null)
+        var capture = findChild(shell, "renditionBackdropCapture")
+        verify(capture !== null)
+        var producer = capture.sourceItem
+        verify(producer !== null)
+        shell.visible = false
+        wait(0)
+        compare(capture.sourceItem, producer)
+        compare(shell.cardCaptureAllowed, false)
+    }
+
     function test_forcingGlassVisibleCannotDrawWithoutTexture() {
         var glass = createTemporaryObject(glassComponent, test)
         verify(glass !== null)
         compare(glass.textureReady, false)
-        var shader = findChild(glass, "glassShader")
-        verify(shader !== null)
-        compare(shader.visible, false)
-        compare(shader.enabled, false)
+        // Sin ningún proveedor válido el shader no existe: nunca recibe null.
+        compare(findChild(glass, "glassShader"), null)
     }
     function test_capturePausesForNavigationMenusAndKeyboard() {
         var shell = createTemporaryObject(shellComponent, test)

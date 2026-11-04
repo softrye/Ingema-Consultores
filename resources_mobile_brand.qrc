@@ -10,6 +10,17 @@
         <file alias="HVA_GROUP_LOGO_NEGATIVO.png">images/HVA_GROUP_LOGO_NEGATIVO.png</file>
         <file alias="INGEPLUS_LOGO_2026.png">images/INGEPLUS_LOGO_2026.png</file>
         <file alias="default_avatar_men.png">images/default_avatar_men.png</file>
+        <file alias="google_mark.png">images/google_mark.png</file>
+        <file alias="halloween/pumpkin.svg">images/halloween/pumpkin.svg</file>
+        <file alias="halloween/ghost.svg">images/halloween/ghost.svg</file>
+        <file alias="halloween/bat.svg">images/halloween/bat.svg</file>
+        <file alias="halloween/cat.svg">images/halloween/cat.svg</file>
+        <file alias="halloween/candy.svg">images/halloween/candy.svg</file>
+        <file alias="halloween/web.svg">images/halloween/web.svg</file>
+        <file alias="halloween/moon.svg">images/halloween/moon.svg</file>
+        <file alias="halloween/star.svg">images/halloween/star.svg</file>
+        <file alias="halloween/hat.svg">images/halloween/hat.svg</file>
+        <file alias="halloween/boo.wav">images/halloween/boo.wav</file>
     </qresource>
     <!-- Semilla de InGe Drive › Recursos (DocsController/DocsOps): mismos archivos
          y misma ruta :/Logos/images/... que el Desktop (resources.qrc). -->

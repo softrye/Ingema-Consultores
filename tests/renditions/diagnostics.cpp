@@ -120,8 +120,8 @@ int main(int argc, char **argv)
     check(recovered.value("level") == "ok" && !codes(recovered).contains("NO_NETWORK"), "E recovery clears connection incident");
 
     // F — Operación en espera de transporte NO es rechazo; permiso es explicación sin acción.
-    auto waiting = rendition("1", {}); waiting.insert("syncState", "ERROR"); waiting.insert("syncError", "TRANSPORT_RETRY");
-    check(D::evaluate(state("ONLINE", {waiting})).value("level") == "ok", "F1 transport marker is not an error");
+    auto waitingRendition = rendition("1", {}); waitingRendition.insert("syncState", "ERROR"); waitingRendition.insert("syncError", "TRANSPORT_RETRY");
+    check(D::evaluate(state("ONLINE", {waitingRendition})).value("level") == "ok", "F1 transport marker is not an error");
     auto denied = rendition("1", {}); denied.insert("syncState", "ERROR"); denied.insert("syncError", "No tiene permiso para editar esta rendición.");
     const auto permission = incident(D::evaluate(state("ONLINE", {denied})), "PERMISSION_DENIED");
     check(!permission.isEmpty() && permission.value("action").toMap().isEmpty(), "F2 permission explained without unauthorized action");

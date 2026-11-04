@@ -149,7 +149,7 @@ Item {
             Text {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
-                text: "Track your reports"
+                text: "Controla tus rendiciones"
                 color: S.muted
                 font.family: page.ui.fontFamily
                 font.pixelSize: 19 * page.ui.u
@@ -318,7 +318,9 @@ Item {
                 model: ownModel
                 delegate: RenditionCard {
                     required property string rowJson
+                    required property int index
                     readonly property var modelData: JSON.parse(rowJson)
+                    cascadeIndex: index                           // «Extrema»: cascada de 30 ms
                     width: column.width
                     ui: page.ui
                     ctl: page.ctl
@@ -331,7 +333,9 @@ Item {
                 model: receivedModel
                 delegate: RenditionCard {
                     required property string rowJson
+                    required property int index
                     readonly property var modelData: JSON.parse(rowJson)
+                    cascadeIndex: index                           // «Extrema»: cascada de 30 ms
                     width: column.width
                     ui: page.ui
                     ctl: page.ctl
@@ -483,7 +487,8 @@ Item {
         var me = typeof auth !== "undefined" && auth ? String(auth.userId || "") : ""
         return !owner.length || !me.length || owner === me
     }
-    readonly property bool cardIsDraft: !!cardMenuRow && String(cardMenuRow.status || "BORRADOR").toUpperCase() === "BORRADOR"
+    readonly property bool cardArchivable: !!cardMenuRow && !!ctl && ctl.canArchive(cardMenuRow)
+    readonly property bool cardIsDraft:!!cardMenuRow && String(cardMenuRow.status || "BORRADOR").toUpperCase() === "BORRADOR"
     function openCardMenu(row, card) {
         cardMenuRow = row
         page.app.haptic("medium")
@@ -503,6 +508,7 @@ Item {
         parent: hosted ? page.app.touchLayer : page
         dimBackground: !hosted
         ui: page.ui
+        liquidUi: page.ui && page.ui.cardGlassUi ? page.ui.cardGlassUi : null   // vidrio del Dock (mismo RGlassMenu)
         cardWidth: 260 * page.ui.u
         onDismissed: page.app.homeTouchItem = null
         RMenuItem { ui: page.ui; label: "Abrir"; glyph: 0xE0BA; glyphColor: S.accent
@@ -513,7 +519,7 @@ Item {
         RMenuItem { ui: page.ui; label: "Exportar Excel"; glyph: 0xE086; glyphColor: S.success; visible: page.cardExportable
                     onActivated: { var id = String(page.cardMenuRow.localId); cardMenu.close(); page.app.exportFromList(id, "xlsx") } }
         RMenuItem { objectName: "cardMenuArchive"; ui: page.ui; label: "Archivar"; glyph: 0xE0D7; glyphColor: S.accent
-                    visible: page.cardIsMine
+                    visible: page.cardIsMine && page.cardArchivable
                     onActivated: {
                         var row = page.cardMenuRow
                         cardMenu.close()

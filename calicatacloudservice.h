@@ -3,6 +3,7 @@
 #include "calicatasyncpolicy.h"
 
 #include <QHash>
+#include <QList>
 #include <QObject>
 #include <QPointer>
 #include <QVariantList>
@@ -37,6 +38,7 @@ class CalicataCloudService final : public QObject
     // P6 presence of the open ficha (Web presenceService contract).
     Q_PROPERTY(QVariantList presenceMembers READ presenceMembers NOTIFY presenceChanged)
     Q_PROPERTY(QString presenceState READ presenceState NOTIFY presenceChanged)
+    Q_PROPERTY(QStringList purgedCalicataIds READ purgedCalicataIds NOTIFY purgedCalicatasChanged)
 
 public:
     explicit CalicataCloudService(QObject *parent = nullptr);
@@ -48,9 +50,10 @@ public:
     bool busy() const { return m_pendingRequests > 0; }
     QString lastError() const { return m_lastError; }
     int pendingActivityCount() const;
-    int pendingMediaCount() const { return m_mediaOutbox.size(); }
+    int pendingMediaCount() const;
     QVariantList presenceMembers() const { return m_presenceMembers; }
     QString presenceState() const { return m_presenceState; }
+    QStringList purgedCalicataIds() const { return m_purgedCalicataIds.values(); }
     Q_INVOKABLE void joinPresence(CalicataDocument *document);
     Q_INVOKABLE void leavePresence();
     Q_INVOKABLE void setPresenceActive(bool active);     // app foreground/background
@@ -126,6 +129,9 @@ public:
     // misma tabla, bucket y descarga firmada que la ficha). Responde con
     // calicataCoverReady(calicataId, url) — url vacía si no hay foto o falla.
     Q_INVOKABLE void requestCalicataCover(const QString &projectId, const QString &calicataId);
+    // Foto del lugar (Wikimedia Commons, geosearch 10 km, sin clave), cacheada por
+    // calicata. sitePhotoReady(key, url, credit) solo se emite si hay foto.
+    Q_INVOKABLE void requestSitePhoto(const QString &key, double latitude, double longitude);
     Q_INVOKABLE void listLogoLibrary(CalicataDocument *document, const QString &parentNodeId = QString());
     Q_INVOKABLE void selectLibraryLogo(CalicataDocument *document, const QString &categoryCode,
                                       const QString &spaceId, const QString &nodeId, const QString &resourcesDir);
@@ -144,6 +150,7 @@ public:
     Q_INVOKABLE void openDriveJson(const QString &spaceId, const QString &nodeId, const QString &versionId);
 
 signals:
+    void purgedCalicatasChanged();
     void driveJsonSaved(const QString &localDocumentId, const QVariantMap &result);
     void driveJsonSaveFailed(const QString &localDocumentId, const QString &message);
     void driveFoldersListed(const QString &projectId, const QString &parentNodeId,
@@ -196,6 +203,7 @@ signals:
     void mediaSyncChanged(const QString &localDocumentId, int idx, const QString &state,
                           const QString &message, const QVariantMap &changes);
     void photoHistoryLoaded(const QString &localDocumentId, int idx, const QVariantList &versions);
+    void sitePhotoReady(const QString &key, const QString &url, const QString &credit);
     void remoteLogoLoaded(const QString &localDocumentId, const QString &categoryCode,
                           const QString &localPath, const QVariantList &history);
     void remoteLogoReadFailed(const QString &localDocumentId, const QString &categoryCode, const QString &message);
@@ -209,6 +217,12 @@ signals:
 private:
     using JsonCallback = std::function<void(bool, const QJsonDocument &, const QString &, const QString &)>;
     using StatusCallback = std::function<void(bool confirmed, const QString &code, const QString &message)>;
+    using MediaStateCallback = std::function<void(bool, const QVariantMap &, const QString &)>;
+    void readCalicataState(const QString &projectId, const QString &calicataId, MediaStateCallback done);
+    void refreshCalicataReadStates(const QString &projectId);
+    QSet<QString> m_purgedCalicataIds;
+    QHash<QString, QSet<QString>> m_projectReadIds;
+    QHash<QString, QList<MediaStateCallback>> m_mediaStateRequests;
 
     void beginRequest();
     void syncAccountContext();
@@ -255,11 +269,17 @@ private:
     void ensureMediaOutbox();
     void saveMediaOutbox();
     void processMediaEntry(int index);
+    void processMediaEntryReady(int index);
+    void downloadRemotePhotoReady(CalicataDocument *document, int idx, const QString &versionId);
+    void loadRemoteLogosReady(CalicataDocument *document, const QString &resourcesDir, const QVariantMap &readState);
     void finishMediaEntry(const QString &entryId, const QString &state, const QString &message,
                           const QVariantMap &changes);
     void downloadStorageObject(const QString &path, const QString &destAbs,
                                std::function<void(bool ok, const QString &message)> done,
                                const QString &bucket = QString());
+    void downloadStorageObjectReady(const QString &path, const QString &destAbs,
+                                   std::function<void(bool, const QString &)> done,
+                                   const QString &bucket);
     void uploadStorageObject(const QString &path, const QString &localFile, const QString &mimeType,
                              std::function<void(bool ok, const QString &message)> done,
                              const QString &bucket = QString());
@@ -274,6 +294,7 @@ private:
     QVariantList m_projects;
     bool m_projectsRefreshPending = false;
     QHash<QString, quint64> m_logoReads;
+    QSet<QString> m_sitePhotoRequests;           // Visita de campo: una descarga en curso por calicata
     QHash<QString, bool> m_coverRequests;          // calicataId -> lectura en curso (sin duplicados)
     QString m_contextOwner;
     quint64 m_contextEpoch = 0;
@@ -310,6 +331,7 @@ private:
     QString m_rtJoinRef;
     QString m_rtToken;
     QString m_rtField;
+    quint64 m_rtFieldGen = 0;                 // throttle del foco (180 ms, como la Web)
     QVariantMap m_rtPresence;
     QVariantList m_presenceMembers;
     QString m_presenceState = QStringLiteral("OFF");

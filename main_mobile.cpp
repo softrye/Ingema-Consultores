@@ -41,6 +41,7 @@
 #include "src/cpp/renditionrepository.h"
 #include "src/cpp/renditionlocalstore.h"
 #include "src/cpp/renditionsynccontroller.h"
+#include "src/cpp/accessrequestsclient.h"
 #include "src/cpp/renditionflutterbridge.h"
 #include "src/cpp/renditionuicontroller.h"
 #include "src/cpp/renditionexportservice.h"
@@ -193,6 +194,8 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationDomain("ingeplus.app");
     QCoreApplication::setApplicationName("InGePlusMobile");
     QCoreApplication::setApplicationVersion("1.1.13");
+    // Calidad gráfica VERY_HIGH/EXTREME: MSAA y render de texto antes de crear la ventana.
+    InGeGraphicsCore::applyStartupFidelity();
 
     qInfo() << "INGE_STARTUP_STAGE QT_APP_READY";
     // Antes que AuthSession y los demás servicios: la migración de instalaciones
@@ -229,6 +232,7 @@ int main(int argc, char *argv[])
     DropboxBridge dropboxBridge(&app);
     DocsOps docsOps(&app);
     InGeGraphicsCore graphicsCore(&app);
+    AccessRequestsClient accessRequests(&app);   // Solicitudes de acceso (Configuración, administradores)
     FlowHaptics flowHaptics(&app);
     // Dock contextual: controladores originales; canal "qml" (sin vista nativa).
     DockContextController dockContextController(&app);
@@ -255,6 +259,7 @@ int main(int argc, char *argv[])
     qmlRegisterSingletonInstance("InGe", 1, 0, "CalicataCloud", &calicataCloud);
     qmlRegisterSingletonInstance("InGe", 1, 0, "Dropbox", &dropboxBridge);
     qmlRegisterSingletonInstance("InGe", 1, 0, "GraphicsCore", &graphicsCore);
+    qmlRegisterSingletonInstance("InGe", 1, 0, "AccessRequests", &accessRequests);
     qmlRegisterSingletonInstance("InGe", 1, 0, "FlowHaptics", &flowHaptics);
     // Editor original de Calicatas: motor global único InGe.CoreFlow 3.0.
     qmlRegisterSingletonType(

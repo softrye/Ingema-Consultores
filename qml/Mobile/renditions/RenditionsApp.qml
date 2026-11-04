@@ -3,7 +3,9 @@ import QtQuick.Controls
 import QtQuick.Shapes
 import QtQuick.Effects
 import "RStyle.js" as S
+import ".." as Mobile                          // GlassSurface: Liquid Glass oficial
 import "../flowcore" as FlowCore
+import InGe.CoreFlow 3.0 as CoreFlowModule           // ganchos «Extrema» del motor único
 
 // Subapp Rendiciones (QML nativo, misma APK). Arquitectura:
 // HomeScreen -> RenditionsApp -> RenditionsUi (C++) -> RenditionFlutterBridge
@@ -26,6 +28,7 @@ Item {
     property var haptics: null                 // FlowHaptics (motor háptico existente), opcional
     property Item dockAnchor: null             // dock contextual global (HomeScreen), sólo para anclar paneles
     property var flow: null                    // motor único InGeCoreFlow (teclado/IME), opcional
+    readonly property var extremeFlow: CoreFlowModule.InGeCoreFlow   // ganchos «Extrema»
     property Item touchLayer: null             // anfitrión global de menús 3D Touch (HomeScreen)
     // Caja con su menú 3D Touch abierto (HomeScreen desenfoca todo y la eleva).
     property Item homeTouchItem: null
@@ -168,13 +171,19 @@ Item {
         exportDestCallback = null; exportDestMenu.close()
         if (cb) cb(destination)
     }
+    // Aviso breve de éxito con el destino (los errores conservan su mensaje).
+    // Google Drive avisa al terminar la subida real (evento exportFinished).
+    function exportDone(destination) {
+        if (destination === "google") return
+        shell.toast("Rendición exportada · " + (destination === "phone" ? "Teléfono" : "InGe Drive"), "success")
+    }
     function runExport(format, destination) {
         call("ownerExport", { format: format, destination: destination }, "export:" + format, function(ok, result, code, message) {
             if (!ok) { shell.toast(shell.errorText(code, message), "error"); return }
             var path = String(result.output || "")
-            if (destination === "phone") {
-                if (typeof excelExporter !== "undefined" && excelExporter && path.length) excelExporter.openExportedFile(path, true)
-            } else shell.toast(destination === "google" ? "Enviando a Google Drive…" : "Guardado en InGe Drive.", "success")
+            if (destination === "phone" && typeof excelExporter !== "undefined" && excelExporter && path.length)
+                excelExporter.openExportedFile(path, true)
+            shell.exportDone(destination)
         })
     }
     function exportFromList(localId, format) {
@@ -214,10 +223,9 @@ Item {
                 exportRetry.retried = false
                 if (!ok) { shell.toast(shell.errorText(code, message), "error"); return }
                 var path = String(result.output || "")
-                if (destination === "phone") {
-                    if (typeof excelExporter !== "undefined" && excelExporter && path.length) excelExporter.openExportedFile(path, true)
-                } else shell.toast(destination === "google" ? "Enviando a Google Drive…" : "Guardado en InGe Drive.", "success")
-                // Sin aviso con la ruta interna: la hoja de compartir ya confirma el archivo.
+                if (destination === "phone" && typeof excelExporter !== "undefined" && excelExporter && path.length)
+                    excelExporter.openExportedFile(path, true)
+                shell.exportDone(destination)                        // sin la ruta interna
             })
         }
     }
@@ -246,6 +254,8 @@ Item {
     readonly property bool editorActive: createSheet.visible
         || (!!stack.currentItem && stack.currentItem.editingInProgress === true)
         || (!!detailPage && detailPage.expensesTab.editorActive === true)
+    readonly property bool halloweenBlocked: phase !== "IDLE" || (!!ctl && ctl.pendingKeys.length > 0)
+        || (active && (overlaysVisible || editorActive || navigationTransitionActive))
     readonly property bool overlaysVisible: createSheet.visible || balanceMenu.visible || folderMenu.visible
         || statusPanel.visible || filesPopup.visible || searchPanel.visible || infoPanel.visible
         || activityPanel.visible || quickExpensePanel.visible || exportDestMenu.visible || notesPanel.visible
@@ -403,6 +413,14 @@ Item {
         }
         function onBridgeError(code, message) { shell.toast(shell.errorText(code, message), "error") }
         function onBridgeEvent(type, event) {
+            if (type === "exportFinished") {          // fin real de la subida a Google Drive
+                if (event.ok === true) shell.toast("Rendición exportada · Google Drive", "success")
+                else {
+                    var text = shell.errorText(event.code, event.message)
+                    if (text.length) shell.toast(text, "error")
+                }
+                return
+            }
             if (type === "receivedReset") {            // cambio de cuenta
                 shell.callbacks = ({})
                 if (stack.depth > 1) stack.popToIndex(0, StackView.Immediate)
@@ -436,6 +454,7 @@ Item {
             mode: shell.syncMode
             dark: S.dark
             skin: String(shell.ui.appSkin || "none")
+            halloweenController: shell.ui.seasonalController || null
             running: shell.active && shell.visible
             reducedMotion: shell.ui.reducedMotion === true
             lowCost: shell.ui.dockLowCostGlass === true
@@ -457,14 +476,17 @@ Item {
         id: cardGlassUi
         readonly property Item backdrop: backdropLayer
         // A valid producer must reach the shader before the first capture can finish.
-        readonly property bool glassReady: shell.cardGlassLive && backdropCapture.sourceItem !== null && backdropCapture.width > 0 && backdropCapture.height > 0
+        readonly property bool glassReady: shell.ui.liquidGlass !== false && backdropCapture.sourceItem !== null && backdropCapture.width > 0 && backdropCapture.height > 0
         readonly property var glassTexture: glassReady ? backdropCapture : null
         readonly property int glassTick: shell.glassTick
     }
     ShaderEffectSource {
         id: backdropCapture
+        objectName: "renditionBackdropCapture"
         width: backdropLayer.width; height: backdropLayer.height
-        sourceItem: shell.visible && (textureReady || updatePending || shell.cardCaptureAllowed) ? backdropLayer : null
+        // The retained page owns this producer for its entire lifetime. Hiding
+        // it freezes captures; it must not invalidate samplers during exit.
+        sourceItem: backdropLayer
         property bool textureReady: false
         property bool updatePending: false
         property size captureSize: Qt.size(1, 1)
@@ -479,9 +501,12 @@ Item {
         }
         // Fluidez: el fondo (aurora/universo) se mueve lento; se recaptura a ~20 fps
         // y a baja resolución (el vidrio lo esmerila igual), no en cada cuadro.
-        live: false
+        // HIGH/MEDIUM_HIGH: en vivo a resolución completa con mipmaps (Liquid Glass
+        // oficial); el resto, a ~20 fps y reducida. En LOW las tarjetas usan el respaldo.
+        live: shell.cardCaptureAllowed && shell.ui.dockLiveGlass === true
+        mipmap: shell.ui.dockLowCostGlass !== true
         hideSource: false; visible: false; smooth: true
-        readonly property int divisor: shell.ui.dockLowCostGlass === true ? 8 : 6
+        readonly property int divisor: shell.ui.dockLiveGlass === true ? 1 : shell.ui.dockLowCostGlass === true ? 8 : 3
         textureSize: captureSize
     }
     function captureBackdrop() {
@@ -496,12 +521,13 @@ Item {
     onCardCaptureAllowedChanged: if (cardCaptureAllowed) Qt.callLater(shell.captureBackdrop)
     Timer {
         interval: 50; repeat: true
-        running: shell.cardCaptureAllowed && shell.ui.reducedMotion !== true
+        running: shell.cardCaptureAllowed && shell.ui.reducedMotion !== true && !backdropCapture.live
         onTriggered: shell.captureBackdrop()
     }
     // La posición de cada tarjeta (desplazamiento) sí se sigue en cada cuadro: es barato.
     FrameAnimation { running: shell.cardCaptureAllowed; onTriggered: shell.glassTick++ }
-    Binding { target: shell.ui; property: "cardGlassUi"; value: shell.cardGlassLive ? cardGlassUi : null; when: shell.visible || shell.active }
+    // Sólo con Rendiciones visible: otras subapps que reutilizan RConfirm/RSelect no muestrean este fondo.
+    Binding { target: shell.ui; property: "cardGlassUi"; value: shell.ui.liquidGlass !== false && shell.visible ? cardGlassUi : null }
 
     // El Liquid Glass del Dock global NO se configura aquí: HomeScreen captura
     // esta subapp (renditionsLoader) como fondo del Dock con su motor único.
@@ -691,14 +717,47 @@ Item {
             x: 10 * shell.ui.u
             height: Math.min(parent.height * 0.76, 640 * shell.ui.u)
             y: createSheet.open ? parent.height - height - shell.ui.dockArea + 8 * shell.ui.u : parent.height + 20 * shell.ui.u
-            Behavior on y { NumberAnimation { duration: createSheet.open ? 260 : 180; easing.type: Easing.OutCubic } }
+            // Hero (sólo advancedMotion): .cover(.up) al presentar (deceleration) y .uncover al
+            // cerrar (standard), con optimizedDurationTo según la distancia recorrida.
+            readonly property var hero: shell.flow && shell.flow.advancedMotion === true ? shell.flow.hero : null
+            Behavior on y { NumberAnimation {
+                duration: sheetCard.hero ? sheetCard.hero.duration(sheetCard.height + 20 * shell.ui.u) : createSheet.open ? 260 : 180
+                easing.type: sheetCard.hero ? Easing.BezierSpline : Easing.OutCubic
+                easing.bezierCurve: sheetCard.hero ? (createSheet.open ? sheetCard.hero.deceleration : sheetCard.hero.standard) : [] } }
             radius: 30 * shell.ui.u
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: S.dark ? Qt.rgba(20 / 255, 25 / 255, 36 / 255, 0.97) : S.glass(0.97) }
-                GradientStop { position: 1.0; color: S.dark ? Qt.rgba(16 / 255, 20 / 255, 30 / 255, 0.97) : S.lite(246, 249, 253, 0.97) }
+            // Vidrio del Dock (preset único, dockGlassTint); sin vidrio, la hoja opaca anterior.
+            readonly property bool liquid: shell.ui.liquidGlass !== false && !!shell.ui.liquidGlassMaterial && !!shell.ui.cardGlassUi
+            color: "transparent"
+            property int geometryTick: 0
+            onYChanged: geometryTick++
+            QtObject {                                  // host con la posición de la hoja (deslizamiento)
+                id: sheetGlass
+                readonly property Item backdrop: shell.ui.cardGlassUi ? shell.ui.cardGlassUi.backdrop : null
+                readonly property bool glassReady: !!shell.ui.cardGlassUi && shell.ui.cardGlassUi.glassReady !== false
+                readonly property var glassTexture: shell.ui.cardGlassUi ? shell.ui.cardGlassUi.glassTexture : null
+                readonly property int glassTick: (shell.ui.cardGlassUi ? shell.ui.cardGlassUi.glassTick : 0) + sheetCard.geometryTick
             }
-            border.width: 1
-            border.color: S.edge(0.95)
+            Mobile.DockGlassPanel {
+                visible: sheetCard.liquid
+                glassUi: sheetGlass
+                tint: shell.ui.dockGlassTint
+                radius: sheetCard.radius
+                u: shell.ui.u
+            }
+            Rectangle {                                 // claro: velo blanco leve; sin vidrio: hoja opaca
+                anchors.fill: parent
+                radius: parent.radius
+                visible: !sheetCard.liquid || !S.dark
+                color: Qt.rgba(1, 1, 1, 0.22)
+                gradient: sheetCard.liquid ? null : opaqueSheet
+                border.width: sheetCard.liquid ? 0 : 1
+                border.color: S.edge(0.95)
+                Gradient {
+                    id: opaqueSheet
+                    GradientStop { position: 0.0; color: S.dark ? Qt.rgba(20 / 255, 25 / 255, 36 / 255, 0.97) : S.glass(0.97) }
+                    GradientStop { position: 1.0; color: S.dark ? Qt.rgba(16 / 255, 20 / 255, 30 / 255, 0.97) : S.lite(246, 249, 253, 0.97) }
+                }
+            }
             MouseArea { anchors.fill: parent; preventStealing: true; onWheel: function(wheel) { wheel.accepted = true } }   // no atraviesa a la lista
             Rectangle {                                 // asa
                 width: 40 * shell.ui.u; height: 5 * shell.ui.u; radius: height / 2
@@ -800,14 +859,37 @@ Item {
     // «invalidate» tras cada guardado; al recibirlo se vuelve a pedir al servidor.
     // El canal se crea dinámicamente para que las pruebas de escritorio (sin el
     // módulo C++) sigan funcionando.
-    readonly property string liveRenditionId: detailPage ? String(detailPage.remoteId || "") : ""
+    // La presencia acompaña al editor: StackView deja de exponer detailPage al
+    // abrir ExpenseEditor o RenditionEditor, aunque seguimos en la misma rendición.
+    // La identidad remota se obtiene del documento seleccionado, no del índice de
+    // la página, y nunca se inventa para una rendición todavía local.
+    readonly property string liveRenditionId: {
+        var view = stack.currentItem
+        if (!view) return ""
+        if (view.isRenditionDetail === true) return String(view.remoteId || "")
+        if (view.isRenditionReceived === true) return String(view.identity.renditionId || "")
+        if (view.editingInProgress !== true) return ""
+        if (view.original !== undefined && view.original !== null)
+            return String(view.original.remoteId || "")
+        var id = String(view.renditionLocalId || "")
+        if (!id.length) return ""
+        var current = st.current || ({})
+        if (String(current.localId || "") === id) return String(current.remoteId || "")
+        var rows = st.renditions || []
+        for (var i = 0; i < rows.length; ++i)
+            if (String(rows[i].localId || "") === id) return String(rows[i].remoteId || "")
+        return ""
+    }
 
     // ------------------------------------- Estado y revisión (contratos de la Web)
     // get_rendition_review_context_v03 decide qué estados ofrece (admin) o si el
     // dueño puede solicitar un cambio; list_rendition_review_observations_v08 trae
-    // los comentarios del revisor.
+    // los comentarios del revisor y get_document_review_observation_v07 el vigente (banner).
     property var reviewCtx: null
     property var reviewNotes: []
+    property var reviewNote: null
+    property bool reviewNotesFailed: false
+    property string dismissedReviewNote: ""
     onLiveRenditionIdChanged: {
         liveReload.stop()
         liveReloadPending = false
@@ -815,16 +897,25 @@ Item {
     }
     function loadReview() {
         var id = liveRenditionId
-        reviewCtx = null; reviewNotes = []
+        reviewCtx = null; reviewNotes = []; reviewNote = null; reviewNotesFailed = false
         if (!id.length) return
         call("reviewContext", { renditionId: id }, "reviewContext:" + id, function(ok, result) {
             if (ok && shell.liveRenditionId === id) shell.reviewCtx = (result.rows || [])[0] || null
         })
         call("reviewObservations", { renditionId: id }, "reviewNotes:" + id, function(ok, result) {
-            if (!ok || shell.liveRenditionId !== id) return
+            if (shell.liveRenditionId !== id) return
+            if (!ok) { shell.reviewNotesFailed = true; return }
             var rows = result.rows || []
             if (rows.length === 1 && Array.isArray(rows[0])) rows = rows[0]
-            shell.reviewNotes = rows
+            // En orden de llegada, como parseDocumentReviewObservations (Web).
+            shell.reviewNotes = rows.filter(function(n) { return n && String(n.body || "").trim().length })
+                .sort(function(a, b) { return Date.parse(a.created_at) - Date.parse(b.created_at)
+                                              || String(a.id).localeCompare(String(b.id)) })
+        })
+        call("reviewObservation", { renditionId: id }, "reviewNote:" + id, function(ok, result) {
+            if (!ok || shell.liveRenditionId !== id) return
+            var note = (result.rows || [])[0] || null
+            shell.reviewNote = note && note.id && String(note.body || "").trim().length ? note : null
         })
     }
     readonly property var reviewMenu: {
@@ -880,8 +971,29 @@ Item {
               value: shell.liveRenditionId.length ? "rendition:" + shell.liveRenditionId : "" }
     Binding { target: shell.liveChannel; property: "active"; when: shell.liveChannel !== null
               value: shell.active && Qt.application.state === Qt.ApplicationActive }
+    Binding { target: shell.liveChannel; property: "fieldSettleMs"; when: shell.liveChannel !== null
+              value: 150 }
     Binding { target: shell.liveChannel; property: "trackMeta"; when: shell.liveChannel !== null
               value: ({ routeIds: shell.liveRenditionId.length ? [shell.liveRenditionId] : [] }) }
+    // Sector en foco: el ancestro más cercano del foco con `presenceField` se publica
+    // en la presencia (setField: 150 ms en Rendiciones, se limpia al cambiar de
+    // rendición o al salir). Los demás lo ven iluminado con FieldPresenceHighlight.
+    readonly property string liveFocusField: {
+        // Nunca publicar el foco de otra hoja/página (ni un campo oculto al
+        // suspender Android); se limpia con presencia vacía al perder el foco.
+        if (!shell.active || !shell.visible || !shell.liveRenditionId.length
+                || createSheet.open || Qt.application.state !== Qt.ApplicationActive) return ""
+        for (var item = shell.Window.activeFocusItem; item; item = item.parent)
+            if (item.presenceField !== undefined && String(item.presenceField).length) return String(item.presenceField)
+        return ""
+    }
+    onLiveFocusFieldChanged: if (liveChannel && typeof liveChannel.setField === "function") liveChannel.setField(liveFocusField)
+    // Etiqueta común del sector de un gasto («Gasto N», la numeración visible).
+    function expensePresenceField(localId) {
+        var rows = (st.expenses || []).filter(function(e) { return e.archived !== true })
+        for (var i = 0; i < rows.length; ++i) if (String(rows[i].localId) === String(localId)) return "Gasto " + (i + 1)
+        return ""
+    }
     Connections {
         target: shell.liveChannel
         ignoreUnknownSignals: true
@@ -1313,6 +1425,7 @@ Item {
         id: balanceMenu
         objectName: "balanceMenu"
         ui: shell.ui
+        liquidUi: shell.ui.cardGlassUi || null            // vidrio del Dock
         z: 45
         cardWidth: 360 * shell.ui.u
         readonly property var c: shell.balanceCounts
@@ -1405,6 +1518,7 @@ Item {
         id: folderMenu
         objectName: "folderMenu"
         ui: shell.ui
+        liquidUi: shell.ui.cardGlassUi || null            // vidrio del Dock
         z: 45
         cardWidth: 330 * shell.ui.u
         RMenuItem {
@@ -1638,9 +1752,15 @@ Item {
         Text { width: parent.width; leftPadding: 6 * shell.ui.u; bottomPadding: 6 * shell.ui.u
                text: "Observaciones del revisor"; color: S.text
                font.family: shell.ui.fontFamily; font.pixelSize: 18 * shell.ui.u; font.weight: Font.DemiBold }
-        Text { width: parent.width; visible: shell.reviewNotes.length === 0; leftPadding: 6 * shell.ui.u; bottomPadding: 8 * shell.ui.u
-               text: "Sin observaciones de revisión."; color: S.muted; wrapMode: Text.WordWrap
+        Text { width: parent.width; leftPadding: 6 * shell.ui.u; bottomPadding: 8 * shell.ui.u
+               text: shell.reviewNotesFailed ? "No se pudo consultar el historial de observaciones."
+                     : shell.reviewNotes.length === 0 ? "Sin observaciones de revisión."
+                     : shell.reviewNotes.length + (shell.reviewNotes.length === 1 ? " observación" : " observaciones") + " · En orden de llegada"
+               color: shell.reviewNotesFailed ? S.warning : S.muted; wrapMode: Text.WordWrap
                font.family: shell.ui.fontFamily; font.pixelSize: 14 * shell.ui.u }
+        RButton { visible: shell.reviewNotesFailed; ui: shell.ui; label: "Reintentar historial"
+                  width: parent.width; height: 44 * shell.ui.u; radius: height / 2; color: S.cardGlass
+                  onActivated: shell.loadReview() }
         ListView {
             width: parent.width
             height: Math.min(contentHeight, shell.height * 0.5)
@@ -1650,13 +1770,14 @@ Item {
             model: shell.reviewNotes
             delegate: Rectangle {
                 required property var modelData
+                required property int index
                 width: ListView.view.width; height: noteCol.implicitHeight + 20 * shell.ui.u
                 radius: 14 * shell.ui.u; color: S.tintSoft; border.width: 1; border.color: S.tintSoftBorder
                 Column {
                     id: noteCol
                     x: 12 * shell.ui.u; y: 10 * shell.ui.u; width: parent.width - 24 * shell.ui.u; spacing: 4 * shell.ui.u
                     Text { width: parent.width; elide: Text.ElideRight; color: S.accent
-                           text: String(modelData.author || "Revisor") + " · " + S.date(String(modelData.created_at || ""))
+                           text: "Observación " + (index + 1) + " · " + String(modelData.author || "Revisor") + " · " + S.date(String(modelData.created_at || ""))
                            font.family: shell.ui.fontFamily; font.pixelSize: 12 * shell.ui.u; font.weight: Font.DemiBold }
                     Text { width: parent.width; wrapMode: Text.WordWrap; color: S.text; text: String(modelData.body || "")
                            font.family: shell.ui.fontFamily; font.pixelSize: 14 * shell.ui.u }
@@ -1714,9 +1835,18 @@ Item {
             // Android ya achica la ventana con el teclado: sólo se centra en el alto visible.
             y: Math.max(shell.ui.topInset + 12 * shell.ui.u, (parent.height - height) / 2)
             radius: 26 * shell.ui.u
-            color: S.dark ? Qt.rgba(18 / 255, 22 / 255, 32 / 255, 0.97) : S.glass(0.97)
-            border.width: 1; border.color: S.edge(1)
-            scale: stateSheet.shown ? 1 : 0.92
+            readonly property bool liquid: (shell.ui.liquidGlass !== false && !!shell.ui.liquidGlassMaterial && !!shell.ui.cardGlassUi)
+            color: liquid ? "transparent" : S.halloween ? S.popup : S.dark ? Qt.rgba(18 / 255, 22 / 255, 32 / 255, 0.97) : S.glass(0.97)
+            border.width: liquid ? 0 : 1; border.color: S.edge(1)
+            Mobile.GlassSurface {                // Liquid Glass oficial (preset único del Dock)
+                visible: shell.ui.liquidGlass !== false && !!shell.ui.liquidGlassMaterial && !!shell.ui.cardGlassUi && (textureReady || fallbackOn)
+                ui: shell.ui.cardGlassUi || null
+                material: shell.ui.liquidGlassMaterial || null
+                tint: shell.ui.dockGlassTint                  // oscuro igual que claro y el Dock: sin tinte negro
+                radius: 26 * shell.ui.u
+                margin: 12 * shell.ui.u
+            }
+            scale: stateSheet.shown ? 1 : (shell.extremeFlow.extremeMotion === true ? shell.extremeFlow.sheetStartScale : 0.92)
             Behavior on scale { NumberAnimation { duration: 320; easing.type: Easing.OutBack; easing.overshoot: 1.15 } }
             MouseArea { anchors.fill: parent }
             Column {
@@ -1753,7 +1883,7 @@ Item {
                     MouseArea { anchors.fill: parent; enabled: !reasonField.activeFocus; onClicked: reasonField.forceActiveFocus() }
                 }
                 Text { width: parent.width; visible: stateSheet.errorText.length > 0; text: stateSheet.errorText; color: S.danger
-                       wrapMode: Text.WordWrap; font.family: shell.ui.fontFamily; font.pixelSize: 13 * shell.ui.u }
+                       wrapMode: Text.Wrap; font.family: shell.ui.fontFamily; font.pixelSize: 13 * shell.ui.u }
                 Row {
                     id: sheetActions
                     width: parent.width; spacing: 10 * shell.ui.u
@@ -1837,6 +1967,7 @@ Item {
     RenditionsDiagnostics {
         id: statusPanel
         ui: shell.ui
+        liquidUi: shell.ui.cardGlassUi || null            // vidrio del Dock
         app: shell
         z: 46
         diagnostics: shell.diagnostics

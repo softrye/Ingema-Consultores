@@ -3,6 +3,7 @@
 #include "appcontext.h"
 #include "authsession.h"
 #include "supabaseclient.h"
+#include "presenceidentity.h"
 
 #include <QDateTime>
 #include <QJsonDocument>
@@ -16,6 +17,11 @@ const int kRetryMs[] = {1000, 2000, 4000, 8000, 15000, 30000};
 
 SupabaseRealtimeChannel::SupabaseRealtimeChannel(QObject *parent) : QObject(parent)
 {
+    m_fieldSettle.setSingleShot(true);
+    m_fieldSettle.setInterval(180); // valor histórico; Rendiciones pide 150 ms
+    connect(&m_fieldSettle, &QTimer::timeout, this, [this]() { if (m_state == QLatin1String("JOINED")) track(); });
+    // Foto de un compañero ya descargada: el roster la muestra en lugar de la inicial.
+    connect(PresenceAvatarCache::instance(), &PresenceAvatarCache::avatarReady, this, [this]() { rebuildMembers(); });
     m_heartbeat.setInterval(25000);
     connect(&m_heartbeat, &QTimer::timeout, this, [this]() {
         if (!m_socket || !m_handshaken) return;
@@ -45,6 +51,8 @@ void SupabaseRealtimeChannel::setTopic(const QString &topic)
     if (t == m_topic) return;
     disconnectSocket(true);
     m_topic = t;
+    m_field.clear();                                    // el foco no viaja a otro documento
+    m_fieldSettle.stop();
     m_everJoined = false;
     m_retryStep = 0;
     emit topicChanged();
@@ -57,8 +65,31 @@ void SupabaseRealtimeChannel::setActive(bool active)
     if (m_active == active) return;
     m_active = active;
     emit activeChanged();
-    if (!active) { disconnectSocket(true); if (!m_topic.isEmpty()) setState(QStringLiteral("OFF")); }   // sin fantasmas
+    if (!active) {
+        // El foco deja de existir al salir de la app; no se reanuncia como
+        // edición activa si Android restaura el mismo TextField al volver.
+        m_fieldSettle.stop();
+        m_field.clear();
+        disconnectSocket(true);
+        if (!m_topic.isEmpty()) setState(QStringLiteral("OFF"));
+    }
     else if (!m_topic.isEmpty()) { m_retryStep = 0; connectSocket(); }
+}
+
+void SupabaseRealtimeChannel::setFieldSettleMs(int ms)
+{
+    const int interval = qBound(50, ms, 1000);
+    if (m_fieldSettle.interval() == interval) return;
+    m_fieldSettle.setInterval(interval);
+    emit fieldSettleMsChanged();
+}
+
+void SupabaseRealtimeChannel::setField(const QString &field)
+{
+    const QString trimmed = field.trimmed().left(80);
+    if (trimmed == m_field) return;
+    m_field = trimmed;
+    m_fieldSettle.start();
 }
 
 void SupabaseRealtimeChannel::setTrackMeta(const QVariantMap &meta)
@@ -314,6 +345,10 @@ void SupabaseRealtimeChannel::track()
         if (name.isEmpty()) name = auth->email().section(QLatin1Char('@'), 0, 0);
         meta[QStringLiteral("name")] = name.left(60);
     }
+    // Claves opcionales (la Web ignora las que no lee): foco y referencia de la foto.
+    if (!meta.contains(QStringLiteral("field")) && !m_field.isEmpty()) meta[QStringLiteral("field")] = m_field;
+    const QString avatarRef = PresenceIdentity::selfAvatarRef();
+    if (!meta.contains(QStringLiteral("avatarUrl")) && !avatarRef.isEmpty()) meta[QStringLiteral("avatarUrl")] = avatarRef;
     sendJson({{QStringLiteral("topic"), fullTopic()}, {QStringLiteral("event"), QStringLiteral("presence")},
               {QStringLiteral("payload"), QVariantMap{{QStringLiteral("type"), QStringLiteral("presence")},
                                                        {QStringLiteral("event"), QStringLiteral("track")},
@@ -333,12 +368,14 @@ void SupabaseRealtimeChannel::rebuildMembers()
         const QString userId = meta.value(QStringLiteral("userId"), it.key()).toString().trimmed().toLower();
         if (userId.isEmpty() || userId == self) continue;
         const QString name = meta.value(QStringLiteral("name")).toString().trimmed().left(60);
-        const QStringList parts = name.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-        QString initials;
-        for (int i = 0; i < parts.size() && initials.size() < 2; ++i) initials += parts.at(i).left(1).toUpper();
+        const QString field = meta.value(QStringLiteral("field")).toString().trimmed().left(80);
         members << QVariantMap{{QStringLiteral("userId"), userId},
                                {QStringLiteral("name"), name.isEmpty() ? QStringLiteral("Usuario") : name},
-                               {QStringLiteral("initials"), initials.isEmpty() ? QStringLiteral("?") : initials}};
+                               {QStringLiteral("initials"), PresenceIdentity::initialsFor(name)},
+                               {QStringLiteral("color"), PresenceIdentity::colorFor(userId)},
+                               {QStringLiteral("field"), field},
+                               {QStringLiteral("avatarSource"), PresenceAvatarCache::instance()->source(
+                                    meta.value(QStringLiteral("avatarUrl")).toString())}};
     }
     if (members == m_members) return;
     m_members = members;

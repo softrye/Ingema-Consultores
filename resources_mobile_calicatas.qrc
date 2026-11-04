@@ -404,4 +404,10 @@
         <file alias="ui/v2/nav_ficha/ic_nav_open_map_gps.svg">qml/Mobile/assets_ui_v2/icons/nav_ficha/ic_nav_open_map_gps.svg</file>
         <file alias="ui/v2/nav_ficha/ic_nav_previous.svg">qml/Mobile/assets_ui_v2/icons/nav_ficha/ic_nav_previous.svg</file>
     </qresource>
+    <!-- Plantillas reales de exportación: resources.qrc pertenece SOLO al target Desktop.
+         El APK usa este QRC y necesita la misma ruta :/templates/... que C++. -->
+    <qresource prefix="/templates">
+        <file alias="Calicata_Formato.xlsx">Templates/Calicata_Formato.xlsx</file>
+        <file alias="Calicata_Formato_Paginado.xlsx">Templates/Calicata_Formato_Paginado.xlsx</file>
+    </qresource>
 </RCC>

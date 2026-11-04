@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import "RStyle.js" as S
+import ".." as Mobile                          // GlassSurface: Liquid Glass oficial
 
 // Selector táctil: opciones [{value, label, detail}] en una hoja modal.
 Column {
@@ -130,7 +131,18 @@ Column {
         x: parent ? (parent.width - width) / 2 : 0
         y: parent ? (parent.height - height) / 2 : 0
         padding: 0
-        background: Rectangle { radius: 18 * select.ui.u; color: S.popup; border.width: 1; border.color: S.border }
+        background: Rectangle {
+            radius: 18 * select.ui.u; color: (select.ui.liquidGlass !== false && !!select.ui.liquidGlassMaterial && !!select.ui.cardGlassUi) ? "transparent" : S.popup
+            border.width: (select.ui.liquidGlass !== false && !!select.ui.liquidGlassMaterial && !!select.ui.cardGlassUi) ? 0 : 1; border.color: S.border
+            Mobile.GlassSurface {                // Liquid Glass oficial (preset único del Dock)
+                visible: select.ui.liquidGlass !== false && !!select.ui.liquidGlassMaterial && !!select.ui.cardGlassUi && (textureReady || fallbackOn)
+                ui: select.ui.cardGlassUi || null
+                material: select.ui.liquidGlassMaterial || null
+                tint: select.ui.dockGlassTint                  // oscuro igual que claro y el Dock: sin tinte negro
+                radius: radius
+                margin: 10 * select.ui.u
+            }
+        }
         Text {
             x: 18 * select.ui.u
             y: 16 * select.ui.u

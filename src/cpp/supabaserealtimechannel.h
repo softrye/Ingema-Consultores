@@ -21,6 +21,7 @@ class SupabaseRealtimeChannel : public QObject
     Q_PROPERTY(QString topic READ topic WRITE setTopic NOTIFY topicChanged)          // p. ej. "rendition:<uuid>"; "" = apagado
     Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)          // false en segundo plano
     Q_PROPERTY(QVariantMap trackMeta READ trackMeta WRITE setTrackMeta NOTIFY trackMetaChanged)
+    Q_PROPERTY(int fieldSettleMs READ fieldSettleMs WRITE setFieldSettleMs NOTIFY fieldSettleMsChanged)
     Q_PROPERTY(QVariantList members READ members NOTIFY membersChanged)               // otras personas (sin mí)
     Q_PROPERTY(QString state READ state NOTIFY stateChanged)                          // OFF | CONNECTING | JOINED | RECONNECTING | UNAVAILABLE
 public:
@@ -33,15 +34,21 @@ public:
     void setActive(bool active);
     QVariantMap trackMeta() const { return m_trackMeta; }
     void setTrackMeta(const QVariantMap &meta);
+    int fieldSettleMs() const { return m_fieldSettle.interval(); }
+    void setFieldSettleMs(int ms);
     QVariantList members() const { return m_members; }
     QString state() const { return m_state; }
 
     Q_INVOKABLE void broadcast(const QString &event, const QVariantMap &payload = {});
+    // Campo o sector en foco ("" = solo viendo). Se publica en la meta como
+    // `field` (≤ 80, como la Web) tras 180 ms sin cambios (PRESENCE_FIELD_SETTLE_MS).
+    Q_INVOKABLE void setField(const QString &field);
 
 signals:
     void topicChanged();
     void activeChanged();
     void trackMetaChanged();
+    void fieldSettleMsChanged();
     void membersChanged();
     void stateChanged();
     void broadcastReceived(const QString &event, const QVariantMap &payload);
@@ -79,4 +86,6 @@ private:
     QTimer m_heartbeat;
     QTimer m_retry;
     QVariantMap m_presence;
+    QString m_field;
+    QTimer m_fieldSettle;
 };

@@ -1,0 +1,40 @@
+{
+  "project_id": "11111111-1111-4111-8111-000000000001",
+  "observed": "2026-11-04",
+  "read_only": true,
+  "cases": [
+    {
+      "label": "synthetic-calicata-01",
+      "read_only": "on",
+      "rpc_response": {
+        "name": "CALICATA_QA_01.calicata",
+        "space_id": "11111111-1111-4111-8111-000000000002",
+        "lifecycle": "ACTIVE",
+        "target_id": "11111111-1111-4111-8111-000000000003",
+        "project_id": "11111111-1111-4111-8111-000000000001",
+        "result_code": "IDEMPOTENT_REPLAY",
+        "target_type": "CALICATA",
+        "node_version": 1,
+        "parent_node_id": "11111111-1111-4111-8111-000000000004",
+        "document_node_id": "11111111-1111-4111-8111-000000000005"
+      }
+    },
+    {
+      "label": "synthetic-calicata-02",
+      "read_only": "on",
+      "rpc_response": {
+        "name": "CALICATA_QA_02.calicata",
+        "space_id": "11111111-1111-4111-8111-000000000002",
+        "lifecycle": "ACTIVE",
+        "target_id": "11111111-1111-4111-8111-000000000006",
+        "project_id": "11111111-1111-4111-8111-000000000001",
+        "result_code": "IDEMPOTENT_REPLAY",
+        "target_type": "CALICATA",
+        "node_version": 1,
+        "parent_node_id": null,
+        "document_node_id": "11111111-1111-4111-8111-000000000007"
+      }
+    }
+  ],
+  "synthetic_fixture": true
+}

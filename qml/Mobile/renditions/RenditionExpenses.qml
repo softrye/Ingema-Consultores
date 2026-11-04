@@ -499,18 +499,24 @@ Item {
                 objectName: "expenseEditorBackdrop"
                 width: tab.app ? tab.app.width : 0
                 height: tab.app ? tab.app.height : 0
-                sourceItem: editorPopup.visible ? tab.app : null
+                // Keep the captured producer alive when the retained popup
+                // closes; only schedule a fresh capture on its next opening.
+                sourceItem: tab.app
                 live: false
                 hideSource: false
                 visible: false
                 smooth: true
             }
+            Connections {
+                target: editorPopup
+                function onOpened() { editorBackdrop.scheduleUpdate() }
+            }
             MultiEffect {
                 readonly property point origin: tab.app ? tab.app.mapToItem(null, 0, 0) : Qt.point(0, 0)
                 x: origin.x; y: origin.y
                 width: tab.app ? tab.app.width : 0; height: tab.app ? tab.app.height : 0
-                visible: editorBackdrop.sourceItem !== null
-                source: visible ? editorBackdrop : null
+                visible: editorPopup.visible && editorBackdrop.sourceItem !== null
+                source: editorBackdrop
                 autoPaddingEnabled: false
                 blurEnabled: true; blurMax: 48; blur: 0.8
                 saturation: -0.1
@@ -1195,6 +1201,8 @@ Item {
                         readonly property bool expanded: tab.expandedId === String(modelData.localId)
                         clickable: !expanded
                         onActivated: tab.expand(modelData)
+                        presenceMembers: tab.app.livePeers || []
+                        presenceFieldKey: tab.app.expensePresenceField(modelData.localId)
                         Row {
                             id: expenseLine
                             width: parent.width

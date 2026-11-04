@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.ConfigurationInfo;
 import android.content.pm.PackageManager;
@@ -47,7 +48,13 @@ public final class InGePerformanceRuntime {
         HOME, IDLE_GLASS, CALICATAS, RENDICIONES, DOCUMENTOS
     }
 
-    private enum OverrideMode { AUTO, FORCE_CONSERVATIVE, FORCE_BALANCED, FORCE_MAX }
+    // FORCE_LOW / FORCE_MAX: selector «Calidad gráfica» (Baja / Alta) de Configuración.
+    private enum OverrideMode { AUTO, FORCE_CONSERVATIVE, FORCE_LOW, FORCE_BALANCED, FORCE_MAX }
+    private static final String PREFS = "inge_performance";
+    private static final String PREF_OVERRIDE = "quality_override";
+    // Elección literal del selector (AUTO | LOW | HIGH | VERY_HIGH | EXTREME). VERY_HIGH y
+    // EXTREME usan el tier HIGH; la fidelidad extra la deriva GraphicsCore.
+    private static final String PREF_CHOICE = "quality_choice";
 
     public static final class Capabilities {
         public final int sdk;
@@ -119,9 +126,11 @@ public final class InGePerformanceRuntime {
     private static volatile InGePerformanceRuntime instance;
 
     private final Capabilities capabilities;
-    private final OverrideMode overrideMode;
-    // Hardware only (RAM, cores, pixels, performance class). Never changes.
-    private final DeviceTier baseTier;
+    private volatile OverrideMode overrideMode;
+    private volatile String userChoice = "AUTO";
+    // Hardware only (RAM, cores, pixels, performance class) plus the user's
+    // quality override; changes only when that override changes.
+    private volatile DeviceTier baseTier;
     // Hardware plus the live battery saver and thermal state. Earth, the
     // refresh budget and the QML automatic profile all read this one value.
     private volatile DeviceTier deviceTier;
@@ -149,6 +158,11 @@ public final class InGePerformanceRuntime {
     private InGePerformanceRuntime(Window window, OverrideMode overrideMode) {
         appContext = window.getContext().getApplicationContext();
         this.overrideMode = overrideMode;
+        final String savedChoice = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(PREF_CHOICE, null);
+        userChoice = overrideMode == OverrideMode.FORCE_MAX && savedChoice != null
+                && (savedChoice.equals("VERY_HIGH") || savedChoice.equals("EXTREME"))
+                ? savedChoice : userOverrideName(overrideMode);
         capabilities = detect(window);
         livePowerSave = capabilities.powerSaveMode;
         liveThermal = capabilities.thermalStatus;
@@ -191,7 +205,7 @@ public final class InGePerformanceRuntime {
             synchronized (InGePerformanceRuntime.class) {
                 value = instance;
                 if (value == null) {
-                    value = new InGePerformanceRuntime(window, readDebugOverride(window));
+                    value = new InGePerformanceRuntime(window, readOverride(window));
                     instance = value;
                 }
             }
@@ -202,6 +216,32 @@ public final class InGePerformanceRuntime {
 
     public static InGePerformanceRuntime get() {
         return instance;
+    }
+
+    // Selector «Calidad gráfica» (AUTO | LOW | HIGH | VERY_HIGH | EXTREME): se guarda y
+    // se aplica en vivo. Automática nunca elige VERY_HIGH ni EXTREME.
+    public static void setUserOverride(String value) {
+        final InGePerformanceRuntime runtime = instance;
+        if (runtime == null) return;
+        final String choice = "LOW".equals(value) || "HIGH".equals(value)
+                || "VERY_HIGH".equals(value) || "EXTREME".equals(value) ? value : "AUTO";
+        final OverrideMode mode = "LOW".equals(choice) ? OverrideMode.FORCE_LOW
+                : "AUTO".equals(choice) ? OverrideMode.AUTO : OverrideMode.FORCE_MAX;
+        runtime.appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putString(PREF_OVERRIDE, mode.name()).putString(PREF_CHOICE, choice).apply();
+        runtime.mainHandler.post(() -> {
+            final boolean sameMode = runtime.overrideMode == mode;
+            if (sameMode && choice.equals(runtime.userChoice)) return;
+            runtime.userChoice = choice;
+            if (sameMode) { runtime.publish(); return; }     // HIGH <-> VERY_HIGH <-> EXTREME
+            runtime.overrideMode = mode;
+            runtime.baseTier = classifyTier(runtime.capabilities, mode, false, -1);
+            runtime.refreshLiveConditions("override");
+        });
+    }
+
+    private static String userOverrideName(OverrideMode mode) {
+        return mode == OverrideMode.FORCE_MAX ? "HIGH" : mode == OverrideMode.FORCE_LOW ? "LOW" : "AUTO";
     }
 
     public Capabilities capabilities() { return capabilities; }
@@ -220,6 +260,7 @@ public final class InGePerformanceRuntime {
         try {
             state.put("tier", runtime.deviceTier.name());
             state.put("baseTier", runtime.baseTier.name());
+            state.put("override", runtime.userChoice);
             state.put("lowRam", runtime.capabilities.lowRamDevice);
             state.put("totalMemoryMb",
                     runtime.capabilities.totalMemoryBytes / (1024L * 1024L));
@@ -434,27 +475,39 @@ public final class InGePerformanceRuntime {
                                              OverrideMode overrideMode,
                                              boolean powerSaveMode,
                                              int thermalStatus) {
+        // Root cause of high-end devices classified LOW (2026-11-02): the old
+        // score truncated RAM to whole GiB, penalised high-resolution panels and
+        // few logical cores, and only reached HIGH with a media performance
+        // class (0 on most flagships and every emulator). A foldable or an
+        // emulator with 8+ GB therefore scored like a budget phone. RAM is now
+        // the main signal (fractional GiB) and the panel/core penalties apply
+        // only below 7 GiB. The hard 4 GiB floor keeps 4 GB phones (3.7 GiB
+        // reported, e.g. Mali-G52 class) in LOW.
         double score = 0.0;
-        final long memoryGiB = c.totalMemoryBytes / (1024L * 1024L * 1024L);
+        final double ramGiB = c.totalMemoryBytes / (1024.0 * 1024.0 * 1024.0);
+        final boolean largeRam = ramGiB >= 7.0;                   // 8 GB nominal and up
         if (c.lowRamDevice) score -= 3.0;
-        if (memoryGiB >= 6) score += 2.0;
-        else if (memoryGiB >= 4) score += 1.0;
-        else if (memoryGiB <= 3) score -= 1.0;
-        if (c.memoryClassMb >= 384) score += 2.0;
-        else if (c.memoryClassMb >= 256) score += 1.0;
+        if (ramGiB >= 11.0) score += 4.0;
+        else if (largeRam) score += 3.5;
+        else if (ramGiB >= 5.0) score += 2.0;
+        else if (ramGiB >= 3.5) score += 1.0;
+        else score -= 1.0;
+        if (c.memoryClassMb >= 384) score += 1.0;
+        else if (c.memoryClassMb >= 192) score += 0.5;
         else if (c.memoryClassMb <= 128) score -= 2.0;
         if (c.logicalCores >= 8) score += 1.0;
-        else if (c.logicalCores <= 4) score -= 1.0;
-        if (c.pixelCount > 4_000_000L) score -= 1.0;
-        else if (c.pixelCount > 2_500_000L) score -= 0.5;
+        else if (c.logicalCores <= 4 && !largeRam) score -= 1.0;
+        if (!largeRam && c.pixelCount > 4_000_000L) score -= 1.0;
+        else if (!largeRam && c.pixelCount > 2_500_000L) score -= 0.5;
         if (c.mediaPerformanceClass >= Build.VERSION_CODES.TIRAMISU) score += 2.0;
         else if (c.mediaPerformanceClass >= Build.VERSION_CODES.R) score += 1.0;
         if (powerSaveMode) score -= 2.0;
         if (thermalStatus >= PowerManager.THERMAL_STATUS_MODERATE) score -= 2.0;
 
         if (overrideMode == OverrideMode.FORCE_CONSERVATIVE) score = -4.0;
+        else if (overrideMode == OverrideMode.FORCE_LOW) return DeviceTier.LOW;
         else if (overrideMode == OverrideMode.FORCE_BALANCED) score = 0.5;
-        else if (overrideMode == OverrideMode.FORCE_MAX) score = 5.0;
+        else if (overrideMode == OverrideMode.FORCE_MAX) return DeviceTier.HIGH;
 
         if (score <= -3.0 || c.lowRamDevice) return DeviceTier.ULTRA_LOW;
         if (score < 1.5
@@ -505,14 +558,19 @@ public final class InGePerformanceRuntime {
         return chosen > 0.0f ? chosen : Math.max(1.0f, fallback);
     }
 
-    private static OverrideMode readDebugOverride(Window window) {
+    // Debug intent extra first; otherwise the saved «Calidad gráfica» choice.
+    private static OverrideMode readOverride(Window window) {
         final Context context = window.getContext();
         final boolean debuggable = (context.getApplicationInfo().flags
                 & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
-        if (!debuggable || !(context instanceof android.app.Activity))
-            return OverrideMode.AUTO;
-        final String value = ((android.app.Activity) context).getIntent()
-                .getStringExtra("inge.performance.override");
+        String value = debuggable && context instanceof android.app.Activity
+                ? ((android.app.Activity) context).getIntent()
+                        .getStringExtra("inge.performance.override") : null;
+        if (value == null) {
+            final SharedPreferences prefs = context.getApplicationContext()
+                    .getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            value = prefs.getString(PREF_OVERRIDE, null);
+        }
         if (value == null) return OverrideMode.AUTO;
         try {
             return OverrideMode.valueOf(value.trim().toUpperCase(Locale.ROOT));

@@ -341,6 +341,8 @@ Item {
             // Guardar/Deshacer sólo aparecen cuando hay cambios.
             RCard {
                 objectName: "financeFundingCard"
+                presenceFieldKey: "Financiamiento"
+                presenceMembers: tab.app.livePeers || []
                 width: parent.width
                 ui: tab.ui
                 color: S.glass(0.80)
@@ -421,6 +423,8 @@ Item {
             // como icono; en Manual el número es editable.
             RCard {
                 objectName: "financeExchangeCard"
+                presenceFieldKey: "Tipo de cambio"
+                presenceMembers: tab.app.livePeers || []
                 width: parent.width
                 ui: tab.ui
                 color: S.glass(0.80)

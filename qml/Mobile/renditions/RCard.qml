@@ -1,6 +1,8 @@
 import QtQuick
 import "RStyle.js" as S
 import ".." as Mobile
+import "../components" as Components             // PresenceAvatars / FieldPresenceHighlight
+import InGe.CoreFlow 3.0 as CoreFlowModule           // ganchos «Extrema» del motor único
 
 // Tarjeta de vidrio con columna de contenido; tocable si [clickable].
 Rectangle {
@@ -20,32 +22,29 @@ Rectangle {
     radius: 18 * ui.u
     readonly property bool glassOn: !!ui && !!ui.cardGlassUi && !!ui.cardGlassUi.glassTexture
                                     && ui.cardGlassUi.glassReady !== false
+    // Liquid Glass activo: captura lista, o respaldo LOW del material (sin captura).
+    readonly property bool liquidOn: !!ui && ui.liquidGlass !== false && !!ui.liquidGlassMaterial
+                                     && (glassOn || (ui.liquidGlassMaterial.fallback === true && !!ui.cardGlassUi))
     // Fuera de pantalla no se dibuja el vidrio (ahorra pasadas de GPU al desplazar).
     readonly property bool onScreen: {
-        if (!glassOn) return false
-        var tick = ui.cardGlassUi.glassTick
+        if (!liquidOn) return false
+        var tick = ui.cardGlassUi ? ui.cardGlassUi.glassTick : 0
         var p = mapToItem(null, 0, 0)
         return p.y + height > -20 && p.y < (Window.height > 0 ? Window.height : 2400) + 20
     }
-    color: glassOn ? (tap.pressed ? Qt.rgba(1, 1, 1, 0.06) : "transparent") : (tap.pressed ? S.surfaceStrong : S.surface)
-    border.width: glassOn ? 0 : 1
+    color: liquidOn ? (tap.pressed ? Qt.rgba(1, 1, 1, 0.06) : "transparent") : (tap.pressed ? S.surfaceStrong : S.surface)
+    border.width: liquidOn ? 0 : 1
     border.color: S.border
-    Mobile.GlassSurface {                             // Liquid Glass real (material del Dock), claro y oscuro
+    Mobile.GlassSurface {                             // Liquid Glass oficial (preset único del Dock)
         ui: card.glassOn ? card.ui.cardGlassUi : null
+        material: card.liquidOn ? card.ui.liquidGlassMaterial : null
+        tint: card.ui.dockGlassTint                  // oscuro igual que claro y el Dock: sin tinte negro
         visible: card.onScreen
         radius: card.radius
         margin: 10 * card.ui.u
-        tint: S.dark ? Qt.rgba(10 / 255, 14 / 255, 24 / 255, 0.42) : Qt.rgba(1, 1, 1, 0.78)
-        refraction: S.dark ? card.ui.dockGlassRefraction : 0          // claro: sin lente oscura
-        specular: S.dark ? 0.75 : 0.45                                   // oscuro: filo claro como iOS
-        bevel: card.ui.dockGlassBevel
-        contrast: card.ui.dockGlassContrast
-        frost: S.dark ? card.ui.dockGlassFrost : 7 * card.ui.u           // esmerilado blanco intenso
-        edge: S.dark ? Qt.rgba(1, 1, 1, 0.38) : Qt.rgba(1, 1, 1, 0.95)
-        shadowAlpha: S.dark ? card.ui.dockGlassShadowAlpha : 0.10
     }
     Rectangle {                                       // brillo superior del vidrio oscuro
-        visible: S.dark && !card.glassOn
+        visible: S.dark && !card.liquidOn
         anchors.fill: parent; anchors.margins: 1; radius: parent.radius - 1
         gradient: Gradient {
             GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.10) }
@@ -68,5 +67,30 @@ Rectangle {
         enabled: card.clickable
         z: -1
         onClicked: card.activated()
+    }
+    // «Extrema»: escala y realce del vidrio al pulsar (sólo tarjetas tocables).
+    readonly property bool extremePress: card.clickable && CoreFlowModule.InGeCoreFlow.extremeMotion === true
+    scale: extremePress && tap.pressed ? CoreFlowModule.InGeCoreFlow.pressScale : 1
+    Behavior on scale { enabled: card.extremePress; NumberAnimation { duration: 110; easing.type: Easing.OutQuad } }
+    Rectangle {
+        anchors.fill: parent; radius: card.radius; z: 2
+        visible: card.extremePress && tap.pressed
+        color: Qt.rgba(1, 1, 1, CoreFlowModule.InGeCoreFlow.pressHighlight)
+    }
+    // Presencia en vivo: la tarjeta se ilumina con el color y el nombre de quien
+    // edita su sector (`presenceFieldKey` = el `field` que publica ese editor).
+    property var presenceMembers: []
+    property string presenceFieldKey: ""
+    // El foco de un TextField anidado sube hasta la tarjeta; se publica el
+    // mismo identificador que usa el halo. No convierte una simple lectura en edición.
+    readonly property string presenceField: presenceFieldKey
+    Components.FieldPresenceHighlight {
+        anchors.fill: parent
+        members: card.presenceMembers
+        field: card.presenceFieldKey
+        radius: card.radius
+        u: card.ui ? card.ui.u : 1
+        fontFamily: card.ui ? card.ui.fontFamily : ""
+        reducedMotion: !!card.ui && card.ui.reducedMotion === true
     }
 }

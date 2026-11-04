@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import "RStyle.js" as S
 
 // Estado, presentación, versiones inmutables, observaciones y acciones de
@@ -46,8 +45,7 @@ Item {
     // Deslizar hacia abajo actualiza (mismo gesto que Gastos).
     readonly property real pull: Math.max(0, reviewFlick.originY - reviewFlick.contentY)
     readonly property string status: S.text_(current, "status").toUpperCase()
-    readonly property int stepIndex: status.indexOf("APROB") >= 0 ? 3 : status.indexOf("OBSERV") >= 0 ? 2
-                                   : status.indexOf("REVIS") >= 0 || status.indexOf("PRESENT") >= 0 ? 1 : 0
+    readonly property int stepIndex: Math.max(0, S.reviewStateIndex(status))
     readonly property string statusLabel: {
         // Etiqueta única del controlador (con tildes: «En revisión»).
         var t = app.ctl ? app.ctl.statusLabel(status.length ? status : "BORRADOR") : (status || "Borrador")
@@ -115,21 +113,38 @@ Item {
                         onActivated: tab.refresh()
                     }
                 }
-                Row {
-                    id: steps
-                    width: parent.width; spacing: 4 * tab.ui.u
+                Column {                                  // línea de tiempo completa de estados (Web)
+                    objectName: "reviewTimeline"
+                    width: parent.width
                     Repeater {
-                        model: ["Borrador", "En revisión", "Observada", "Aprobada"]
-                        delegate: Column {
+                        model: S.reviewStates
+                        delegate: Item {
                             id: step
                             required property string modelData
                             required property int index
-                            width: (steps.width - 3 * steps.spacing) / 4; spacing: 6 * tab.ui.u
-                            Rectangle { width: step.width; height: 6 * tab.ui.u; radius: height / 2
-                                        color: step.index <= tab.stepIndex && !(step.index === 2 && tab.stepIndex === 3) ? S.accent : S.ink(0.10)
-                                        Behavior on color { ColorAnimation { duration: 300 } } }
-                            Text { width: step.width; text: step.modelData; elide: Text.ElideRight; color: S.text
-                                   font.family: tab.ui.fontFamily; font.pixelSize: 11.5 * tab.ui.u; font.weight: Font.DemiBold }
+                            readonly property bool now: index === tab.stepIndex
+                            readonly property bool done: index < tab.stepIndex
+                            readonly property color tone: now || done ? S.statusColor(modelData) : S.ink(0.18)
+                            width: parent.width; height: 30 * tab.ui.u
+                            Rectangle {                       // tramo vertical hacia el siguiente estado
+                                visible: step.index < S.reviewStates.length - 1
+                                x: 9 * tab.ui.u; y: parent.height / 2; width: 2 * tab.ui.u; height: parent.height
+                                color: step.done ? S.statusColor(step.modelData) : S.ink(0.10)
+                            }
+                            Rectangle {
+                                x: (step.now ? 2 : 4) * tab.ui.u; anchors.verticalCenter: parent.verticalCenter
+                                width: (step.now ? 16 : 12) * tab.ui.u; height: width; radius: width / 2
+                                color: step.now || step.done ? step.tone : "transparent"
+                                border.width: step.now || step.done ? 0 : 2 * tab.ui.u; border.color: step.tone
+                            }
+                            Text {
+                                x: 28 * tab.ui.u; anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width - x; elide: Text.ElideRight
+                                text: tab.ctl.statusLabel(step.modelData) + (step.now ? " · actual" : "")
+                                color: step.now ? S.text : step.done ? S.muted : S.faint
+                                font.family: tab.ui.fontFamily; font.pixelSize: 13 * tab.ui.u
+                                font.weight: step.now ? Font.Bold : Font.Normal
+                            }
                         }
                     }
                 }
@@ -155,6 +170,7 @@ Item {
                 width: parent.width
                 app: tab.app
                 remoteId: tab.remoteId
+                versionId: String(tab.current.currentVersionId || "")
                 active: tab.visible
             }
 
