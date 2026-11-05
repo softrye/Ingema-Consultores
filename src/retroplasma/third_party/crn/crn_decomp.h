@@ -2053,7 +2053,7 @@ namespace crnd
 
       crnd_output_debug_string(buf);
 
-      printf(buf);
+      printf("%s", buf);
 
       if (crnd_is_debugger_present())
          crnd_debug_break();
