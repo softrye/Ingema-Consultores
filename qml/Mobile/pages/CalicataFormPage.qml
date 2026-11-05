@@ -1545,6 +1545,7 @@ Item {
     }
 
     function handleBack() {
+        if (prfColorPopup.visible) { prfColorPopup.finish(); return true }
         // Back Android solo cierra superficies/modales temporales. No recorre
         // General/Ubicación/Perfil/Laboratorio/Fotos/Revisión.
         if (ubicacionMap.handleBack()) return true   // mapa de Ubicación (Hero inverso)
@@ -6280,6 +6281,209 @@ Item {
     }
 
 
+    // Web CalicataLiveColor: presets + HSV canvas + hue + canonical HEX.
+    GenPopup {
+        id: prfColorPopup
+        closePolicy: Popup.NoAutoClose
+        preferredWidth: root.dp(420)
+        preferredHeight: root.dp(560)
+        property string localKey: ""
+        property string remoteKey: ""
+        property string chosen: ""
+        property real hue: 0
+        property real saturation: 0
+        property real brightness: 0
+        property bool closing: false
+        property bool colorEdited: false
+        function targetIndex() {
+            for (var i=0; i<cortesModel.count; ++i) {
+                var row=root.corteToPlainObject(cortesModel.get(i))
+                if ((localKey.length && String(row.local_stratum_id || "")===localKey)
+                    || (remoteKey.length && String(row.remote_stratum_id || "")===remoteKey)) return i
+            }
+            return -1
+        }
+        function openFor(index) {
+            if (index<0 || index>=cortesModel.count || !root.commitPendingField()) return
+            var row=root.corteToPlainObject(cortesModel.get(index))
+            localKey=String(row.local_stratum_id || ""); remoteKey=String(row.remote_stratum_id || "")
+            if (!localKey.length && !remoteKey.length) { root.showInfo("Color", "No se pudo identificar el estrato para editar su color."); return }
+            chooseHex(Rules.stratumColorValue(row),false)
+            closing=false; colorEdited=false
+            open()
+        }
+        function chooseHex(text, save) {
+            var normalized=Rules.normalizeCalicataColor(text)
+            if (String(text).trim().length && !normalized.length) return false
+            chosen=normalized
+            var hsv=Rules.calicataHexToHsv(chosen || Rules.CALICATA_STRATUM_FALLBACK_COLOR)
+            hue=hsv.hue; saturation=hsv.saturation; brightness=hsv.value
+            colorEdited=save
+            colorHexField.editPending=false; colorHexField.validationError=""; colorHexField.text=chosen
+            return !save || persist()
+        }
+        function selectHsv(h,s,v) {
+            hue=((h%360)+360)%360; saturation=Math.max(0,Math.min(1,s)); brightness=Math.max(0,Math.min(1,v))
+            chosen=Rules.calicataHsvToHex({hue:hue,saturation:saturation,value:brightness})
+            colorEdited=true
+            colorHexField.editPending=false; colorHexField.validationError=""; colorHexField.text=chosen
+        }
+        function persist() {
+            if (closing || root._loading || root._documentClosing) return false
+            if (!colorEdited) return true
+            var index=targetIndex()
+            if (index<0) { closing=true; close(); return false }
+            var row=root.corteToPlainObject(cortesModel.get(index))
+            if (Rules.stratumColorValue(row)===chosen) { colorEdited=false; return true }
+            var saved=root.setStratumColor(index,chosen)
+            if (saved) colorEdited=false
+            return saved
+        }
+        function finish() {
+            if (!root.commitPendingField() || !persist()) return
+            closing=true
+            close()
+        }
+        function canvasPick(x,y) {
+            selectHsv(hue,x/Math.max(1,colorCanvas.width),1-y/Math.max(1,colorCanvas.height))
+        }
+        onAboutToHide: {
+            // A valid HEX edit is committed before closing, through BoundTextField.
+            root.commitPendingField()
+            persist()
+            closing=true
+        }
+        contentItem: ColumnLayout {
+            spacing: root.dp(10)
+            GenDialogHeader { title: "Color del estrato"; subtitle: "Presets o selección manual"; onCloseRequested: prfColorPopup.finish() }
+            Flickable {
+                Layout.fillWidth: true; Layout.fillHeight: true
+                contentWidth: width; contentHeight: colorPickerContent.implicitHeight
+                clip: true; boundsBehavior: Flickable.StopAtBounds
+                ColumnLayout {
+                    id: colorPickerContent
+                    Keys.onEscapePressed: function(event) { prfColorPopup.finish(); event.accepted=true }
+                    width: parent.width
+                    spacing: root.dp(12)
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: root.dp(8)
+                        Repeater {
+                            model: root.prfColorPresets
+                            delegate: Rectangle {
+                                required property var modelData
+                                width: root.dp(40); height: root.dp(40); radius: root.dp(10)
+                                color: modelData.value
+                                border.width: prfColorPopup.chosen===modelData.value ? 3 : 1
+                                border.color: prfColorPopup.chosen===modelData.value ? root.cGenBlue : root.cBorder
+                                Accessible.role: Accessible.Button
+                                Accessible.name: modelData.label+" "+modelData.value
+                                MouseArea { anchors.fill: parent; onClicked: prfColorPopup.chooseHex(parent.modelData.value,true) }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        id: colorCanvas
+                        Layout.fillWidth: true
+                        implicitHeight: root.dp(160)
+                        color: Qt.hsva(prfColorPopup.hue/360,1,1,1)
+                        clip: true
+                        activeFocusOnTab: true
+                        Accessible.role: Accessible.Slider
+                        Accessible.name: "Saturación y brillo del color"
+                        Accessible.description: "Usa las flechas para ajustar saturación y brillo."
+                        Rectangle {
+                            anchors.fill: parent
+                            gradient: Gradient { orientation: Gradient.Horizontal
+                                GradientStop { position: 0; color: "#FFFFFF" }
+                                GradientStop { position: 1; color: "#00FFFFFF" }
+                            }
+                        }
+                        Rectangle {
+                            anchors.fill: parent
+                            gradient: Gradient {
+                                GradientStop { position: 0; color: "#00000000" }
+                                GradientStop { position: 1; color: "#FF000000" }
+                            }
+                        }
+                        Rectangle {
+                            width: root.dp(14); height: width; radius: width/2
+                            x: prfColorPopup.saturation*parent.width-width/2
+                            y: (1-prfColorPopup.brightness)*parent.height-height/2
+                            color: "transparent"; border.color: "white"; border.width: 2
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            preventStealing: true
+                            onPressed: function(mouse) { colorCanvas.forceActiveFocus(); prfColorPopup.canvasPick(mouse.x,mouse.y) }
+                            onPositionChanged: function(mouse) { if (pressed) prfColorPopup.canvasPick(mouse.x,mouse.y) }
+                            onReleased: prfColorPopup.persist()
+                        }
+                        Keys.onPressed: function(event) {
+                            var step=(event.modifiers & Qt.ShiftModifier)?0.1:0.025
+                            var ds=event.key===Qt.Key_Left?-step:event.key===Qt.Key_Right?step:0
+                            var dv=event.key===Qt.Key_Down?-step:event.key===Qt.Key_Up?step:0
+                            if (!ds && !dv) return
+                            prfColorPopup.selectHsv(prfColorPopup.hue,prfColorPopup.saturation+ds,prfColorPopup.brightness+dv)
+                            prfColorPopup.persist(); event.accepted=true
+                        }
+                    }
+                    Text { text: "Matiz"; color: root.cMuted; font.pixelSize: root.fsLabel }
+                    Slider {
+                        id: colorHue
+                        Layout.fillWidth: true
+                        from: 0; to: 359
+                        value: prfColorPopup.hue
+                        Accessible.name: "Matiz del color"
+                        onMoved: { prfColorPopup.selectHsv(value,prfColorPopup.saturation,prfColorPopup.brightness); if (!pressed) prfColorPopup.persist() }
+                        onPressedChanged: if (!pressed) prfColorPopup.persist()
+                        background: Rectangle {
+                            x: colorHue.leftPadding; y: colorHue.topPadding+(colorHue.availableHeight-height)/2
+                            width: colorHue.availableWidth; height: root.dp(12); radius: height/2
+                            gradient: Gradient { orientation: Gradient.Horizontal
+                                GradientStop { position: 0; color: "red" }
+                                GradientStop { position: 0.167; color: "yellow" }
+                                GradientStop { position: 0.333; color: "lime" }
+                                GradientStop { position: 0.5; color: "cyan" }
+                                GradientStop { position: 0.667; color: "blue" }
+                                GradientStop { position: 0.833; color: "magenta" }
+                                GradientStop { position: 1; color: "red" }
+                            }
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Rectangle { Layout.preferredWidth: root.dp(38); Layout.preferredHeight: root.dp(38); radius: root.dp(8); color: prfColorPopup.chosen || "transparent"; border.color: root.cBorder }
+                        BoundTextField {
+                            Layout.fillWidth: true
+                            id: colorHexField
+                            modelText: prfColorPopup.chosen
+                            placeholderText: "#RRGGBB"
+                            onCommit: function(t) {
+                                if (String(t).trim().length && !Rules.normalizeCalicataColor(t).length) {
+                                    validationError=Rules.CALICATA_COLOR_FORMAT_ERROR
+                                    return false
+                                }
+                                return prfColorPopup.chooseHex(t,true)
+                            }
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: prfColorPopup.chosen.length ? Rules.colorLabel(prfColorPopup.chosen)+" · "+prfColorPopup.chosen : "Sin color registrado"
+                        wrapMode: Text.WordWrap; color: root.cMuted; font.pixelSize: root.fsLabel
+                    }
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                PrfToolButton { text: "Limpiar"; iconName: "action.delete"; onClicked: prfColorPopup.chooseHex("",true) }
+                Item { Layout.fillWidth: true }
+                PrfToolButton { text: "Listo"; iconName: "action.check"; primaryTone: true; onClicked: prfColorPopup.finish() }
+            }
+        }
+    }
+
     // ===== Perfil: tocar la barra de un estrato = editarlo (todos sus campos) =====
     // Mismo vidrio de los diálogos (GenPopup). Los campos usan los setters ya
     // portados (commitBoundary, setStratumColor, setStratumExtra…).
@@ -6510,21 +6714,8 @@ Item {
                                     swatch: root.stratumColorFor(prfEditorCard.s)
                                     valueText: root.stratumColorText(prfEditorCard.s)
                                     placeholder: "Sin color registrado"
-                                    onActivated: {
-                                        var presets = root.prfColorPresets
-                                        var labels = presets.map(function(c) { return c.label + " · " + c.value })
-                                        var current = Rules.stratumColorValue(prfEditorCard.s), selected = ""
-                                        for (var i = 0; i < presets.length; ++i) if (presets[i].value === current) selected = labels[i]
-                                        var idx = prfEditorCard.idx
-                                        root.prfPick("Color del estrato", labels, selected, "calgen.default",
-                                                     function(v) { root.setStratumColor(idx, v.length ? v.split(" · ")[1] : "") })
-                                    }
-                                }
-                                BoundTextField {
-                                    Layout.fillWidth: true
-                                    placeholderText: "#806F64"
-                                    modelText: Rules.stratumColorValue(prfEditorCard.s)
-                                    onCommit: function(t) { return root.setStratumColor(prfEditorCard.idx, t) }
+                                    Layout.columnSpan: parent.columns
+                                    onActivated: prfColorPopup.openFor(prfEditorCard.idx)
                                 }
                             }
 

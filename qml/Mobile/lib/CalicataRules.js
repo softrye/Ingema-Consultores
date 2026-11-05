@@ -220,6 +220,28 @@ var CALICATA_COLOR_PRESETS = [
     { label: "Rojizo", value: "#A44B3F" }]
 var CALICATA_STRATUM_FALLBACK_COLOR = "#64748B"
 var CALICATA_COLOR_FORMAT_ERROR = "Color debe usar el formato HEX RGB #RRGGBB."
+// Same RGB/HSV conversion as Web CalicataLiveColor / colorCanvas.ts.
+function calicataHexToHsv(hex) {
+    var match = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(String(hex || ""))
+    if (!match) return { hue: 0, saturation: 0, value: 0 }
+    var red=parseInt(match[1],16)/255, green=parseInt(match[2],16)/255, blue=parseInt(match[3],16)/255
+    var maximum=Math.max(red,green,blue), minimum=Math.min(red,green,blue), delta=maximum-minimum, hue=0
+    if (delta !== 0) {
+        if (maximum === red) hue=((green-blue)/delta)%6
+        else if (maximum === green) hue=(blue-red)/delta+2
+        else hue=(red-green)/delta+4
+        hue=(hue*60+360)%360
+    }
+    return { hue:hue, saturation:maximum===0?0:delta/maximum, value:maximum }
+}
+function calicataHsvToHex(hsv) {
+    var h=((hsv.hue%360)+360)%360, saturation=Math.min(1,Math.max(0,hsv.saturation)), value=Math.min(1,Math.max(0,hsv.value))
+    var chroma=value*saturation, secondary=chroma*(1-Math.abs((h/60)%2-1)), base=value-chroma
+    var channels=[[chroma,secondary,0],[secondary,chroma,0],[0,chroma,secondary],[0,secondary,chroma],
+                  [secondary,0,chroma],[chroma,0,secondary]][Math.floor(h/60)]
+    return "#"+channels.map(function(channel) { var hex=Math.round((channel+base)*255).toString(16); return hex.length<2?"0"+hex:hex }).join("").toUpperCase()
+}
+
 function normalizeCalicataColor(value) {
     var normalized = String(value === undefined || value === null ? "" : value).trim().toUpperCase()
     return /^#[0-9A-F]{6}$/.test(normalized) ? normalized : ""
