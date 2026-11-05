@@ -188,20 +188,38 @@ QVariantMap canonicalHeader(QVariantMap header) {
     if (!header.contains(QStringLiteral("projectCode")))
         header[QStringLiteral("projectCode")] = header.value(QStringLiteral("project_code"));
 
+    // El alias histórico se copia antes de cualquier normalización; los
+    // valores crudos quedan recuperables aunque cambie su representación UI.
+    if (!header.contains(QStringLiteral("water_table_depth_legacy_original"))) {
+        const QVariant legacyDepth = header.value(QStringLiteral("water_table_depth"),
+                                                   header.value(QStringLiteral("waterTableDepth")));
+        if (legacyDepth.isValid() && !legacyDepth.isNull()
+                && !legacyDepth.toString().trimmed().isEmpty())
+            header[QStringLiteral("water_table_depth_legacy_original")] = legacyDepth;
+    }
     if (!header.contains(QStringLiteral("water_table_status"))) {
+        // Al leer un documento Web, groundwater_depth_m puede ser el ÚNICO
+        // campo: preservar ese dato incluso si no hay flag Android legacy.
+        const QVariant storedDepth = header.value(QStringLiteral("groundwater_depth_m"),
+                                                  header.value(QStringLiteral("water_table_depth")));
+        bool validStoredDepth = false;
+        const double depth = storedDepth.toDouble(&validStoredDepth);
+        const bool foundDepth = storedDepth.isValid() && !storedDepth.isNull()
+            && validStoredDepth && qIsFinite(depth) && depth >= 0.0;
         const auto water = header.value(QStringLiteral("water_table_present"),
                                         header.value(QStringLiteral("waterTablePresent")));
         const auto text = water.toString().trimmed().toUpper();
-        header[QStringLiteral("water_table_status")] = text == QLatin1String("TRUE") || text == QLatin1String("1") || text == QLatin1String("ENCONTRADO")
+        header[QStringLiteral("water_table_status")] = foundDepth
+            ? QStringLiteral("ENCONTRADO")
+            : text == QLatin1String("TRUE") || text == QLatin1String("1") || text == QLatin1String("ENCONTRADO")
             ? QStringLiteral("ENCONTRADO") : text == QLatin1String("FALSE") || text == QLatin1String("0") || text == QLatin1String("NO_ENCONTRADO")
             ? QStringLiteral("NO_ENCONTRADO") : QStringLiteral("NO_EVALUADO");
     }
     header[QStringLiteral("water_table_present")] =
         header.value(QStringLiteral("water_table_status")) == QLatin1String("ENCONTRADO");
-    if (header.value(QStringLiteral("water_table_status")).toString() != QLatin1String("ENCONTRADO")) {
-        header[QStringLiteral("groundwater_depth_m")] = QVariant();
-        header[QStringLiteral("water_table_depth")] = QVariant();
-    }
+    // No descartar valores originales por una bandera histórica contradictoria.
+    // El estado explícito sigue controlando si se envía NULL al servidor; solo
+    // la edición del ingeniero puede limpiar el valor guardado localmente.
 
     if (header.contains(QStringLiteral("project_full_name")))
         header.insert(QStringLiteral("excel_title"), header.value(QStringLiteral("project_full_name")));

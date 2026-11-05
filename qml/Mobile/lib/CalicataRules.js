@@ -1,13 +1,74 @@
 .pragma library
 
-// An unedited sample uses its stratum interval. A manual subinterval remains explicit.
+// Web source of truth: projectCalicataStrataService.ts (04/11/2026).
+// Labels are presentation only; Supabase stores the exact uppercase slugs.
+var WEB_MOISTURE_CODES = ["SECO", "BAJO", "MEDIO", "AGUA"]
+var WEB_CONSISTENCY_CODES = ["SUELTO", "MEDIANAMENTE_DENSO", "RIGIDO", "MUY_RIGIDO"]
+var WEB_EXCAVABILITY_CODES = ["RENDIMIENTO_BAJO", "RENDIMIENTO_MEDIO",
+                              "RENDIMIENTO_ALTO", "RENDIMIENTO_MUY_ALTO"]
+function _webCode(value, codes, aliases) {
+    if (value === undefined || value === null || value === "") return ""
+    var number = Number(value)
+    if ((typeof value === "number" || /^\d+$/.test(String(value).trim()))
+            && isFinite(number) && Math.floor(number) === number)
+        return number >= 0 && number < codes.length ? codes[number] : ""
+    var text = String(value).trim().toUpperCase()
+        .replace(/[ÁÀÄ]/g, "A").replace(/[ÉÈË]/g, "E")
+        .replace(/[ÍÌÏ]/g, "I").replace(/[ÓÒÖ]/g, "O")
+        .replace(/[ÚÙÜ]/g, "U").replace(/[.\s/-]+/g, "_")
+        .replace(/_+/g, "_").replace(/^_|_$/g, "")
+    if (codes.indexOf(text) >= 0) return text
+    return aliases[text] || ""
+}
+function webMoistureCode(value) {
+    return _webCode(value, WEB_MOISTURE_CODES, {})
+}
+function webConsistencyCode(value) {
+    // Equivalencias semánticamente inequívocas. "Densa", "Firme", "Blanda"
+    // y otras clasificaciones históricas se conservan, sin inventar código.
+    return _webCode(value, WEB_CONSISTENCY_CODES, {
+        SUELTA: "SUELTO", MEDIANAMENTE_DENSA: "MEDIANAMENTE_DENSO",
+        RIGIDA: "RIGIDO", MUY_RIGIDA: "MUY_RIGIDO"
+    })
+}
+function webExcavabilityCode(value) {
+    return _webCode(value, WEB_EXCAVABILITY_CODES, {
+        REND_BAJO: "RENDIMIENTO_BAJO", REND_MEDIO: "RENDIMIENTO_MEDIO",
+        REND_ALTO: "RENDIMIENTO_ALTO", REND_MUY_ALTO: "RENDIMIENTO_MUY_ALTO"
+    })
+}
+function webCatalogLabel(value) {
+    var text = String(value || "")
+    return text.length ? text.toLowerCase().replace(/_/g, " ")
+        .replace(/^./, function(c) { return c.toUpperCase() }) : ""
+}
+function webDepth2(value) {
+    var text = String(value === undefined || value === null ? "" : value).trim()
+    if (!text.length) return ""
+    if (!/^\d+(?:[.,]\d{1,2})?$/.test(text)) return null
+    var number = Number(text.replace(",", "."))
+    return isFinite(number) ? number.toFixed(2) : null
+}
+function webSampleIntervalError(from, to, stratumFrom, stratumTo) {
+    var low = webDepth2(from), high = webDepth2(to)
+    if (low === null || high === null) return "Los campos numéricos deben contener valores válidos (máximo 2 decimales)."
+    var first = parseDecimalSafe(stratumFrom), last = parseDecimalSafe(stratumTo)
+    if ((low !== "" || high !== "") && (!isFinite(first) || !isFinite(last) || last <= first))
+        return "El intervalo debe estar dentro del estrato."
+    if ((low !== "" && (Number(low) < first || Number(low) > last))
+            || (high !== "" && (Number(high) < first || Number(high) > last)))
+        return "El intervalo debe estar dentro del estrato."
+    if (low !== "" && high !== "" && Number(low) >= Number(high))
+        return "Desde debe ser menor que Hasta."
+    return ""
+}
+
+// Web calicata_samples: optional from_depth_m/to_depth_m are NULL, never
+// synthesized from the stratum when no interval was explicitly recorded.
 function sampleIntervalValue(row, key) {
     row = row || {}
     var value = row[key]
-    if (value !== undefined && value !== null && String(value).trim().length)
-        return String(value)
-    var boundary = row[key === "muestra_desde" ? "de" : "a"]
-    return boundary === undefined || boundary === null ? "" : String(boundary)
+    return value === undefined || value === null ? "" : String(value)
 }
 
 function inheritSampleInterval(row, previousDe, previousA) {
@@ -21,10 +82,15 @@ function inheritSampleInterval(row, previousDe, previousA) {
     for (var i = 0; i < fields.length; ++i) {
         var raw = row[fields[i]]
         var value = parseDecimalSafe(raw), old = parseDecimalSafe(previous[i])
-        var follows = raw === undefined || raw === null || !String(raw).trim().length
-                      || (isFinite(value) && isFinite(old) && Math.abs(value - old) < 0.000001)
-        result[fields[i]] = follows ? String(boundaries[i] === undefined || boundaries[i] === null ? "" : boundaries[i])
-                                   : String(raw)
+        // No convertir NULL en un intervalo: solo desplazar un límite
+        // explícito que coincidía con el límite anterior del estrato.
+        if (raw === undefined || raw === null || !String(raw).trim().length) {
+            result[fields[i]] = ""
+        } else {
+            var follows = isFinite(value) && isFinite(old) && Math.abs(value - old) < 0.000001
+            result[fields[i]] = follows ? String(boundaries[i] === undefined || boundaries[i] === null ? "" : boundaries[i])
+                                       : String(raw)
+        }
     }
     return result
 }

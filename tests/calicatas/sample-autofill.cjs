@@ -3,15 +3,15 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const Rules = vm.createContext({});
 vm.runInContext(fs.readFileSync('qml/Mobile/lib/CalicataRules.js','utf8').replace(/^\.pragma library\s*/,''), Rules);
-assert.equal(typeof Rules.sampleIntervalValue, 'function', 'sample bounds must inherit the stratum');
+assert.equal(typeof Rules.sampleIntervalValue, 'function', 'sample bounds must preserve explicit null');
 const row = {de:'1.60',a:'3.00',muestra_desde:'',muestra_hasta:''};
-assert.equal(Rules.sampleIntervalValue(row,'muestra_desde'),'1.60');
-assert.equal(Rules.sampleIntervalValue(row,'muestra_hasta'),'3.00');
-assert.equal(Rules.sampleIntervalValue({...row,de:'0.00'},'muestra_desde'),'0.00');
+assert.equal(Rules.sampleIntervalValue(row,'muestra_desde'),'');
+assert.equal(Rules.sampleIntervalValue(row,'muestra_hasta'),'');
+assert.equal(Rules.sampleIntervalValue({...row,de:'0.00'},'muestra_desde'),'');
 assert.equal(Rules.sampleIntervalValue({...row,muestra_desde:'1.85'},'muestra_desde'),'1.85');
 const read = r => JSON.parse(JSON.stringify(r));
 assert.deepEqual(read(Rules.inheritSampleInterval({...row,a:'3.50',tipo_muestra:'MA'},'1.60','3.00')),
-  {muestra_desde:'1.60',muestra_hasta:'3.50'});
+  {muestra_desde:'',muestra_hasta:''});
 assert.deepEqual(read(Rules.inheritSampleInterval({...row,de:'1.80',muestra_desde:'1.60',muestra_hasta:'3.00'},'1.60','3.00')),
   {muestra_desde:'1.80',muestra_hasta:'3.00'});
 assert.deepEqual(read(Rules.inheritSampleInterval({...row,muestra_desde:'1.85',muestra_hasta:'2.30',a:'3.50'},'1.60','3.00')),
@@ -21,15 +21,16 @@ const qml=fs.readFileSync('qml/Mobile/pages/CalicataFormPage.qml','utf8');
 function method(name) { const m=qml.match(new RegExp('function '+name+'\\([^]*?^    }','m')); assert.ok(m,name); return m[0]; }
 const model=vm.createContext({Rules,root:{},JSON,Object,String,isFinite});
 vm.runInContext(method('corteToPlainObject'),model);
-assert.equal(model.corteToPlainObject({...row,tipo_muestra:'MA'}).muestra_hasta,'3.00', 'saved samples include inherited bounds');
+assert.equal(model.corteToPlainObject({...row,tipo_muestra:'MA'}).muestra_hasta,'', 'optional web sample bounds remain NULL when unset');
 assert.equal(model.corteToPlainObject(row).muestra_hasta,'', 'no phantom sample on an unselected field');
 const rows=[{...row,tipo_muestra:'MA'}];
 const cortesModel={get:i=>rows[i],setProperty:(i,k,v)=>{rows[i][k]=v;}};
 const commit=vm.createContext({Rules,cortesModel,root:{_markDirty(){}},showInfo(){throw Error('valid default rejected');}});
 vm.runInContext(method('commitSampleInterval'),commit);
-assert.equal(commit.commitSampleInterval(0,'muestra_desde','2.00'),true, 'manual lower bound validates against inherited upper bound');
-assert.equal(rows[0].muestra_hasta,'3.00');
-console.log('PASS sample default, persistence, changed strata, manual subinterval, no phantom sample');
+assert.equal(commit.commitSampleInterval(0,'muestra_desde','2.00'),true, 'one optional bound is valid without inventing the other');
+assert.equal(rows[0].muestra_hasta,'');
+assert.equal(rows[0].muestra_desde,'2.00');
+console.log('PASS nullable sample, persistence, changed strata, manual subinterval, no phantom sample');
 
 // Changing a stratum boundary also changes the next stratum's inherited sample.
 const chain=[{de:'0.00',a:'1.60',_extraJson:'{}'},

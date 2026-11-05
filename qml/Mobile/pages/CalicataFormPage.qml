@@ -1178,6 +1178,18 @@ Item {
     function setStratumExtra(index, key, value) {
         root.setLabEvidence(index, key, value)
     }
+    function setCanonicalStratumConsistency(index, value) {
+        if (index < 0 || index >= cortesModel.count) return
+        var code = Rules.webConsistencyCode(value)
+        var extra = JSON.parse(cortesModel.get(index)._extraJson || "{}")
+        // Mantiene 'consistency' legacy sin modificar; una elección explícita
+        // con código vacío NO debe revivir el valor histórico al reimportar.
+        extra.consistency_compaction = code
+        extra.consistency_web_selected = true
+        cortesModel.setProperty(index, "consistency_compaction", code)
+        cortesModel.setProperty(index, "_extraJson", JSON.stringify(extra))
+        root._markDirty()
+    }
     function toggleStratumListValue(index, key, value) {
         if (index < 0 || index >= cortesModel.count) return
         var extra = JSON.parse(cortesModel.get(index)._extraJson || "{}")
@@ -1304,11 +1316,14 @@ Item {
         addCorte()
         if (cortesModel.count <= before) return
         var target = cortesModel.count - 1
-        var roles = ["material_origin", "descripcion", "humedad", "excavabilidad", "estabilidad", "aashto", "sucs"]
+        var roles = ["material_origin", "descripcion", "humedad", "moisture_condition",
+                     "consistency_compaction", "excavabilidad", "excavability",
+                     "estabilidad", "aashto", "sucs"]
         for (var r = 0; r < roles.length; ++r) cortesModel.setProperty(target, roles[r], source[roles[r]])
         var extra = JSON.parse(cortesModel.get(target)._extraJson || "{}")
         var keys = ["natural_origin", "fill_type", "fill_context", "fill_control", "fill_compaction", "fill_matrix",
                     "fill_components", "fill_components_other", "structure", "consistency", "stratum_color",
+                    "consistency_compaction", "consistency_web_selected",
                     "color", "color_legacy_migrated",
                     "pattern_primary", "pattern_secondary", "pattern_anthropic", "features_enabled", "features", "features_other"]
         for (var k = 0; k < keys.length; ++k)
@@ -1371,19 +1386,26 @@ Item {
     // cualquier otro valor queda como Personalizado.
     function commitProfileGroundwater(text) {
         root._flushCortesRevision()
-        var value = String(text || "").trim()
-        var number = Rules.parseDecimalSafe(value)
-        if (value.length && (!isFinite(number) || number < 0)) {
-            root.showInfo("Nivel freático", "Ingresa una profundidad decimal mayor o igual que 0 m.")
+        // Web persiste calicatas.groundwater_depth_m como número o NULL,
+        // NO dispone de columna groundwater_custom. Dos decimales al editar;
+        // el texto legacy sin editar se mantiene en el documento.
+        var value = String(text === undefined || text === null ? "" : text).trim()
+        var canonical = Rules.webDepth2(value)
+        if (canonical === null) {
+            var negativeNumber = /^-\d+(?:[.,]\d{1,2})?$/.test(value)
+            root.showInfo("Nivel freático", negativeNumber
+                          ? "Sólo la altitud puede ser negativa."
+                          : "Los campos numéricos de la cabecera deben contener valores válidos.")
             return false
         }
+        var number = Rules.parseDecimalSafe(canonical)
         var derived = Rules.parseDecimalSafe(root.derivedGroundwaterText)
-        if (!value.length || (isFinite(derived) && Math.abs(derived - number) < 0.000001)) {
+        if (!canonical.length || (isFinite(derived) && Math.abs(derived - number) < 0.000001)) {
             root.groundwaterCustom = false
             txtWaterTableDepth.text = ""
         } else {
             root.groundwaterCustom = true
-            txtWaterTableDepth.text = value
+            txtWaterTableDepth.text = canonical
         }
         root._markDirty()
         return true
@@ -2003,7 +2025,8 @@ Item {
     readonly property string dateFmt: "dd/MM/yyyy"
 
     readonly property var humItems: ["Seco", "Bajo", "Medio", "Agua"]
-    readonly property var excItems: ["Rend. bajo", "Rend. medio", "Rend. alto", "Rend. muy alto"]
+    // Mismas etiquetas que formatCatalogValue() de la Web; slug separado.
+    readonly property var excItems: ["Rendimiento bajo", "Rendimiento medio", "Rendimiento alto", "Rendimiento muy alto"]
     readonly property var estItems: ["Baja", "Media", "Alta", "Muy Alta"]
     readonly property var sampleTypeItems: ["—", "MA", "MS", "MI", "MW", "Otro"]
 
@@ -2047,7 +2070,8 @@ Item {
         var strata = []
         for (var i = 0; i < cortesModel.count; ++i) {
             var row = cortesModel.get(i)
-            strata.push({ moistureCondition: Number(row.humedad) === 3 ? "AGUA" : "",
+            strata.push({ moistureCondition: Rules.webMoistureCode(row.moisture_condition)
+                                  || Rules.webMoistureCode(row.humedad),
                           fromDepthM: String(row.de || "") })
         }
         return Rules.derivedGroundwaterDepth(strata)
@@ -2187,24 +2211,19 @@ Item {
     }
 
     function commitSampleInterval(index, key, text) {
+        if (index < 0 || index >= cortesModel.count) return false
         var row = cortesModel.get(index)
         var otherKey = key === "muestra_desde" ? "muestra_hasta" : "muestra_desde"
-        var otherText = Rules.sampleIntervalValue(row, otherKey)
-        var other = Rules.parseDecimalSafe(otherText)
-        var number = Rules.parseDecimalSafe(text)
-        var top = Rules.parseDecimalSafe(row.de), bottom = Rules.parseDecimalSafe(row.a)
-        if (isFinite(number) && ((isFinite(top) && number < top) || (isFinite(bottom) && number > bottom))) {
-            showInfo("Intervalo de muestra", "El intervalo debe estar dentro del estrato ("
-                     + String(row.de || "—") + " – " + String(row.a || "—") + " m).")
+        var candidateFrom = key === "muestra_desde" ? text : Rules.sampleIntervalValue(row, otherKey)
+        var candidateTo = key === "muestra_hasta" ? text : Rules.sampleIntervalValue(row, otherKey)
+        var error = Rules.webSampleIntervalError(candidateFrom, candidateTo, row.de, row.a)
+        if (error.length) {
+            showInfo("Intervalo de muestra", error)
             return false
         }
-        if (isFinite(number) && isFinite(other)
-                && (key === "muestra_desde" ? number >= other : number <= other)) {
-            showInfo("Intervalo de muestra", "Desde debe ser menor que Hasta.")
-            return false
-        }
-        cortesModel.setProperty(index, key, text)
-        cortesModel.setProperty(index, otherKey, otherText)
+        // Web: from_depth_m/to_depth_m numéricos y NULL cuando están vacíos.
+        // No rellenar el otro extremo a partir del estrato ni al confirmar.
+        cortesModel.setProperty(index, key, Rules.webDepth2(text))
         root._markDirty()
         return true
     }
@@ -5752,7 +5771,10 @@ Item {
             sample_code: "",
             descripcion: "",
             humedad: -1,
+            moisture_condition: "",
+            consistency_compaction: "",
             excavabilidad: -1,
+            excavability: "",
             estabilidad: -1,
             tipoText: "",
             tipo_muestra: "",
@@ -6810,6 +6832,8 @@ Item {
                                         onActivated: root.prfPickIndex("Humedad", root.humItems, prfEditorCard.s.humedad, "calgen.water",
                                                                        function(i) {
                                                                            cortesModel.setProperty(prfEditorCard.idx, "humedad", i)
+                                                                           cortesModel.setProperty(prfEditorCard.idx, "moisture_condition",
+                                                                                                   i >= 0 ? Rules.WEB_MOISTURE_CODES[i] : "")
                                                                            root._markDirty()
                                                                        })
                                     }
@@ -6817,19 +6841,24 @@ Item {
                                         visible: !(prfEditorCard.origin === "Antrópico")
                                         sideLabel: prfEditorCard.sideLabels
                                         label: "Consistencia / densidad"
-                                        valueText: String(prfEditorCard.s.consistency || "")
+                                        valueText: Rules.webCatalogLabel(prfEditorCard.s.consistency_compaction)
+                                                   || (String(prfEditorCard.s.consistency || "").length
+                                                       ? String(prfEditorCard.s.consistency) + " (histórico)" : "")
                                         onActivated: root.prfPick("Consistencia / densidad",
-                                                                  root.stratumConsistencyOptions(prfEditorCard.s),
-                                                                  prfEditorCard.s.consistency, "calgen.depth",
-                                                                  function(v) { root.setStratumExtra(prfEditorCard.idx, "consistency", v) })
+                                                                  Rules.WEB_CONSISTENCY_CODES.map(Rules.webCatalogLabel),
+                                                                  Rules.webCatalogLabel(prfEditorCard.s.consistency_compaction),
+                                                                  "calgen.depth",
+                                                                  function(v) {
+                                                                      root.setCanonicalStratumConsistency(prfEditorCard.idx, v)
+                                                                  })
                                     }
                                     PrfPickField {
                                         visible: !(prfEditorCard.origin === "Antrópico")
                                         sideLabel: prfEditorCard.sideLabels
-                                        label: "Estabilidad"
+                                        label: "Estabilidad (local)"
                                         valueText: prfEditorCard.s.estabilidad >= 0 && prfEditorCard.s.estabilidad < root.estItems.length
                                                    ? root.estItems[prfEditorCard.s.estabilidad] : ""
-                                        onActivated: root.prfPickIndex("Estabilidad", root.estItems, prfEditorCard.s.estabilidad,
+                                        onActivated: root.prfPickIndex("Estabilidad (local)", root.estItems, prfEditorCard.s.estabilidad,
                                                                        "status.warning",
                                                                        function(i) {
                                                                            cortesModel.setProperty(prfEditorCard.idx, "estabilidad", i)
@@ -6846,6 +6875,8 @@ Item {
                                                                        "calgen.machine",
                                                                        function(i) {
                                                                            cortesModel.setProperty(prfEditorCard.idx, "excavabilidad", i)
+                                                                           cortesModel.setProperty(prfEditorCard.idx, "excavability",
+                                                                                                   i >= 0 ? Rules.WEB_EXCAVABILITY_CODES[i] : "")
                                                                            root._markDirty()
                                                                        })
                                     }
@@ -7206,8 +7237,8 @@ Item {
             test_date: root._liveValue(row.test_date)
         }
     }
-    readonly property var liveHumidity: ["SECO", "BAJO", "MEDIO", "AGUA"]
-    readonly property var liveExcavability: ["RENDIMIENTO_BAJO", "RENDIMIENTO_MEDIO", "RENDIMIENTO_ALTO", "RENDIMIENTO_MUY_ALTO"]
+    readonly property var liveHumidity: Rules.WEB_MOISTURE_CODES
+    readonly property var liveExcavability: Rules.WEB_EXCAVABILITY_CODES
 
     // Presence `field` (meta canónica Web): etiqueta legible de la celda en
     // edición ("Supervisor", "Corte 2, Descripción"); "" (-> null) si no hay.
@@ -7247,16 +7278,19 @@ Item {
         var cortes = (state && state.cortes) || []
         for (var i = 0; i < cortes.length; ++i) {
             var row = cortes[i]
-            var hum = Number(row.humedad), exc = Number(row.excavabilidad)
+            var hum = Rules.webMoistureCode(row.moisture_condition)
+                      || Rules.webMoistureCode(row.humedad)
+            var exc = Rules.webExcavabilityCode(row.excavability)
+                      || Rules.webExcavabilityCode(row.excavabilidad)
             snap.strata.push({
                 id: root._liveStratumId(row),
                 remote: String(row.remote_stratum_id || ""),
                 fields: {
                     to_depth_m: root._liveValue(row.a),
                     description: root._liveValue(row.descripcion),
-                    moisture_condition: hum >= 0 && hum < root.liveHumidity.length ? root.liveHumidity[hum] : null,
-                    consistency_compaction: root._liveValue(row.consistency_compaction),
-                    excavability: exc >= 0 && exc < root.liveExcavability.length ? root.liveExcavability[exc] : null,
+                    moisture_condition: root._liveValue(hum),
+                    consistency_compaction: root._liveValue(Rules.webConsistencyCode(row.consistency_compaction)),
+                    excavability: root._liveValue(exc),
                     color: root._liveValue(row.color),
                     sample_type: root._liveValue(row.tipo_muestra),
                     observations: root._liveValue(row.observations)
@@ -7369,7 +7403,11 @@ Item {
             return true
         case "groundwater_depth_m":
             txtWaterTableDepth.text = text
-            root.groundwaterCustom = text.length > 0 && text !== root.derivedGroundwaterText
+            var derivedGroundwater = Rules.parseDecimalSafe(root.derivedGroundwaterText)
+            root.groundwaterCustom = text.length > 0
+                    && (!isFinite(derivedGroundwater)
+                        || !isFinite(Rules.parseDecimalSafe(text))
+                        || Math.abs(Rules.parseDecimalSafe(text) - derivedGroundwater) > 0.000001)
             return true
         case "title":
         case "description":
@@ -7431,13 +7469,27 @@ Item {
                 root.renumerarCortesYIntervalos(false)   // from_depth_m es derivado
                 return true
             case "description": cortesModel.setProperty(i, "descripcion", text); return true
-            case "moisture_condition": cortesModel.setProperty(i, "humedad", root.liveHumidity.indexOf(text.toUpperCase())); return true
-            case "excavability": cortesModel.setProperty(i, "excavabilidad", root.liveExcavability.indexOf(text.toUpperCase())); return true
+            case "moisture_condition":
+                var moistureCode = Rules.webMoistureCode(text)
+                cortesModel.setProperty(i, "humedad", root.liveHumidity.indexOf(moistureCode))
+                cortesModel.setProperty(i, "moisture_condition", moistureCode)
+                return true
+            case "excavability":
+                var excavationCode = Rules.webExcavabilityCode(text)
+                cortesModel.setProperty(i, "excavabilidad", root.liveExcavability.indexOf(excavationCode))
+                cortesModel.setProperty(i, "excavability", excavationCode)
+                return true
             case "sample_type":
                 cortesModel.setProperty(i, "tipo_muestra", text)
                 cortesModel.setProperty(i, "tipoText", text)
                 return true
             case "consistency_compaction":
+                var consistencyCode = Rules.webConsistencyCode(text)
+                cortesModel.setProperty(i, "consistency_compaction", consistencyCode)
+                extra[field] = value === null ? null : consistencyCode
+                extra.consistency_web_selected = true
+                cortesModel.setProperty(i, "_extraJson", JSON.stringify(extra))
+                return true
             case "color":
             case "observations":
                 extra[field] = value === null ? null : text
@@ -7606,7 +7658,10 @@ Item {
         cortesModel.setProperty(i, "_percentageFieldsJson", "[]")
         cortesModel.setProperty(i, "descripcion", "")
         cortesModel.setProperty(i, "humedad", -1)
+        cortesModel.setProperty(i, "moisture_condition", "")
+        cortesModel.setProperty(i, "consistency_compaction", "")
         cortesModel.setProperty(i, "excavabilidad", -1)
+        cortesModel.setProperty(i, "excavability", "")
         cortesModel.setProperty(i, "estabilidad", -1)
 
         cortesModel.setProperty(i, "tipoText", "")
@@ -7694,7 +7749,10 @@ Item {
             sample_code: "",
             descripcion: "",
             humedad: -1,
+            moisture_condition: "",
+            consistency_compaction: "",
             excavabilidad: -1,
+            excavability: "",
             estabilidad: -1,
             tipoText: "",
             tipo_muestra: "",
@@ -7729,6 +7787,15 @@ Item {
             if (migratedColor.length) o.color = migratedColor
             o.color_legacy_migrated = true
         }
+        // El ListModel usa índices para mantener el perfil antiguo, pero el
+        // JSON conserva los textos de origen incluso tras volver a guardar.
+        for (var legacyField of ["humedad", "excavabilidad", "estabilidad"]) {
+            var original = o[legacyField]
+            var preservedKey = legacyField + "_legacy_original"
+            if (typeof original === "string" && original.trim().length
+                    && !/^-?\d+$/.test(original.trim()) && !o[preservedKey])
+                o[preservedKey] = original
+        }
         var d = _defaultCorte()
         // Esquema de PRESENTACIÓN estable: ListModel no crea rol para un miembro
         // null ("Adding an object with a null member..."). Un null conserva el
@@ -7754,8 +7821,16 @@ Item {
         r._percentageFieldsJson = JSON.stringify(o.percentage_fields || [])
         // "A1a", "A 2 4"… -> código canónico; un valor desconocido se conserva tal cual.
         r.aashto = Rules.normalizeAashtoCode(r.aashto) || String(r.aashto || "")
-        r.humedad = root._enumIndex(r.humedad, root.humItems)
-        r.excavabilidad = root._enumIndex(r.excavabilidad, root.excItems)
+        // Migración en lectura, sin reescribir los valores históricos en o /
+        // _extraJson. Los roles nuevos mantienen slugs exactos de Web.
+        r.moisture_condition = Rules.webMoistureCode(o.moisture_condition)
+                || Rules.webMoistureCode(r.humedad)
+        r.humedad = Rules.WEB_MOISTURE_CODES.indexOf(r.moisture_condition)
+        r.consistency_compaction = Rules.webConsistencyCode(o.consistency_compaction)
+                || (o.consistency_web_selected === true ? "" : Rules.webConsistencyCode(o.consistency))
+        r.excavability = Rules.webExcavabilityCode(o.excavability)
+                || Rules.webExcavabilityCode(r.excavabilidad)
+        r.excavabilidad = Rules.WEB_EXCAVABILITY_CODES.indexOf(r.excavability)
         r.estabilidad = root._enumIndex(r.estabilidad, root.estItems)
         r.de = (r.de === undefined || r.de === null) ? "" : String(r.de)
         r.a  = (r.a  === undefined || r.a  === null) ? "" : String(r.a)
@@ -7767,10 +7842,12 @@ Item {
             r.tipo_muestra = "Otro"
             r.tipo_otro = legacyType
         }
+        // Ausencia de intervalo en la fuente no es el intervalo del estrato.
+        // Web calicata_samples.from_depth_m/to_depth_m permite NULL.
         r.muestra_desde = (o.muestra_desde !== undefined && o.muestra_desde !== null)
-                ? String(o.muestra_desde) : r.de
+                ? String(o.muestra_desde) : ""
         r.muestra_hasta = (o.muestra_hasta !== undefined && o.muestra_hasta !== null)
-                ? String(o.muestra_hasta) : r.a
+                ? String(o.muestra_hasta) : ""
         r.resultados = String(o.resultados || o.resultado || "")
         r.g002 = String(o.g002 || o.g2micra || o.g2_micra || "")
         return r
@@ -7788,7 +7865,14 @@ Item {
             color: Rules.stratumRowColor(source),
             color_label: Rules.stratumRowColor(source).length ? Rules.colorLabel(Rules.stratumRowColor(source)) : "",
             humedad: isFinite(Number(source.humedad)) ? Number(source.humedad) : -1,
+            moisture_condition: Rules.webMoistureCode(source.moisture_condition)
+                    || Rules.webMoistureCode(source.humedad),
+            consistency_compaction: Rules.webConsistencyCode(source.consistency_compaction)
+                    || (source.consistency_web_selected === true
+                        ? "" : Rules.webConsistencyCode(source.consistency)),
             excavabilidad: isFinite(Number(source.excavabilidad)) ? Number(source.excavabilidad) : -1,
+            excavability: Rules.webExcavabilityCode(source.excavability)
+                    || Rules.webExcavabilityCode(source.excavabilidad),
             estabilidad: isFinite(Number(source.estabilidad)) ? Number(source.estabilidad) : -1,
             tipoText: String(source.tipo_muestra === "Otro"
                              ? (source.tipo_otro || "") : (source.tipo_muestra || "")),
@@ -7898,11 +7982,14 @@ Item {
         // Valor freático guardado (legacy ENCONTRADO o override Personalizado).
         // El modo se decide después de cargar los cortes.
         if (typeof txtWaterTableDepth !== "undefined")
-            txtWaterTableDepth.text = (h.water_table_depth !== undefined
-                                       && h.water_table_depth !== null)
-                    ? String(h.water_table_depth)
-                    : (h.waterTableDepth !== undefined && h.waterTableDepth !== null)
-                      ? String(h.waterTableDepth) : ""
+            txtWaterTableDepth.text = (h.groundwater_depth_m !== undefined
+                                       && h.groundwater_depth_m !== null
+                                       && String(h.groundwater_depth_m).length)
+                    ? String(h.groundwater_depth_m)
+                    : (h.water_table_depth !== undefined && h.water_table_depth !== null)
+                      ? String(h.water_table_depth)
+                      : (h.waterTableDepth !== undefined && h.waterTableDepth !== null)
+                        ? String(h.waterTableDepth) : ""
         if (typeof txtProjectFullName !== "undefined") {
             // Nombre contractual (dato de la ficha). projectName es el espacio de
             // guardado y nunca se usa como nombre del proyecto.
@@ -7945,7 +8032,8 @@ Item {
             var storedWater = String(txtWaterTableDepth.text || "").trim().replace(",", ".")
             var derivedWater = root._derivedGroundwater()
             root.groundwaterCustom = storedWater.length > 0
-                    && (derivedWater === null || Number(storedWater) !== Number(derivedWater))
+                    && (derivedWater === null || !isFinite(Number(storedWater))
+                        || Math.abs(Number(storedWater) - Number(derivedWater)) > 0.000001)
         }
         var view = (st.uiState || {}).calicatasView || {}
         // La navegación (sección / estrato) es estado del EDITOR: se restaura solo la
@@ -8043,13 +8131,14 @@ Item {
         h.depth_m = root.derivedDepthText
         // Configuración del perfil (Perfil > columna izquierda/derecha).
         h.profile_setup = Object.assign({}, root.profileSetup || {})
-        // Nivel freático: derivado del primer AGUA o override Personalizado.
-        // El estado legacy se mantiene coherente para Excel/validaciones.
+        // Web: calicatas.groundwater_depth_m = valor NUMÉRICO o NULL.
+        // Personalizado es inferido; Mostrar N.F. = profile_setup local.
+        // No alterar valores legacy sin que el usuario edite la profundidad.
         var water = root.effectiveGroundwaterText
         var previousWater = String(baseHeader.water_table_status || "")
         h.groundwater_custom = root.groundwaterCustom
-        h.water_table_depth = water
-        h.groundwater_depth_m = water
+        h.water_table_depth = water  // alias legacy no destructivo
+        h.groundwater_depth_m = water.length ? Rules.parseDecimalSafe(water) : null
         h.water_table_present = water.length > 0
         h.water_table_status = water.length ? "ENCONTRADO"
                 : previousWater === "NO_ENCONTRADO" ? "NO_ENCONTRADO" : "NO_EVALUADO"

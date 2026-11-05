@@ -199,9 +199,24 @@ QString excavabilityFor(const QVariantMap &row)
 
 QString consistencyFor(const QVariantMap &row)
 {
-    const QVariantMap extra = row.value(QStringLiteral("_extra")).toMap();
+    QVariantMap extra = row.value(QStringLiteral("_extra")).toMap();
+    if (extra.isEmpty()) {
+        const QJsonDocument stored = QJsonDocument::fromJson(
+            row.value(QStringLiteral("_extraJson")).toString().toUtf8());
+        if (stored.isObject()) extra = stored.object().toVariantMap();
+    }
     QString value = trimmedText(row.value(QStringLiteral("consistency_compaction"))).toUpper();
     if (value.isEmpty()) value = trimmedText(extra.value(QStringLiteral("consistency_compaction"))).toUpper();
+    if (value.isEmpty() && !extra.value(QStringLiteral("consistency_web_selected")).toBool()) {
+        // Migración conservadora de etiquetas antiguas: no usar "estabilidad"
+        // ni convertir "Densa"/"Firme" a un slug semánticamente distinto.
+        value = trimmedText(extra.value(QStringLiteral("consistency"))).toUpper();
+        if (value.isEmpty()) value = trimmedText(row.value(QStringLiteral("consistency"))).toUpper();
+        if (value == QLatin1String("SUELTA")) value = QStringLiteral("SUELTO");
+        else if (value == QLatin1String("MEDIANAMENTE DENSA")) value = QStringLiteral("MEDIANAMENTE_DENSO");
+        else if (value == QLatin1String("RÍGIDA")) value = QStringLiteral("RIGIDO");
+        else if (value == QLatin1String("MUY RÍGIDA")) value = QStringLiteral("MUY_RIGIDO");
+    }
     return QSet<QString>{"SUELTO", "MEDIANAMENTE_DENSO", "RIGIDO", "MUY_RIGIDO"}.contains(value)
         ? value : QString();
 }
@@ -1379,10 +1394,29 @@ QString CalicataCloudService::syncDocument(CalicataDocument *document, const QSt
             : trimmedText(localRow.value(QStringLiteral("sample_code")));
         sampleArgs[QStringLiteral("p_sample_code")] = sampleCode;
         sampleArgs[QStringLiteral("p_sample_type")] = sampleType;
-        QVariant sampleFrom = nullableDepth(localRow.value(QStringLiteral("muestra_desde")));
-        QVariant sampleTo = nullableDepth(localRow.value(QStringLiteral("muestra_hasta")));
-        if (!sampleFrom.isValid()) sampleFrom = nullableDepth(localRow.value(QStringLiteral("de")));
-        if (!sampleTo.isValid()) sampleTo = nullableDepth(localRow.value(QStringLiteral("a")));
+        // Web: calicata_samples.from_depth_m/to_depth_m son numéricos
+        // opcionales (NULL). No fabricar límites heredados del estrato.
+        const QVariant sampleFrom = nullableNumber(localRow.value(QStringLiteral("muestra_desde")));
+        const QVariant sampleTo = nullableNumber(localRow.value(QStringLiteral("muestra_hasta")));
+        const QVariant stratumFrom = nullableNumber(localRow.value(QStringLiteral("de")));
+        const QVariant stratumTo = nullableNumber(localRow.value(QStringLiteral("a")));
+        const bool requestedFrom = !trimmedText(localRow.value(QStringLiteral("muestra_desde"))).isEmpty();
+        const bool requestedTo = !trimmedText(localRow.value(QStringLiteral("muestra_hasta"))).isEmpty();
+        if ((requestedFrom && (!sampleFrom.isValid() || sampleFrom.toDouble() < 0.0))
+            || (requestedTo && (!sampleTo.isValid() || sampleTo.toDouble() < 0.0))) {
+            fail({}, QStringLiteral("Los campos numéricos deben contener valores válidos (máximo 2 decimales)."));
+            return;
+        }
+        if ((sampleFrom.isValid() && stratumFrom.isValid() && sampleFrom.toDouble() < stratumFrom.toDouble())
+            || (sampleTo.isValid() && stratumTo.isValid() && sampleTo.toDouble() > stratumTo.toDouble())
+            || ((sampleFrom.isValid() || sampleTo.isValid()) && (!stratumFrom.isValid() || !stratumTo.isValid()))) {
+            fail({}, QStringLiteral("El intervalo debe estar dentro del estrato."));
+            return;
+        }
+        if (sampleFrom.isValid() && sampleTo.isValid() && sampleFrom.toDouble() >= sampleTo.toDouble()) {
+            fail({}, QStringLiteral("Desde debe ser menor que Hasta."));
+            return;
+        }
         sampleArgs[QStringLiteral("p_from_depth_m")] = sampleFrom;
         sampleArgs[QStringLiteral("p_to_depth_m")] = sampleTo;
 
