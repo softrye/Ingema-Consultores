@@ -140,6 +140,8 @@ std::shared_ptr<const LoadedTile> mesh(QByteArrayView data,const std::vector<dou
         if(uvTransform.size()!=4){fail(error,"RP_ROCKTREE_UV_TRANSFORM_INVALID");return {};}
         uOffset=uvTransform[0];vOffset=uvTransform[1];uScale=uvTransform[2];vScale=uvTransform[3];
     }
+    tile->origin=ecefToPlanet({matrix[12],matrix[13],matrix[14]});
+    tile->localPositions.reserve(std::size_t(count)*3);
     unsigned u=0,v=0;quint8 x=0,y=0,z=0;g.bounds.minimum={10,10,10};g.bounds.maximum={-10,-10,-10};
     for(qsizetype i=0;i<count;++i){
         if((i&1023)==0&&cancel.load()){error=QStringLiteral("CANCELLED");return {};}
@@ -148,22 +150,24 @@ std::shared_ptr<const LoadedTile> mesh(QByteArrayView data,const std::vector<dou
         if(!finite(p)||length(p)>2){fail(error,"RP_ROCKTREE_VERTEX_INVALID");return {};}
         u=(u+quint8(uv[i])+(unsigned(quint8(uv[2*count+i]))<<8))%um;
         v=(v+quint8(uv[count+i])+(unsigned(quint8(uv[3*count+i]))<<8))%vm;
+        const auto relative=p-tile->origin; // Relative-to-eye/RTC precision: subtract in double BEFORE converting to float.
+        tile->localPositions.insert(tile->localPositions.end(),{float(relative.x),float(relative.y),float(relative.z)});
         auto &vertex=g.vertices[std::size_t(i)];vertex.position[0]=float(p.x);vertex.position[1]=float(p.y);vertex.position[2]=float(p.z);
         vertex.uv[0]=float((u+uOffset)*uScale);vertex.uv[1]=float(1-(v+vOffset)*vScale); // terrain.vert already flips V.
         g.bounds.minimum={std::min(g.bounds.minimum.x,p.x),std::min(g.bounds.minimum.y,p.y),std::min(g.bounds.minimum.z,p.z)};
         g.bounds.maximum={std::max(g.bounds.maximum.x,p.x),std::max(g.bounds.maximum.y,p.y),std::max(g.bounds.maximum.z,p.z)};
     }
     std::vector<Vec3> normals(std::size_t(count),Vec3{});
-    auto position=[&](quint32 i){const auto &p=g.vertices[i].position;return Vec3{p[0],p[1],p[2]};};
+    auto position=[&](quint32 i){const auto *p=tile->localPositions.data()+std::size_t(i)*3;return Vec3{p[0],p[1],p[2]};};
     for(std::size_t i=2;i<terrainEnd;++i){
         auto a=strip[i-2],b=strip[i-1],c=strip[i];if(i&1)std::swap(a,b);if(a==b||a==c||b==c)continue;
         g.indices.insert(g.indices.end(),{a,b,c});auto n=cross(position(b)-position(a),position(c)-position(a));
         normals[a]=normals[a]+n;normals[b]=normals[b]+n;normals[c]=normals[c]+n;
     }
     if(g.indices.empty())return {};
-    for(std::size_t i=0;i<normals.size();++i){const auto n=normalized(length(normals[i])>1e-20?normals[i]:position(quint32(i)));g.vertices[i].normal[0]=float(n.x);g.vertices[i].normal[1]=float(n.y);g.vertices[i].normal[2]=float(n.z);}
+    for(std::size_t i=0;i<normals.size();++i){const auto n=normalized(length(normals[i])>1e-20?normals[i]:position(quint32(i))+tile->origin);g.vertices[i].normal[0]=float(n.x);g.vertices[i].normal[1]=float(n.y);g.vertices[i].normal[2]=float(n.z);}
     if(!texture(tex,tile->texture,error))return {};
-    tile->bytes=g.vertices.size()*sizeof(Vertex)+g.indices.size()*sizeof(std::uint32_t)+std::size_t(tile->texture.sizeInBytes());
+    tile->bytes=g.vertices.size()*sizeof(Vertex)+g.indices.size()*sizeof(std::uint32_t)+std::size_t(tile->texture.sizeInBytes())+tile->localPositions.size()*sizeof(float);
     tile->resolutionMetres=info.metresPerTexel;tile->source=QStringLiteral("Google Earth · RockTree");return tile;
 }
 }

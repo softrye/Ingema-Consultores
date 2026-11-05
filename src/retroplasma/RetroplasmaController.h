@@ -12,12 +12,15 @@
 #include <QSet>
 #include <optional>
 #include <QVariantMap>
+#include <QJsonObject>
 #include <QtQml/qqmlregistration.h>
 
 class RetroplasmaController : public QObject {
     Q_OBJECT
     QML_ANONYMOUS
     Q_PROPERTY(bool active READ active NOTIFY changed)
+    Q_PROPERTY(bool cesiumBackend READ cesiumBackend CONSTANT)
+    Q_PROPERTY(QString cesiumBackdrop READ cesiumBackdrop NOTIFY changed)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(bool ready READ ready NOTIFY changed)
     Q_PROPERTY(bool navigationMode READ navigationMode NOTIFY changed)
@@ -39,7 +42,12 @@ public:
     bool renderActive()const{return m_active&&m_appVisible;}
     quint64 sceneRevision()const{return m_generation;}
     bool busy()const{return m_manifestBusy||!m_jobs.empty();}
-    bool ready()const{return bool(m_scene);}
+    bool ready()const{return cesiumBackend()?m_cesiumReady:bool(m_scene);}
+    bool cesiumBackend()const{
+        return true;
+    }
+    void acceptCesiumEvent(const QJsonObject &);
+    QString cesiumBackdrop()const{return m_cesiumBackdrop;}
     bool navigationMode()const{return m_navigationMode;}
     QString status()const{return m_status;}
     QString sourceName()const;
@@ -98,6 +106,16 @@ private:
     double m_measurementKm=0,m_geoWidth=0;
     quint64 m_geoRevision=0;
     QString m_documentMessage;
+    bool m_cesiumReady=false;
+    QString m_cesiumError;
+    QString m_cesiumBackdrop;
+    QVariantMap m_cesiumCamera,m_cesiumStats;
+    void openCesium();
+    void closeCesium();
+    void dispatchCesium(const QJsonObject &);
+    void sendCesiumBudget();
+    void sendCesiumLayers();
+    void setCesiumSource(const QString &,const QString &date=QString());
     inge::rp::EarthBudget m_budget;
     QString m_preferredImagery=QStringLiteral("rocktree");
     void tick();

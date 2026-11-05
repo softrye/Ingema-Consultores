@@ -1,0 +1,2 @@
+Natural Earth: ne_110m_admin_0_boundary_lines_land. Public domain.
+https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_boundary_lines_land.geojson

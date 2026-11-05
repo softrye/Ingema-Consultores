@@ -1,0 +1,7 @@
+{
+  "version": "1.147.0",
+  "archive": "Cesium-1.147.zip",
+  "engineSha256": "ca180396f07e0c96f5f53b4d18d95ffab7a8a2b5cc115aa9a6fe7037a043c2c7",
+  "runtimeDirectory": "Build/Cesium",
+  "networkCdn": false
+}

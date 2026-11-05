@@ -22,14 +22,15 @@ RetroplasmaController::RetroplasmaController(QObject *parent):QObject(parent),m_
     if(saved==QLatin1String("rocktree")||saved==QLatin1String("blue-marble")||saved==QLatin1String("landsat")||saved==QLatin1String("sentinel"))m_preferredImagery=saved;
     connect(&m_tick,&QTimer::timeout,this,&RetroplasmaController::tick);
     if(auto *app=qobject_cast<QGuiApplication *>(QCoreApplication::instance())){
-        connect(app,&QGuiApplication::applicationStateChanged,this,[this](Qt::ApplicationState state){m_appVisible=state==Qt::ApplicationActive;if(m_active&&m_appVisible){m_clock.restart();m_tick.start();}else m_tick.stop();emit renderChanged();});
+        connect(app,&QGuiApplication::applicationStateChanged,this,[this](Qt::ApplicationState state){if(cesiumBackend()){m_appVisible=state==Qt::ApplicationActive;if(m_active)dispatchCesium({{"op","visible"},{"value",m_appVisible}});emit renderChanged();return;}m_appVisible=state==Qt::ApplicationActive;if(m_active&&m_appVisible){m_clock.restart();m_tick.start();}else m_tick.stop();emit renderChanged();});
     }
     connect(QCoreApplication::instance(),&QCoreApplication::aboutToQuit,this,&RetroplasmaController::close);
 }
 RetroplasmaController::~RetroplasmaController(){close();m_pool.waitForDone();}
-void RetroplasmaController::open(){if(m_active)return;m_active=true;m_mailbox=std::make_shared<inge::rp::MetricsMailbox>();m_presentedFrames=m_lastFrameCount=0;m_fps=m_frameMs=0;m_clock.restart();m_telemetryClock.start();if(m_appVisible)m_tick.start();openPlanet();emit changed();}
+void RetroplasmaController::open(){if(cesiumBackend()){openCesium();return;}if(m_active)return;m_active=true;m_mailbox=std::make_shared<inge::rp::MetricsMailbox>();m_presentedFrames=m_lastFrameCount=0;m_fps=m_frameMs=0;m_clock.restart();m_telemetryClock.start();if(m_appVisible)m_tick.start();openPlanet();emit changed();}
 void RetroplasmaController::openPlanet(){m_preservedCamera.reset();QUrl url(QStringLiteral("inge-earth://global"));QUrlQuery query;query.addQueryItem(QStringLiteral("layer"),m_preferredImagery);url.setQuery(query);loadScene(url);}
 void RetroplasmaController::setPlanetImagery(const QString &layer,const QString &date){
+    if(cesiumBackend()){setCesiumSource(layer,date);return;}
     if(!m_active||(layer!=QLatin1String("rocktree")&&layer!=QLatin1String("blue-marble")&&layer!=QLatin1String("landsat")&&layer!=QLatin1String("sentinel")))return;
     m_preferredImagery=layer;QSettings().setValue(QStringLiteral("earth/imagery"),layer);
     if(m_scene&&m_scene->planetary)m_preservedCamera=m_camera;
@@ -44,13 +45,15 @@ void RetroplasmaController::setRenderBudget(const QVariantMap &values){
     next.maxLevel=std::clamp(values.value(QStringLiteral("maxLevel"),15).toInt(),8,21);
     double pixels=values.value(QStringLiteral("pixelError"),14).toDouble();next.pixelError=std::isfinite(pixels)?std::clamp(pixels,1.0,32.0):14;
     if(next.cpuBytes==m_budget.cpuBytes&&next.gpuBytes==m_budget.gpuBytes&&next.parallel==m_budget.parallel&&next.nodes==m_budget.nodes&&next.maxLevel==m_budget.maxLevel&&next.pixelError==m_budget.pixelError)return;
+    if(cesiumBackend()){m_budget=next;sendCesiumBudget();emit changed();emit renderChanged();return;}
     m_budget=next;m_pool.setMaxThreadCount(next.parallel);m_failed.clear();if(m_active)schedule();emit renderChanged();emit changed();
 }
 void RetroplasmaController::cancelJobs(){if(m_manifestCancel)m_manifestCancel->store(true);for(auto &job:m_jobs)job.cancelled->store(true);m_jobs.clear();}
 void RetroplasmaController::loadLocalScene(const QString &path){loadScene(path.startsWith(QLatin1String("file:"))||path.startsWith(QLatin1String("qrc:"))?QUrl(path):QUrl::fromLocalFile(path));}
-void RetroplasmaController::retryScene(){if(m_active&&!m_sceneUrl.isEmpty()){if(m_scene&&m_scene->planetary)m_preservedCamera=m_camera;loadScene(m_sceneUrl);}}
-void RetroplasmaController::close(){if(!m_active&&!m_manifestBusy)return;++m_generation;m_active=false;m_tick.stop();cancelJobs();m_scene.reset();m_cache.clear();m_failed.clear();m_renderTiles.clear();m_pendingTarget.reset();m_preservedCamera.reset();m_manifestBusy=false;m_navigationMode=false;m_status=QStringLiteral("CLOSED");emit renderChanged();emit changed();}
+void RetroplasmaController::retryScene(){if(cesiumBackend()){if(!m_cesiumReady){closeCesium();openCesium();}else setCesiumSource(m_preferredImagery);return;}if(m_active&&!m_sceneUrl.isEmpty()){if(m_scene&&m_scene->planetary)m_preservedCamera=m_camera;loadScene(m_sceneUrl);}}
+void RetroplasmaController::close(){if(cesiumBackend()){closeCesium();return;}if(!m_active&&!m_manifestBusy)return;++m_generation;m_active=false;m_tick.stop();cancelJobs();m_scene.reset();m_cache.clear();m_failed.clear();m_renderTiles.clear();m_pendingTarget.reset();m_preservedCamera.reset();m_manifestBusy=false;m_navigationMode=false;m_status=QStringLiteral("CLOSED");emit renderChanged();emit changed();}
 void RetroplasmaController::loadScene(const QUrl &url){
+    if(cesiumBackend()){if(url.scheme()==QLatin1String("inge-earth"))setCesiumSource(QUrlQuery(url).queryItemValue(QStringLiteral("layer")));else {m_status=m_cesiumError=QStringLiteral("CESIUM_LOCAL_SCENE_FORMAT_UNSUPPORTED");emit changed();}return;}
     if(!m_active)return;m_sceneUrl=url;cancelJobs();m_cache.clear();m_failed.clear();m_renderTiles.clear();m_scene.reset();m_manifestBusy=true;
     const bool rocktree=url.scheme()==QLatin1String("inge-earth")&&QUrlQuery(url).queryItemValue(QStringLiteral("layer"))==QLatin1String("rocktree");
     if(rocktree)m_provider=std::make_shared<inge::rp::RocktreeSceneProvider>();else m_provider=std::make_shared<inge::rp::PlanetSceneProvider>();
@@ -125,21 +128,24 @@ void RetroplasmaController::trimCache(const QSet<QString> &protectedKeys){
     while(bytes>m_budget.cpuBytes){auto candidate=m_cache.end();for(auto it=m_cache.begin();it!=m_cache.end();++it)if(!protectedKeys.contains(it.key())&&(candidate==m_cache.end()||it.value().used<candidate.value().used))candidate=it;if(candidate==m_cache.end()){m_status=QStringLiteral("RP_VISIBLE_CPU_CACHE_LIMIT");break;}bytes-=candidate.value().tile->bytes;m_cache.erase(candidate);}
 }
 void RetroplasmaController::orbit(double dx,double dy){
+    if(cesiumBackend()){if(m_active&&m_cesiumReady&&std::isfinite(dx)&&std::isfinite(dy))dispatchCesium({{"op","orbit"},{"x",dx},{"y",dy}});return;}
     if(!m_active||!std::isfinite(dx)||!std::isfinite(dy))return;
     double speed=m_camera.planetary()?std::clamp(m_camera.pose().distance/inge::rp::EarthRadius*.002,1e-6,.006):.006;
     m_camera.orbit(-dx*speed,dy*speed);
 }
-void RetroplasmaController::pan(double dx,double dy){if(m_active)m_camera.pan(-dx,dy);}
-void RetroplasmaController::zoom(double scale){if(m_active&&std::isfinite(scale)&&scale>0)m_camera.zoom(1/scale);}
-void RetroplasmaController::rotateView(double radians){if(m_active)m_camera.rotateHeading(radians);}
+void RetroplasmaController::pan(double dx,double dy){if(cesiumBackend()){if(m_active&&m_cesiumReady&&std::isfinite(dx)&&std::isfinite(dy))dispatchCesium({{"op","pan"},{"x",dx},{"y",dy}});return;}if(m_active)m_camera.pan(-dx,dy);}
+void RetroplasmaController::zoom(double scale){if(cesiumBackend()){if(m_active&&m_cesiumReady&&std::isfinite(scale)&&scale>0)dispatchCesium({{"op","zoom"},{"scale",scale}});return;}if(m_active&&std::isfinite(scale)&&scale>0)m_camera.zoom(1/scale);}
+void RetroplasmaController::rotateView(double radians){if(cesiumBackend()){if(m_active&&m_cesiumReady&&std::isfinite(radians))dispatchCesium({{"op","rotate"},{"radians",radians}});return;}if(m_active)m_camera.rotateHeading(radians);}
 bool RetroplasmaController::goTo(double latitude,double longitude,double altitude){
     if(!m_active||!std::isfinite(latitude)||!std::isfinite(longitude)||!std::isfinite(altitude)||std::abs(latitude)>90||std::abs(longitude)>180||std::abs(altitude)>100000)return false;
+    if(cesiumBackend()){if(!m_cesiumReady)m_pendingTarget=inge::rp::GeoPoint{latitude,longitude,altitude};else dispatchCesium({{"op","goto"},{"latitude",latitude},{"longitude",longitude},{"height",120000}});return true;}
     if(!m_scene){m_pendingTarget=inge::rp::GeoPoint{latitude,longitude,altitude};return true;}
     if(m_scene->planetary)m_camera.goToGeographic({latitude,longitude,altitude});else m_camera.goTo(inge::rp::enuToRender(inge::rp::ecefToEnu(inge::rp::geodeticToEcef({latitude,longitude,altitude}),m_scene->origin)));emit renderChanged();return true;
 }
 bool RetroplasmaController::command(const QString &name){
     if(!m_active)return false;
     if(name==QLatin1String("navigation")){m_navigationMode=!m_navigationMode;emit changed();return true;}
+    if(cesiumBackend()){dispatchCesium({{"op","action"},{"name",name}});return m_cesiumReady;}
     if(!m_scene)return false;
     if(m_scene->planetary&&(name==QLatin1String("southAmerica")||name==QLatin1String("peru")||name==QLatin1String("lima"))){
         if(name==QLatin1String("southAmerica"))m_camera.goToGeographic({-15,-60,0},6500000);
@@ -155,8 +161,9 @@ bool RetroplasmaController::command(const QString &name){
     else if(name==QLatin1String("reset")){if(m_scene->planetary)m_camera.framePlanet(m_width/m_height);else m_camera.reset(m_scene->bounds);}else if(name==QLatin1String("north"))m_camera.north();else return false;
     emit renderChanged();return true;
 }
-QString RetroplasmaController::coordinates()const{if(!m_scene)return {};auto point=m_scene->planetary?m_camera.planetTarget():inge::rp::ecefToGeodetic(inge::rp::enuToEcef(inge::rp::renderToEnu(m_camera.pose().focus),m_scene->origin));return QStringLiteral("%1°, %2° · objetivo %3 m · cámara %4 m").arg(point.latitude,0,'f',6).arg(point.longitude,0,'f',6).arg(point.altitude,0,'f',1).arg(m_camera.pose().distance,0,'f',1);}
+QString RetroplasmaController::coordinates()const{if(cesiumBackend()){return m_cesiumCamera.isEmpty()?QString():QStringLiteral("%1°, %2° · cámara %3 m").arg(m_cesiumCamera.value("latitude").toDouble(),0,'f',6).arg(m_cesiumCamera.value("longitude").toDouble(),0,'f',6).arg(m_cesiumCamera.value("cameraAltitude").toDouble(),0,'f',1);}if(!m_scene)return {};auto point=m_scene->planetary?m_camera.planetTarget():inge::rp::ecefToGeodetic(inge::rp::enuToEcef(inge::rp::renderToEnu(m_camera.pose().focus),m_scene->origin));return QStringLiteral("%1°, %2° · objetivo %3 m · cámara %4 m").arg(point.latitude,0,'f',6).arg(point.longitude,0,'f',6).arg(point.altitude,0,'f',1).arg(m_camera.pose().distance,0,'f',1);}
 QString RetroplasmaController::sourceName()const{
+    if(cesiumBackend())return m_scene?m_scene->source+QStringLiteral("\nCesium 1.147 · WGS84 · precisión RTC · detalle adaptativo por perfil."):QString();
     if(!m_scene)return {};if(!m_scene->planetary)return m_scene->source;
     if(m_scene->rocktreeRoot){double finest=std::numeric_limits<double>::max();for(const auto &tile:m_renderTiles)finest=std::min(finest,tile.tile->resolutionMetres);
         return m_scene->source+QStringLiteral("\nDetalle máximo del perfil: nivel %1. Caché CPU/GPU: %2 / %3 MiB.").arg(m_budget.maxLevel).arg(qulonglong(m_budget.cpuBytes/1048576)).arg(qulonglong(m_budget.gpuBytes/1048576))
@@ -168,9 +175,10 @@ QString RetroplasmaController::sourceName()const{
         +QStringLiteral(" Zoom mínimo de cámara: 40 km; no detalle urbano submétrico.");
 }
 QString RetroplasmaController::attribution()const{
+    if(cesiumBackend())return m_scene&&m_scene->imagery==QLatin1String("rocktree")?QStringLiteral("Google Earth / proveedores · NASA / Natural Earth"):m_scene?m_scene->source:QString();
     if(!m_scene)return {};
     if(m_scene->rocktreeRoot)return QStringLiteral("Google Earth · imágenes y geometría de sus respectivos proveedores");
     if(m_scene->imagery==QLatin1String("sentinel"))return QStringLiteral("NASA / USGS · EOxCloudless by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016). CC BY 4.0");
     return QStringLiteral("NASA / USGS · Blue Marble / Landsat");
 }
-QVariantMap RetroplasmaController::metrics()const{std::lock_guard lock(m_mailbox->mutex);auto &m=m_mailbox->value;std::size_t cpu=0;for(const auto &entry:m_cache)cpu+=entry.tile->bytes;return {{QStringLiteral("fps"),m_fps},{QStringLiteral("frameMs"),m_frameMs},{QStringLiteral("cpuRecordMs"),m.cpuRecordMs},{QStringLiteral("gpuMiB"),double(m.gpuBytes)/1048576},{QStringLiteral("cpuMiB"),double(cpu)/1048576},{QStringLiteral("meshes"),m.meshes},{QStringLiteral("triangles"),m.triangles},{QStringLiteral("textures"),m.textures},{QStringLiteral("pending"),m_jobs.size()},{QStringLiteral("decodeErrors"),m_failed.size()},{QStringLiteral("renderError"),m.error},{QStringLiteral("backend"),m.backend}};}
+QVariantMap RetroplasmaController::metrics()const{if(cesiumBackend()){auto result=m_cesiumStats;result.insert("renderError",m_cesiumError);result.insert("decodeErrors",m_cesiumError.isEmpty()?0:1);return result;}std::lock_guard lock(m_mailbox->mutex);auto &m=m_mailbox->value;std::size_t cpu=0;for(const auto &entry:m_cache)cpu+=entry.tile->bytes;return {{QStringLiteral("fps"),m_fps},{QStringLiteral("frameMs"),m_frameMs},{QStringLiteral("cpuRecordMs"),m.cpuRecordMs},{QStringLiteral("gpuMiB"),double(m.gpuBytes)/1048576},{QStringLiteral("cpuMiB"),double(cpu)/1048576},{QStringLiteral("meshes"),m.meshes},{QStringLiteral("triangles"),m.triangles},{QStringLiteral("textures"),m.textures},{QStringLiteral("pending"),m_jobs.size()},{QStringLiteral("decodeErrors"),m_failed.size()},{QStringLiteral("renderError"),m.error},{QStringLiteral("backend"),m.backend}};}

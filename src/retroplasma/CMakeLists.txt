@@ -15,6 +15,8 @@ qt_add_qml_module(InGeRetroplasma STATIC
         RetroplasmaGeometryDecoder.h RetroplasmaGeometryDecoder.cpp
         RetroplasmaTextureDecoder.h RetroplasmaTextureDecoder.cpp
         RetroplasmaRocktree.h RetroplasmaRocktree.cpp RetroplasmaCrnDecoder.cpp
+        CesiumRocktreeAssets.h CesiumRocktreeAssets.cpp CesiumNativeView.h CesiumNativeView.cpp
+        CesiumEarthController.cpp
         RetroplasmaRocktreeProvider.h RetroplasmaRocktreeProvider.cpp RetroplasmaRocktreeScheduler.cpp
         RetroplasmaScene.h
         RetroplasmaDataProvider.h RetroplasmaDataProvider.cpp

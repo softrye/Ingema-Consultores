@@ -9,6 +9,7 @@ public:
     void framePlanet(double aspect,bool snap=false);
     void goToGeographic(GeoPoint,double cameraAltitude=120000);
     void rotateHeading(double radians);
+    void setPlanetView(GeoPoint p,double height,double heading){m_planetary=true;m_heading=m_targetHeading=heading;m_current=m_target={{0,p.altitude,0},p.longitude*Radians,p.latitude*Radians,height};}
     double heading()const{return m_heading;}
     GeoPoint planetPosition()const;
     GeoPoint planetTarget()const;

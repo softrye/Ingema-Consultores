@@ -1818,7 +1818,7 @@ Item {
     // legibilidad, tarjetas y saludo), no sólo la foto desenfocada. Si
     // homeContent está oculto (desenfoque del panel Agregar), se usa la foto.
     readonly property Item dockBackdropSource: page === "calicatas" && calicatasEditor.status === Loader.Ready ? calicatasEditor
-                                             : page === "earth" && earthNativeLoader.status === Loader.Ready ? earthNativeLoader
+                                             : page === "earth" && earthNativeLoader.status === Loader.Ready && earthNativeLoader.item ? earthNativeLoader.item.glassBackdropItem
                                              : page === "rendiciones" && renditionsLoader.status === Loader.Ready ? renditionsLoader
                                              : page !== "calicatas" && page !== "earth" && page !== "rendiciones" && homeContent.visible
                                                ? homeContent

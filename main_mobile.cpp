@@ -1,4 +1,5 @@
 ﻿#include <QGuiApplication>
+#include <QSurfaceFormat>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QtQml/qqml.h>
@@ -189,6 +190,8 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationDomain("ingeplus.app");
     QCoreApplication::setApplicationName("InGePlusMobile");
     QCoreApplication::setApplicationVersion("1.1.13");
+
+    { auto format=QSurfaceFormat::defaultFormat(); format.setAlphaBufferSize(8); QSurfaceFormat::setDefaultFormat(format); }
 
     qInfo() << "INGE_STARTUP_STAGE QT_APP_READY";
     // Antes que AuthSession y los demás servicios: la migración de instalaciones

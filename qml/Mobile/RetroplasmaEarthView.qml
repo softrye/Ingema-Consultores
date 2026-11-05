@@ -12,6 +12,7 @@ import "lib/EarthQuality.js" as EarthQuality
 Item {
     id: root
     required property var controller
+    readonly property Item glassBackdropItem: cesiumGlassBackdrop.status === Image.Ready ? cesiumGlassBackdrop : null
     property string performanceProfile: "LOW"
     property bool performancePressure: false
     readonly property var earthBudget: EarthQuality.budget(performanceProfile, performancePressure)
@@ -114,8 +115,37 @@ Item {
     }
     Component.onDestruction: finishGps()
 
-    Rectangle { anchors.fill: parent; color: "#070F1E" }
-    RetroplasmaView {
+    Rectangle { anchors.fill: parent; color: "#000000" }
+    Canvas {
+        id: starfield
+        visible: !root.controller.cesiumBackend // The SAME algorithm is behind Cesium's transparent canvas.
+        anchors.fill: parent
+        renderStrategy: Canvas.Cooperative
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+        onPaint: {
+            var c = getContext("2d"); c.reset()
+            var seed = 7
+            function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647 }
+            var count = Math.round(width * height / 2600)
+            for (var i = 0; i < count; ++i) {
+                var big = rnd() > 0.93
+                c.globalAlpha = 0.25 + 0.75 * rnd()
+                c.fillStyle = rnd() > 0.85 ? "#CFE3FF" : "#FFFFFF"
+                c.beginPath(); c.arc(rnd() * width, rnd() * height, big ? 1.3 : 0.7, 0, 2 * Math.PI); c.fill()
+            }
+        }
+    }
+    Image {
+        id: cesiumGlassBackdrop
+        anchors.fill: parent
+        source: root.controller.cesiumBackdrop
+        retainWhileLoading: true
+        cache: false
+        // Drawn below the cutout; used only as a source by the existing glass.
+        visible: root.controller.cesiumBackdrop.length > 0
+    }
+    CesiumNativeView {
         id: viewport
         objectName: "earthFullViewport"
         anchors.fill: parent
@@ -161,7 +191,7 @@ Item {
     readonly property real cameraAltitude: Number(controller.cameraInfo.cameraAltitude) || 0
     readonly property real rawHeading: Number(controller.cameraInfo.heading) || 0
     readonly property real headingOffset: ((rawHeading % 360) + 540) % 360 - 180
-    readonly property real minCameraAltitude: 2000         // límites de RetroplasmaCamera::zoom
+    readonly property real minCameraAltitude: earthBudget.gpuMiB <= 32 ? 2000 : 80
     readonly property real maxCameraAltitude: 50000000
     property real zoomPrediction: 0                        // telemetría a 2 Hz: predice toques seguidos
     readonly property real effectiveAltitude: zoomPrediction > 0 ? zoomPrediction : cameraAltitude
@@ -247,7 +277,7 @@ Item {
                     id: controlCapture
                     width: controlGlass.width
                     height: controlGlass.height
-                    sourceItem: viewport
+                    sourceItem: root.controller.cesiumBackend ? cesiumGlassBackdrop : viewport
                     sourceRect: Qt.rect(controlGlass.x, controlGlass.y, controlGlass.width, controlGlass.height)
                     live: root.glassLive
                     hideSource: false
@@ -629,7 +659,7 @@ Item {
                 Column {
                     width: parent.width; spacing: 8 * root.u; visible: root.sheet === "info"
                     Text { font.family: root.fontFamily; width: parent.width; text: root.controller.coordinates; color: "#344A62"; wrapMode: Text.WordWrap }
-                    Text { font.family: root.fontFamily; width: parent.width; text: "Resolución del nodo más fino cargado: " + Number(root.controller.cameraInfo.resolutionMetres).toFixed(2) + " m/texel. Fuente: " + root.controller.imageryLayer; color: "#344A62"; wrapMode: Text.WordWrap }
+                    Text { font.family: root.fontFamily; width: parent.width; text: "Cesium 1.147 · WGS84 · detalle adaptativo. Fuente: " + root.controller.imageryLayer; color: "#344A62"; wrapMode: Text.WordWrap }
                     Text { font.family: root.fontFamily; width: parent.width; text: root.controller.status; color: "#344A62"; wrapMode: Text.WordWrap }
                     Text { font.family: root.fontFamily; width: parent.width; text: JSON.stringify(root.controller.metrics,null,2); color: "#344A62"; font.pixelSize: 11 * root.u; wrapMode: Text.WrapAnywhere }
                 }

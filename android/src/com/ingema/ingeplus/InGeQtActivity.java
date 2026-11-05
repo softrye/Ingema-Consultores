@@ -85,6 +85,7 @@ public final class InGeQtActivity extends QtActivity {
     private WebView earthWebView;
     private WebViewAssetLoader earthAssetLoader;
     private boolean earthWebViewLoaded;
+    private final java.util.ArrayDeque<String> earthNativeCommands = new java.util.ArrayDeque<>();
     private long earthRendererLostAtMs;
     // LOW/ULTRA_LOW: a hidden Cesium WebView is released shortly after it
     // leaves the screen; other tiers keep it for a fast reopen and release it
@@ -134,6 +135,7 @@ public final class InGeQtActivity extends QtActivity {
 
     // Home V2: abre / cierra el visor Cesium existente (WebView directo con
     // los mismos puentes). Atrás dentro del visor lo cierra y vuelve a Qt.
+    @Keep
     public static boolean showEarthViewer() {
         final InGeQtActivity activity = current.get();
         if (activity == null)
@@ -142,10 +144,32 @@ public final class InGeQtActivity extends QtActivity {
         return true;
     }
 
+    @Keep
     public static void hideEarthViewer() {
         final InGeQtActivity activity = current.get();
         if (activity != null)
             activity.runOnUiThread(activity::hideEarthViewerOnUi);
+    }
+    @Keep
+    public static void executeEarthCommand(String script) {
+        final InGeQtActivity activity = currentActivity();
+        if (activity == null || script == null || script.length() > 4 * 1024 * 1024) return;
+        activity.runOnUiThread(() -> {
+            if (activity.earthWebView != null && activity.earthWebViewLoaded) activity.earthWebView.evaluateJavascript(script, null);
+            else if (activity.earthNativeCommands.size() < 128) activity.earthNativeCommands.addLast(script);
+        });
+    }
+    @Keep
+    public static void setEarthViewport(int x, int y, int width, int height) {
+        final InGeQtActivity activity = currentActivity();
+        if (activity == null || width <= 0 || height <= 0) return;
+        activity.runOnUiThread(() -> {
+            if (activity.earthWebView == null) return;
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) activity.earthWebView.getLayoutParams();
+            if (params.width == width && params.height == height && params.leftMargin == x && params.topMargin == y) return;
+            params.width = width; params.height = height; params.leftMargin = x; params.topMargin = y;
+            activity.earthWebView.setLayoutParams(params);
+        });
     }
 
     // Respuesta háptica del sistema (respeta el ajuste de vibración táctil
@@ -231,14 +255,13 @@ public final class InGeQtActivity extends QtActivity {
         if (webView == null)
             return;
         webView.setVisibility(View.VISIBLE);
-        webView.bringToFront();
-        webView.requestFocus();
+        CesiumNativeBridge.compose(findViewById(android.R.id.content), true);
         if (earthWebViewLoaded) {
             webView.evaluateJavascript(
                     "window.InGeEarthEngineSetVisible && window.InGeEarthEngineSetVisible(true)", null);
         }
         android.util.Log.i("InGeEarthDirect", "INGE_EARTH_VIEWER_SHOWN loaded=" + earthWebViewLoaded
-                + " engine=cesium_technical_backup");
+                + " engine=cesium_1_147");
     }
 
     private void hideEarthViewerOnUi() {
@@ -249,6 +272,8 @@ public final class InGeQtActivity extends QtActivity {
         webView.evaluateJavascript(
                 "window.InGeEarthEngineSetVisible && window.InGeEarthEngineSetVisible(false)", null);
         webView.setVisibility(View.GONE);
+        CesiumNativeBridge.restoreAll();
+        earthNativeCommands.clear();
         android.util.Log.i("InGeEarthDirect", "INGE_EARTH_VIEWER_HIDDEN");
         // En gama baja se libera WebGL al ocultar (se recrea al volver a abrir).
         if (isLowMemoryTier())
@@ -462,8 +487,10 @@ public final class InGeQtActivity extends QtActivity {
         performanceHandler.postDelayed(betaPerformanceSample, 15_000L);
         if (performanceRuntime != null)
             performanceRuntime.setTrackingEnabled(true);
-        if (earthWebView != null)
+        if (earthWebView != null) {
             earthWebView.onResume();
+            if (isEarthViewerVisible()) earthWebView.post(() -> CesiumNativeBridge.compose(findViewById(android.R.id.content), true));
+        }
     }
 
     @Override
@@ -639,6 +666,7 @@ public final class InGeQtActivity extends QtActivity {
         // Each WebView keeps its own loader: requests already queued by a
         // WebView whose renderer died may still arrive after the field is reset.
         final WebViewAssetLoader assetLoader = new WebViewAssetLoader.Builder()
+                .addPathHandler("/earth-data/", CesiumNativeBridge::resource)
                 .addPathHandler("/assets/",
                         new WebViewAssetLoader.AssetsPathHandler(this))
                 .build();
@@ -656,7 +684,7 @@ public final class InGeQtActivity extends QtActivity {
         settings.setGeolocationEnabled(false);
 
         // Mismo tono que la pantalla de carga de Earth: sin flash negro.
-        webView.setBackgroundColor(Color.rgb(7, 17, 28));
+        webView.setBackgroundColor(Color.BLACK);
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         webView.setVisibility(View.GONE);
@@ -676,16 +704,24 @@ public final class InGeQtActivity extends QtActivity {
                 new EarthConfigBridge(), "InGeEarthConfig");
         webView.addJavascriptInterface(
                 new EarthUiBridge(), "InGeEarthUiBridge");
+        webView.addJavascriptInterface(new CesiumNativeBridge(), "InGeCesiumNative");
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(
                     WebView view, WebResourceRequest request) {
                 return assetLoader.shouldInterceptRequest(request.getUrl());
             }
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                if (!request.isForMainFrame()) return false;
+                final android.net.Uri uri = request.getUrl();
+                return !"https".equals(uri.getScheme()) || !"appassets.androidplatform.net".equals(uri.getHost()) || !uri.getPath().startsWith("/assets/cesium/");
+            }
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 earthWebViewLoaded = true;
+                while (!earthNativeCommands.isEmpty()) view.evaluateJavascript(earthNativeCommands.removeFirst(), null);
                 if (view.getVisibility() == View.VISIBLE)
                     view.evaluateJavascript(
                             "window.InGeEarthEngineSetVisible && window.InGeEarthEngineSetVisible(true)", null);
@@ -715,7 +751,7 @@ public final class InGeQtActivity extends QtActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 Gravity.TOP | Gravity.START);
-        content.addView(webView, params);
+        content.addView(webView, 0, params);
         earthWebView = webView;
         webView.loadUrl(EARTH_ASSET_URL);
         android.util.Log.i("InGeEarthDirect",
@@ -757,8 +793,12 @@ public final class InGeQtActivity extends QtActivity {
         earthWebView = null;
         earthAssetLoader = null;
         earthWebViewLoaded = false;
+        CesiumNativeBridge.restoreAll();
+        earthNativeCommands.clear();
         if (webView == null)
             return;
+        try { webView.removeJavascriptInterface("InGeCesiumNative"); }
+        catch (Throwable ignored) {}
         try { webView.removeJavascriptInterface("InGeEarthTelemetry"); }
         catch (Throwable ignored) {}
         try { webView.removeJavascriptInterface("InGeEarthConfig"); }
@@ -804,6 +844,7 @@ public final class InGeQtActivity extends QtActivity {
             return;
         }
         stopEarthLocationSearch();
+        CesiumNativeBridge.rendererGone();
         destroyDirectEarthWebView();
     }
 

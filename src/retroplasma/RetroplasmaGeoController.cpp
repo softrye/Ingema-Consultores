@@ -44,7 +44,7 @@ void RetroplasmaController::centerGeoLayer(const QString &id,int feature){
     for(auto &l:m_geoLayers)if(l.id==id){std::vector<inge::rp::GeoPoint> points;
         if(feature>=0&&feature<int(l.document.features.size()))points=l.document.features[feature].points;else for(auto &f:l.document.features)points.insert(points.end(),f.points.begin(),f.points.end());if(points.empty())return;
         double west=points[0].longitude,east=west,south=90,north=-90;for(auto p:points){double lon=west+std::remainder(p.longitude-west,360.0);west=std::min(west,lon);east=std::max(east,lon);south=std::min(south,p.latitude);north=std::max(north,p.latitude);}
-        double lon=std::remainder((west+east)*.5,360.0),lat=(south+north)*.5,extent=inge::rp::surfaceDistance({south,west,0},{north,east,0});m_camera.goToGeographic({lat,lon,0},std::clamp(extent*1.8,5000.0,50000000.0));emit renderChanged();return;
+        double lon=std::remainder((west+east)*.5,360.0),lat=(south+north)*.5,extent=inge::rp::surfaceDistance({south,west,0},{north,east,0});if(cesiumBackend())dispatchCesium({{"op","goto"},{"latitude",lat},{"longitude",lon},{"height",std::clamp(extent*1.8,5000.0,50000000.0)}});else m_camera.goToGeographic({lat,lon,0},std::clamp(extent*1.8,5000.0,50000000.0));emit renderChanged();return;
     }
 }
 void RetroplasmaController::addPlace(const QString &name){
@@ -56,6 +56,7 @@ void RetroplasmaController::addPlace(const QString &name){
 void RetroplasmaController::beginMeasure(){m_measureLine={};m_measureLine.kind=QStringLiteral("LineString");m_measureLine.name=QStringLiteral("Medición");m_measuring=true;m_measurementKm=0;m_documentMessage=QStringLiteral("Toca dos posiciones sobre la Tierra para medir.");rebuildGeoTiles();emit geoChanged();}
 void RetroplasmaController::cancelMeasure(){m_measuring=false;m_measureLine={};m_measurementKm=0;rebuildGeoTiles();emit geoChanged();}
 bool RetroplasmaController::selectPosition(double x,double y,bool marker){
+    if(cesiumBackend()){if(!m_active||!m_cesiumReady||!std::isfinite(x)||!std::isfinite(y))return false;dispatchCesium({{"op","pick"},{"x",x},{"y",y},{"intent",m_measuring?"measure":marker?"place":"goto"}});return true;}
     if(!m_scene||!m_scene->planetary||!m_active)return false;inge::rp::GeoPoint hit;
     if(!inge::rp::pickPlanet(viewProjection(),m_camera.eye(),2*x/m_width-1,1-2*y/m_height,hit,71)){m_documentMessage=QStringLiteral("Toca la superficie terrestre.");emit geoChanged();return false;}
     hit.altitude=0;
@@ -64,6 +65,7 @@ bool RetroplasmaController::selectPosition(double x,double y,bool marker){
     else m_camera.goToGeographic(hit,std::max(2000.0,m_camera.pose().distance*.5));return true;
 }
 void RetroplasmaController::rebuildGeoTiles(){
+    if(cesiumBackend()){sendCesiumLayers();emit renderChanged();return;}
     m_geoTiles.clear();double width=std::clamp(m_camera.pose().distance*2*std::tan(22.5*inge::rp::Radians)/m_height*3,10.0,30000.0);m_geoWidth=width;++m_geoRevision;std::size_t bytes=0;bool exceeded=false;
     auto add=[&](const inge::rp::GeoFeature &f){auto tile=inge::rp::geoFeatureTile(f,width);if(tile&&bytes+tile->bytes<=16*1024*1024){bytes+=tile->bytes;m_geoTiles.push_back({QStringLiteral("geo:%1:%2").arg(m_geoRevision).arg(m_geoTiles.size()),tile});}else if(tile)exceeded=true;};
     for(auto &l:m_geoLayers){if(exceeded)break;if(l.visible)for(auto &f:l.document.features){if(exceeded)break;if(f.visible)add(f);}}
@@ -71,6 +73,7 @@ void RetroplasmaController::rebuildGeoTiles(){
     if(exceeded){m_documentMessage=QStringLiteral("Límite gráfico de capas (16 MiB). Algunas geometrías no se muestran: oculta o elimina capas.");emit geoChanged();}emit renderChanged();
 }
 QVariantMap RetroplasmaController::cameraInfo()const{
+    if(cesiumBackend())return m_cesiumCamera;
     auto p=m_camera.planetTarget();double metresPerPixel=m_camera.pose().distance*2*std::tan(22.5*inge::rp::Radians)/m_height;
     double resolution=19568;for(auto &t:m_renderTiles)if(t.tile->coveragePercent>0)resolution=std::min(resolution,t.tile->resolutionMetres);
     return {{"latitude",p.latitude},{"longitude",p.longitude},{"altitude",p.altitude},{"cameraAltitude",m_camera.pose().distance},{"heading",m_camera.heading()/inge::rp::Radians},{"metresPerPixel",metresPerPixel},{"resolutionMetres",resolution}};
