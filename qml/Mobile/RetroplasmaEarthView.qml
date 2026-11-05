@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Effects
 import InGe.Retroplasma 1.0
+import "lib/EarthQuality.js" as EarthQuality
 
 // One native GPU viewport; forms and telemetry remain ordinary Qt Quick.
 // UX 5.0: sin barras superiores/inferiores propias. Buscar, Lugares, Medir,
@@ -11,6 +12,11 @@ import InGe.Retroplasma 1.0
 Item {
     id: root
     required property var controller
+    property string performanceProfile: "LOW"
+    property bool performancePressure: false
+    readonly property var earthBudget: EarthQuality.budget(performanceProfile, performancePressure)
+    onEarthBudgetChanged: if (root.controller) root.controller.setRenderBudget(earthBudget)
+    Component.onCompleted: root.controller.setRenderBudget(earthBudget)
     property real u: 1
     property string fontFamily: ""
     property string iconFamily: ""          // Lucide, la misma fuente del Dock
@@ -395,7 +401,7 @@ Item {
 
     Text { font.family: root.fontFamily;
         anchors.centerIn: parent; width: parent.width - 100 * root.u
-        visible: !root.controller.ready
+        visible: !root.controller.ready || (root.controller.busy && Number(root.controller.metrics.meshes) === 0)
         text: root.controller.busy ? "Cargando la Tierra..." : root.controller.status
         color: "white"; wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter
     }
@@ -426,6 +432,13 @@ Item {
         }
         Text { font.family: root.fontFamily
             width: parent.width
+            visible: Number(root.controller.metrics.decodeErrors) > 0 || String(root.controller.metrics.renderError || "").length > 0
+            text: String(root.controller.metrics.renderError || root.controller.status)
+            color: "#FFD0B0"; style: Text.Outline; styleColor: "#070F1E"
+            font.pixelSize: 11 * root.u; wrapMode: Text.WordWrap
+        }
+        Text { font.family: root.fontFamily
+            width: parent.width
             visible: root.coordinatesShown
             text: {
                 var p = root.controller.cameraInfo
@@ -449,9 +462,8 @@ Item {
                 x: 11 * root.u
                 anchors.verticalCenter: parent.verticalCenter
                 width: Math.min(implicitWidth, telemetry.width - 22 * root.u)
-                text: root.attributionExpanded
-                      ? "NASA / USGS · EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016). CC BY 4.0. Toca de nuevo para ver Capas y fuentes."
-                      : "ⓘ NASA / USGS · EOxCloudless by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016)"
+                text: "ⓘ " + root.controller.attribution
+                      + (root.attributionExpanded ? ". Toca de nuevo para ver Capas y fuentes." : "")
                 color: Qt.rgba(1, 1, 1, 0.86)
                 font.family: root.fontFamily
                 font.pixelSize: 9 * root.u
@@ -460,7 +472,7 @@ Item {
                 elide: Text.ElideRight
             }
             Accessible.role: Accessible.Button
-            Accessible.name: "Atribución: NASA / USGS. EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016). CC BY 4.0"
+            Accessible.name: "Atribución: " + root.controller.attribution
             Accessible.onPressAction: root.toggleAttribution()
             MouseArea {
                 anchors.fill: parent
@@ -558,6 +570,7 @@ Item {
                 }
                 Column {
                     width: parent.width; spacing: 8 * root.u; visible: root.sheet === "layers"
+                    Button { font.family: root.fontFamily; width: parent.width; text: "Google Earth | Geometría 3D RockTree"; onClicked: root.controller.setPlanetImagery("rocktree") }
                     Button { font.family: root.fontFamily; width: parent.width; text: "NASA + Sentinel 2016 | 10 m"; onClicked: root.controller.setPlanetImagery("sentinel") }
                     Button { font.family: root.fontFamily; width: parent.width; text: "NASA Blue Marble | 500 m"; onClicked: root.controller.setPlanetImagery("blue-marble") }
                     TextField { id: imageryDate; width: parent.width; placeholderText: "Fecha Landsat AAAA-MM-DD; vacio = reciente" }
@@ -616,7 +629,7 @@ Item {
                 Column {
                     width: parent.width; spacing: 8 * root.u; visible: root.sheet === "info"
                     Text { font.family: root.fontFamily; width: parent.width; text: root.controller.coordinates; color: "#344A62"; wrapMode: Text.WordWrap }
-                    Text { font.family: root.fontFamily; width: parent.width; text: "Resolucion mas fina cargada: " + Number(root.controller.cameraInfo.resolutionMetres).toFixed(0) + " m/pixel. La base NASA permanece en zonas sin detalle."; color: "#344A62"; wrapMode: Text.WordWrap }
+                    Text { font.family: root.fontFamily; width: parent.width; text: "Resolución del nodo más fino cargado: " + Number(root.controller.cameraInfo.resolutionMetres).toFixed(2) + " m/texel. Fuente: " + root.controller.imageryLayer; color: "#344A62"; wrapMode: Text.WordWrap }
                     Text { font.family: root.fontFamily; width: parent.width; text: root.controller.status; color: "#344A62"; wrapMode: Text.WordWrap }
                     Text { font.family: root.fontFamily; width: parent.width; text: JSON.stringify(root.controller.metrics,null,2); color: "#344A62"; font.pixelSize: 11 * root.u; wrapMode: Text.WrapAnywhere }
                 }

@@ -1005,6 +1005,10 @@ Item {
             sourceComponent: Component {
                 RetroplasmaEarthView {
                     controller: EarthNative
+                    performanceProfile: GraphicsCore.fidelity
+                    performancePressure: GraphicsCore.powerSaveMode || GraphicsCore.thermalStatus >= 3
+                                         || (GraphicsCore.memoryTrimLevel >= 10 && GraphicsCore.memoryTrimLevel <= 15)
+                                         || GraphicsCore.memoryTrimLevel >= 60
                     otherGpsClientActive: function() { return home.page === "calicatas" && calicatasEditor.item && calicatasEditor.item.gpsEnabled }
                     u: home.u
                     fontFamily: home.fontFamily

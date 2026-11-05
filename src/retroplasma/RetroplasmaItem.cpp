@@ -37,6 +37,7 @@ class Renderer final : public QQuickRhiItemRenderer {
     bool m_active=false;
     quint64 m_sceneRevision=0;
     bool m_sceneChanged=false;
+    std::size_t m_gpuBudget=32*1024*1024;
     void clearGpu(){m_drawKeys.clear();m_tiles.clear();m_failed.clear();m_sampler.reset();m_uniform.reset();m_pass=nullptr;}
     void initialize(QRhiCommandBuffer *)override{
         if(m_rhi!=rhi()){clearGpu();m_rhi=rhi();m_vertex={};m_fragment={};}
@@ -48,6 +49,7 @@ class Renderer final : public QQuickRhiItemRenderer {
         if(controller&&m_sceneRevision!=controller->sceneRevision()){
             m_sceneRevision=controller->sceneRevision();m_sceneChanged=true;
         }
+        if(controller&&m_gpuBudget!=controller->gpuBudgetBytes()){m_gpuBudget=controller->gpuBudgetBytes();m_sceneChanged=true;}
         if(controller){m_selected=controller->renderTiles();m_camera=controller->viewProjection();m_light=controller->viewLight();m_mailbox=controller->mailbox();}
         else {m_selected.clear();m_mailbox.reset();}
     }
@@ -95,7 +97,7 @@ class Renderer final : public QQuickRhiItemRenderer {
         auto *uploads=m_rhi->nextResourceUpdateBatch();std::set<QString> wanted;std::size_t budget=0;bool replacementReady=true;
         for(const auto &selection:m_selected){
             if(!selection.tile)continue;
-            if(budget+selection.tile->bytes>64*1024*1024){m_error=QStringLiteral("RP_GPU_MEMORY_LIMIT");replacementReady=false;continue;}
+            if(budget+selection.tile->bytes>m_gpuBudget){m_error=QStringLiteral("RP_GPU_MEMORY_LIMIT");replacementReady=false;continue;}
             wanted.insert(selection.key);budget+=selection.tile->bytes;
         }
         // Preserve the last complete draw until every replacement is GPU-ready.
@@ -106,7 +108,7 @@ class Renderer final : public QQuickRhiItemRenderer {
             if(m_failed.count(selection.key)){replacementReady=false;continue;}
             const auto &tile=*selection.tile;GpuTile gpu;
             auto reject=[&](){m_failed.insert(selection.key);replacementReady=false;};
-            if(allocated+tile.bytes>64*1024*1024){m_error=QStringLiteral("RP_GPU_TRANSITION_MEMORY_LIMIT");reject();continue;}
+            if(allocated+tile.bytes>m_gpuBudget){m_error=QStringLiteral("RP_GPU_TRANSITION_MEMORY_LIMIT");reject();continue;}
             if(tile.geometry.vertices.size()>65535){m_error=QStringLiteral("RP_INDEX16_VERTEX_LIMIT");reject();continue;}
             std::vector<quint16> indices;indices.reserve(tile.geometry.indices.size());bool valid=true;
             for(auto index:tile.geometry.indices){if(index>=tile.geometry.vertices.size()){valid=false;break;}indices.push_back(quint16(index));}

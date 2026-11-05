@@ -612,6 +612,7 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/flowcore/FlowVariant.qml"
             "${MOBILE_QML_DIR}/flowcore/ImeAwareFlickable.qml"
             "${MOBILE_QML_DIR}/lib/IconCatalog.js"
+            "${MOBILE_QML_DIR}/lib/EarthQuality.js"
             "${MOBILE_QML_DIR}/lib/PropACalicataIconMap.js"
             "${MOBILE_QML_DIR}/pages/CalicataFormPage.qml"
             "${MOBILE_QML_DIR}/pages/CalicataOperationOverlay.qml"

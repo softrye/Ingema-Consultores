@@ -13,9 +13,9 @@
 ## Fases
 
 - [x] 1. Fuentes y pruebas de contrato/fixtures añadidas: Protobuf, jerarquía, límites, vértices, UV, índices, texturas múltiples y CRN. Pruebas C++ pendientes de compilar por el usuario.
-- [ ] 2. Proveedor, caché HTTPS cancelable, scheduler y viewport: recorrido lazy de BulkMetadata, geometría real, créditos y errores visibles; conservar cámara al cambiar fuente.
-- [ ] 3. Enlazar perfiles existentes a caché CPU/GPU, concurrencia y detalle; ajustar selección y navegación; preservar estrellas y atmósfera de Claude.
-- [ ] 4. Verificación sin compilar, revisión de diferencias y commits sólo de cambios propios. Documentar lo pendiente de validar en Android.
+- [x] 2. Fuentes integradas: proveedor, caché HTTPS cancelable, scheduler y viewport. Atribución general visible; quedan pendientes los IDs específicos de proveedores y la validación visual.
+- [x] 3. Perfiles existentes enlazados a caché CPU/GPU, concurrencia y detalle; estrellas y atmósfera de Claude preservadas.
+- [x] 4. Verificación sin compilar, revisión de diferencias y commits sólo de cambios propios. Ver `docs/INGE_EARTH_ROCKTREE_20261105.md` para los límites y las pruebas pendientes en Android.
 
 ## Verificación
 

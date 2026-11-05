@@ -23,6 +23,8 @@ class RetroplasmaController : public QObject {
     Q_PROPERTY(bool navigationMode READ navigationMode NOTIFY changed)
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(QString sourceName READ sourceName NOTIFY changed)
+    Q_PROPERTY(QString attribution READ attribution NOTIFY changed)
+    Q_PROPERTY(QString imageryLayer READ imageryLayer NOTIFY changed)
     Q_PROPERTY(QString coordinates READ coordinates NOTIFY changed)
     Q_PROPERTY(QVariantMap metrics READ metrics NOTIFY changed)
     Q_PROPERTY(QVariantMap cameraInfo READ cameraInfo NOTIFY changed)
@@ -41,6 +43,9 @@ public:
     bool navigationMode()const{return m_navigationMode;}
     QString status()const{return m_status;}
     QString sourceName()const;
+    QString attribution()const;
+    QString imageryLayer()const{return m_scene?m_scene->imagery:QString();}
+    std::size_t gpuBudgetBytes()const{return m_budget.gpuBytes;}
     QString coordinates()const;
     QVariantMap metrics()const;
     QVariantMap cameraInfo()const;
@@ -66,6 +71,7 @@ public:
     Q_INVOKABLE void retryScene();
     Q_INVOKABLE void openPlanet();
     Q_INVOKABLE void setPlanetImagery(const QString &layer,const QString &date=QString());
+    Q_INVOKABLE void setRenderBudget(const QVariantMap &budget);
     Q_INVOKABLE bool command(const QString &name);
     Q_INVOKABLE void orbit(double dx,double dy);
     Q_INVOKABLE void pan(double dx,double dy);
@@ -92,6 +98,8 @@ private:
     double m_measurementKm=0,m_geoWidth=0;
     quint64 m_geoRevision=0;
     QString m_documentMessage;
+    inge::rp::EarthBudget m_budget;
+    QString m_preferredImagery=QStringLiteral("rocktree");
     void tick();
     void schedule();
     void cancelJobs();

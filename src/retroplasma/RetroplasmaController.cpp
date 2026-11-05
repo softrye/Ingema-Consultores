@@ -1,21 +1,25 @@
 #include "RetroplasmaController.h"
 #include "RetroplasmaTileScheduler.h"
 #include "RetroplasmaPlanetProvider.h"
+#include "RetroplasmaRocktreeProvider.h"
 #include <QUrlQuery>
+#include <QSettings>
 #include <QGuiApplication>
 #include <QResource>
 #include <QtConcurrent/QtConcurrentRun>
 #include <algorithm>
+#include <limits>
 
 static void initializeRetroplasmaResources(){Q_INIT_RESOURCE(rp_shaders);Q_INIT_RESOURCE(rp_samples);}
 namespace {
-constexpr std::size_t CacheLimit=64*1024*1024;
 using SceneResult=std::pair<std::shared_ptr<const inge::rp::Scene>,QString>;
 using TileResult=std::pair<std::shared_ptr<const inge::rp::LoadedTile>,QString>;
 bool contains(inge::rp::Bounds a,inge::rp::Bounds b){constexpr double e=0.02;return b.minimum.x>=a.minimum.x-e&&b.minimum.y>=a.minimum.y-e&&b.minimum.z>=a.minimum.z-e&&b.maximum.x<=a.maximum.x+e&&b.maximum.y<=a.maximum.y+e&&b.maximum.z<=a.maximum.z+e;}
 }
 RetroplasmaController::RetroplasmaController(QObject *parent):QObject(parent),m_provider(std::make_shared<inge::rp::PlanetSceneProvider>()),m_mailbox(std::make_shared<inge::rp::MetricsMailbox>()){
-    initializeRetroplasmaResources();m_pool.setMaxThreadCount(2);m_tick.setInterval(16);
+    initializeRetroplasmaResources();m_pool.setMaxThreadCount(m_budget.parallel);m_tick.setInterval(16);
+    const auto saved=QSettings().value(QStringLiteral("earth/imagery"),QStringLiteral("rocktree")).toString();
+    if(saved==QLatin1String("rocktree")||saved==QLatin1String("blue-marble")||saved==QLatin1String("landsat")||saved==QLatin1String("sentinel"))m_preferredImagery=saved;
     connect(&m_tick,&QTimer::timeout,this,&RetroplasmaController::tick);
     if(auto *app=qobject_cast<QGuiApplication *>(QCoreApplication::instance())){
         connect(app,&QGuiApplication::applicationStateChanged,this,[this](Qt::ApplicationState state){m_appVisible=state==Qt::ApplicationActive;if(m_active&&m_appVisible){m_clock.restart();m_tick.start();}else m_tick.stop();emit renderChanged();});
@@ -24,18 +28,33 @@ RetroplasmaController::RetroplasmaController(QObject *parent):QObject(parent),m_
 }
 RetroplasmaController::~RetroplasmaController(){close();m_pool.waitForDone();}
 void RetroplasmaController::open(){if(m_active)return;m_active=true;m_mailbox=std::make_shared<inge::rp::MetricsMailbox>();m_presentedFrames=m_lastFrameCount=0;m_fps=m_frameMs=0;m_clock.restart();m_telemetryClock.start();if(m_appVisible)m_tick.start();openPlanet();emit changed();}
-void RetroplasmaController::openPlanet(){m_preservedCamera.reset();loadScene(QUrl(QStringLiteral("inge-earth://global")));}
+void RetroplasmaController::openPlanet(){m_preservedCamera.reset();QUrl url(QStringLiteral("inge-earth://global"));QUrlQuery query;query.addQueryItem(QStringLiteral("layer"),m_preferredImagery);url.setQuery(query);loadScene(url);}
 void RetroplasmaController::setPlanetImagery(const QString &layer,const QString &date){
-    if(!m_active||(layer!=QLatin1String("blue-marble")&&layer!=QLatin1String("landsat")&&layer!=QLatin1String("sentinel")))return;
+    if(!m_active||(layer!=QLatin1String("rocktree")&&layer!=QLatin1String("blue-marble")&&layer!=QLatin1String("landsat")&&layer!=QLatin1String("sentinel")))return;
+    m_preferredImagery=layer;QSettings().setValue(QStringLiteral("earth/imagery"),layer);
     if(m_scene&&m_scene->planetary)m_preservedCamera=m_camera;
     QUrl url(QStringLiteral("inge-earth://global"));QUrlQuery q;q.addQueryItem(QStringLiteral("layer"),layer);if(!date.isEmpty())q.addQueryItem(QStringLiteral("date"),date);url.setQuery(q);loadScene(url);
+}
+void RetroplasmaController::setRenderBudget(const QVariantMap &values){
+    auto next=m_budget;
+    next.cpuBytes=std::size_t(std::clamp(values.value(QStringLiteral("cpuMiB"),40).toInt(),24,192))*1024*1024;
+    next.gpuBytes=std::size_t(std::clamp(values.value(QStringLiteral("gpuMiB"),32).toInt(),24,160))*1024*1024;
+    next.parallel=std::clamp(values.value(QStringLiteral("parallel"),1).toInt(),1,4);
+    next.nodes=std::clamp(values.value(QStringLiteral("nodes"),32).toInt(),16,160);
+    next.maxLevel=std::clamp(values.value(QStringLiteral("maxLevel"),15).toInt(),8,21);
+    double pixels=values.value(QStringLiteral("pixelError"),14).toDouble();next.pixelError=std::isfinite(pixels)?std::clamp(pixels,1.0,32.0):14;
+    if(next.cpuBytes==m_budget.cpuBytes&&next.gpuBytes==m_budget.gpuBytes&&next.parallel==m_budget.parallel&&next.nodes==m_budget.nodes&&next.maxLevel==m_budget.maxLevel&&next.pixelError==m_budget.pixelError)return;
+    m_budget=next;m_pool.setMaxThreadCount(next.parallel);m_failed.clear();if(m_active)schedule();emit renderChanged();emit changed();
 }
 void RetroplasmaController::cancelJobs(){if(m_manifestCancel)m_manifestCancel->store(true);for(auto &job:m_jobs)job.cancelled->store(true);m_jobs.clear();}
 void RetroplasmaController::loadLocalScene(const QString &path){loadScene(path.startsWith(QLatin1String("file:"))||path.startsWith(QLatin1String("qrc:"))?QUrl(path):QUrl::fromLocalFile(path));}
 void RetroplasmaController::retryScene(){if(m_active&&!m_sceneUrl.isEmpty()){if(m_scene&&m_scene->planetary)m_preservedCamera=m_camera;loadScene(m_sceneUrl);}}
 void RetroplasmaController::close(){if(!m_active&&!m_manifestBusy)return;++m_generation;m_active=false;m_tick.stop();cancelJobs();m_scene.reset();m_cache.clear();m_failed.clear();m_renderTiles.clear();m_pendingTarget.reset();m_preservedCamera.reset();m_manifestBusy=false;m_navigationMode=false;m_status=QStringLiteral("CLOSED");emit renderChanged();emit changed();}
 void RetroplasmaController::loadScene(const QUrl &url){
-    if(!m_active)return;m_sceneUrl=url;cancelJobs();m_cache.clear();m_failed.clear();m_renderTiles.clear();m_scene.reset();m_manifestBusy=true;m_status=url.scheme()==QLatin1String("inge-earth")?QStringLiteral("Cargando Tierra WGS84 / NASA…"):QStringLiteral("Cargando escena local…");quint64 generation=++m_generation;
+    if(!m_active)return;m_sceneUrl=url;cancelJobs();m_cache.clear();m_failed.clear();m_renderTiles.clear();m_scene.reset();m_manifestBusy=true;
+    const bool rocktree=url.scheme()==QLatin1String("inge-earth")&&QUrlQuery(url).queryItemValue(QStringLiteral("layer"))==QLatin1String("rocktree");
+    if(rocktree)m_provider=std::make_shared<inge::rp::RocktreeSceneProvider>();else m_provider=std::make_shared<inge::rp::PlanetSceneProvider>();
+    m_status=rocktree?QStringLiteral("Cargando metadatos de Google Earth / RockTree…"):url.scheme()==QLatin1String("inge-earth")?QStringLiteral("Cargando Tierra WGS84 / NASA…"):QStringLiteral("Cargando escena local…");quint64 generation=++m_generation;
     auto cancel=std::make_shared<std::atomic_bool>(false);m_manifestCancel=cancel;auto provider=m_provider;
     auto *watcher=new QFutureWatcher<SceneResult>(this);
     connect(watcher,&QFutureWatcher<SceneResult>::finished,this,[this,watcher,generation,cancel](){
@@ -64,18 +83,18 @@ void RetroplasmaController::schedule(){
     if(!m_scene||!m_active)return;
     QHash<QString,std::shared_ptr<const inge::rp::LoadedTile>> resident;for(auto it=m_cache.begin();it!=m_cache.end();++it)resident.insert(it.key(),it.value().tile);
     auto selection=chooseTiles(resident);
-    m_renderTiles=std::move(selection.draw);for(auto &tile:m_renderTiles)m_cache[tile.key].used=++m_usage;
+    m_renderTiles=std::move(selection.draw);for(auto &tile:m_renderTiles){auto it=m_cache.find(tile.ownerKey.isEmpty()?tile.key:tile.ownerKey);if(it!=m_cache.end())it->used=++m_usage;}
     for(auto it=m_jobs.begin();it!=m_jobs.end();++it)if(!selection.wanted.contains(it.key()))it.value().cancelled->store(true);
     trimCache(selection.wanted);
     for(auto request:selection.requests){
-        if(m_jobs.size()>=2)break;if(m_jobs.contains(request.key)||m_cache.contains(request.key)||m_failed.contains(request.key))continue;
+        if(m_jobs.size()>=m_budget.parallel)break;if(m_jobs.contains(request.key)||m_cache.contains(request.key)||m_failed.contains(request.key))continue;
         const auto lod=request.direct?request.asset:m_scene->nodes[request.node].lods[request.lod];const auto nodeBounds=request.direct?request.bounds:m_scene->nodes[request.node].bounds;const quint64 generation=m_generation;
         auto cancel=std::make_shared<std::atomic_bool>(false);m_jobs.insert(request.key,{cancel});auto provider=m_provider;
         auto *watcher=new QFutureWatcher<TileResult>(this);
         connect(watcher,&QFutureWatcher<TileResult>::finished,this,[this,watcher,generation,cancel,key=request.key,nodeBounds](){
             auto result=watcher->result();watcher->deleteLater();if(generation!=m_generation||!m_active)return;
             m_jobs.remove(key);if(cancel->load()){schedule();return;}
-            if(result.first&&!contains(nodeBounds,result.first->geometry.bounds)){result.first.reset();result.second=QStringLiteral("RP_MESH_OUTSIDE_NODE_BOUNDS");}
+            if(result.first&&!result.first->rocktreeBulk&&!contains(nodeBounds,result.first->geometry.bounds)){result.first.reset();result.second=QStringLiteral("RP_MESH_OUTSIDE_NODE_BOUNDS");}
             if(result.first){
                 m_cache.insert(key,{result.first,++m_usage});
                 QHash<QString,std::shared_ptr<const inge::rp::LoadedTile>> resident;
@@ -83,10 +102,10 @@ void RetroplasmaController::schedule(){
                 // Recompute before eviction: complete children can now release their parent.
                 auto next=chooseTiles(resident);
                 auto protectedKeys=next.wanted;protectedKeys.insert(key);
-                for(const auto &tile:next.draw)protectedKeys.insert(tile.key);
+                for(const auto &tile:next.draw)protectedKeys.insert(tile.ownerKey.isEmpty()?tile.key:tile.ownerKey);
                 // Preflight before eviction: a rejected replacement cannot evict its parent.
                 std::size_t protectedBytes=0;for(auto it=m_cache.begin();it!=m_cache.end();++it)if(protectedKeys.contains(it.key()))protectedBytes+=it.value().tile->bytes;
-                if(protectedBytes>CacheLimit){m_cache.remove(key);m_failed.insert(key,QStringLiteral("RP_CPU_TRANSITION_MEMORY_LIMIT"));}
+                if(protectedBytes>m_budget.cpuBytes){m_cache.remove(key);m_failed.insert(key,QStringLiteral("RP_CPU_TRANSITION_MEMORY_LIMIT"));}
                 else trimCache(protectedKeys);
             }else m_failed.insert(key,result.second);
             schedule();emit renderChanged();emit changed();
@@ -98,11 +117,12 @@ void RetroplasmaController::schedule(){
     else m_status=m_jobs.empty()?m_scene->title:QStringLiteral("Escena visible · refinando LOD…");
 }
 inge::rp::Schedule RetroplasmaController::chooseTiles(const QHash<QString,std::shared_ptr<const inge::rp::LoadedTile>> &resident)const{
-    return m_scene->planetary?inge::rp::RetroplasmaTileScheduler::selectPlanet(*m_scene,viewProjection(),m_camera.eye(),m_height*m_pixelRatio,resident,QString::number(m_generation)):inge::rp::RetroplasmaTileScheduler::select(*m_scene,viewProjection(),m_camera.eye(),m_height,resident,QString::number(m_generation));
+    if(m_scene->rocktreeRoot)return inge::rp::RetroplasmaTileScheduler::selectRocktree(*m_scene,viewProjection(),m_camera.eye(),m_height*m_pixelRatio,resident,QString::number(m_generation),m_budget);
+    return m_scene->planetary?inge::rp::RetroplasmaTileScheduler::selectPlanet(*m_scene,viewProjection(),m_camera.eye(),m_height*m_pixelRatio,resident,QString::number(m_generation),m_budget):inge::rp::RetroplasmaTileScheduler::select(*m_scene,viewProjection(),m_camera.eye(),m_height,resident,QString::number(m_generation));
 }
 void RetroplasmaController::trimCache(const QSet<QString> &protectedKeys){
     std::size_t bytes=0;for(const auto &entry:m_cache)bytes+=entry.tile->bytes;
-    while(bytes>CacheLimit){auto candidate=m_cache.end();for(auto it=m_cache.begin();it!=m_cache.end();++it)if(!protectedKeys.contains(it.key())&&(candidate==m_cache.end()||it.value().used<candidate.value().used))candidate=it;if(candidate==m_cache.end()){m_status=QStringLiteral("RP_VISIBLE_CPU_CACHE_LIMIT");break;}bytes-=candidate.value().tile->bytes;m_cache.erase(candidate);}
+    while(bytes>m_budget.cpuBytes){auto candidate=m_cache.end();for(auto it=m_cache.begin();it!=m_cache.end();++it)if(!protectedKeys.contains(it.key())&&(candidate==m_cache.end()||it.value().used<candidate.value().used))candidate=it;if(candidate==m_cache.end()){m_status=QStringLiteral("RP_VISIBLE_CPU_CACHE_LIMIT");break;}bytes-=candidate.value().tile->bytes;m_cache.erase(candidate);}
 }
 void RetroplasmaController::orbit(double dx,double dy){
     if(!m_active||!std::isfinite(dx)||!std::isfinite(dy))return;
@@ -138,10 +158,19 @@ bool RetroplasmaController::command(const QString &name){
 QString RetroplasmaController::coordinates()const{if(!m_scene)return {};auto point=m_scene->planetary?m_camera.planetTarget():inge::rp::ecefToGeodetic(inge::rp::enuToEcef(inge::rp::renderToEnu(m_camera.pose().focus),m_scene->origin));return QStringLiteral("%1°, %2° · objetivo %3 m · cámara %4 m").arg(point.latitude,0,'f',6).arg(point.longitude,0,'f',6).arg(point.altitude,0,'f',1).arg(m_camera.pose().distance,0,'f',1);}
 QString RetroplasmaController::sourceName()const{
     if(!m_scene)return {};if(!m_scene->planetary)return m_scene->source;
+    if(m_scene->rocktreeRoot){double finest=std::numeric_limits<double>::max();for(const auto &tile:m_renderTiles)finest=std::min(finest,tile.tile->resolutionMetres);
+        return m_scene->source+QStringLiteral("\nDetalle máximo del perfil: nivel %1. Caché CPU/GPU: %2 / %3 MiB.").arg(m_budget.maxLevel).arg(qulonglong(m_budget.cpuBytes/1048576)).arg(qulonglong(m_budget.gpuBytes/1048576))
+            +(m_renderTiles.empty()?QStringLiteral("\nCargando geometría real…"):QStringLiteral("\nResolución del nodo más fino cargado: ~%1 m/texel.").arg(finest,0,'f',2));}
     double finest=19568;int hls=0,coverage=0;QString firstDate,lastDate;for(const auto &entry:m_renderTiles){if(entry.tile->coveragePercent>0)finest=std::min(finest,entry.tile->resolutionMetres);if(entry.tile->source.contains(QLatin1String("HLS"))){++hls;coverage+=entry.tile->coveragePercent;if(entry.tile->coveragePercent>0){auto date=entry.tile->acquisitionDate;if(firstDate.isEmpty()||date<firstDate)firstDate=date;if(lastDate.isEmpty()||date>lastDate)lastDate=date;}}}
     return m_scene->source+QStringLiteral("\nBase mundial incorporada: ~19.6 km/píxel; Blue Marble GIBS: 500 m nativos.\nResolución más fina cargada: ~%1 m/píxel.").arg(finest,0,'f',0)
         +(m_scene->imagery==QLatin1String("landsat")?QStringLiteral(" HLS: 30 m nativos, cobertura parcial/nubes; %1% de píxeles con datos en tiles HLS cargados.").arg(hls?coverage/hls:0):QString())
         +(firstDate.isEmpty()?QString():QStringLiteral(" Fechas cargadas: %1 — %2.").arg(firstDate,lastDate))
         +QStringLiteral(" Zoom mínimo de cámara: 40 km; no detalle urbano submétrico.");
+}
+QString RetroplasmaController::attribution()const{
+    if(!m_scene)return {};
+    if(m_scene->rocktreeRoot)return QStringLiteral("Google Earth · imágenes y geometría de sus respectivos proveedores");
+    if(m_scene->imagery==QLatin1String("sentinel"))return QStringLiteral("NASA / USGS · EOxCloudless by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016). CC BY 4.0");
+    return QStringLiteral("NASA / USGS · Blue Marble / Landsat");
 }
 QVariantMap RetroplasmaController::metrics()const{std::lock_guard lock(m_mailbox->mutex);auto &m=m_mailbox->value;std::size_t cpu=0;for(const auto &entry:m_cache)cpu+=entry.tile->bytes;return {{QStringLiteral("fps"),m_fps},{QStringLiteral("frameMs"),m_frameMs},{QStringLiteral("cpuRecordMs"),m.cpuRecordMs},{QStringLiteral("gpuMiB"),double(m.gpuBytes)/1048576},{QStringLiteral("cpuMiB"),double(cpu)/1048576},{QStringLiteral("meshes"),m.meshes},{QStringLiteral("triangles"),m.triangles},{QStringLiteral("textures"),m.textures},{QStringLiteral("pending"),m_jobs.size()},{QStringLiteral("decodeErrors"),m_failed.size()},{QStringLiteral("renderError"),m.error},{QStringLiteral("backend"),m.backend}};}
