@@ -30,8 +30,13 @@ InGeGraphicsCore::InGeGraphicsCore(QObject *parent)
     if (qGuiApp) {
         connect(qGuiApp, &QGuiApplication::applicationStateChanged, this,
                 [this](Qt::ApplicationState state) {
-                    if (state == Qt::ApplicationActive)
-                        restoreAfterExternalActivityIfReady();
+                    if (state == Qt::ApplicationActive) {
+                        // Android's surface may still be changing during this signal.
+                        // Showing the QQuickWindow here can re-enter Qt's JNI lifecycle.
+                        QTimer::singleShot(0, this, [this]() {
+                            restoreAfterExternalActivityIfReady();
+                        });
+                    }
                 });
     }
 }
@@ -186,7 +191,11 @@ void InGeGraphicsCore::completeExternalActivity()
     m_externalActivityInFlight = false;
     m_externalActivityRestorePending = true;
     m_externalRestoreAttempts = 0;
-    restoreAfterExternalActivityIfReady();
+    // Defer window restoration until Qt has finished dispatching the return
+    // from Android's camera/gallery Activity (no nested state transitions).
+    QTimer::singleShot(0, this, [this]() {
+        restoreAfterExternalActivityIfReady();
+    });
 }
 
 void InGeGraphicsCore::restoreAfterExternalActivityIfReady()
