@@ -165,13 +165,138 @@ function compatibleSecondary(primary) {
     }
     return result
 }
+// ===== Paridad Web: estratos (profundidad y color) =====
+// Web fieldContract.ts parseCalicataDepthInput: coma o punto, sin signo, máx. 2
+// decimales, en centímetros enteros múltiplos de 5; canónico con 2 decimales.
+var CALICATA_DEPTH_STEP_M = 0.05
+function parseCalicataDepthInput(value) {
+    var normalized = String(value === undefined || value === null ? "" : value).trim().replace(",", ".")
+    if (!normalized.length) return { valid: true, value: null, canonical: "" }
+    if (normalized.charAt(0) === "-") return { valid: false, value: null, canonical: normalized, reason: "negative" }
+    if (!/^\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, value: null, canonical: normalized, reason: "not_numeric" }
+    var parts = normalized.split("."), whole = parts[0], decimals = parts.length > 1 ? parts[1] : ""
+    if (decimals.length > 2 || whole.length > 13) return { valid: false, value: null, canonical: normalized, reason: "precision" }
+    while (decimals.length < 2) decimals += "0"
+    var centimeters = Number(whole) * 100 + Number(decimals)
+    if (!isFinite(centimeters) || Math.floor(centimeters) !== centimeters || centimeters > 9007199254740991)
+        return { valid: false, value: null, canonical: normalized, reason: "not_numeric" }
+    if (centimeters % 5 !== 0) return { valid: false, value: null, canonical: normalized, reason: "step" }
+    var numeric = centimeters / 100
+    return { valid: true, value: numeric, canonical: numeric.toFixed(2) }
+}
+// Bandas de la columna estratigráfica: TODO estrato se dibuja. Desde = Hasta del
+// anterior (0.00 el primero, como la Web); sin Hasta válido se dibuja con un
+// espesor solo visual (no se guarda: el dato sigue vacío, igual que la Web).
+var PROFILE_PLACEHOLDER_THICKNESS_M = 0.50
+function profileBands(rows) {
+    rows = rows || []
+    var bands = [], bottom = 0
+    for (var i = 0; i < rows.length; ++i) {
+        var row = rows[i] || {}
+        var from = i === 0 ? 0 : bottom
+        var to = parseCalicataDepthInput(row.a)
+        var real = to.valid && to.value !== null && to.value > from
+        var end = real ? to.value : from + PROFILE_PLACEHOLDER_THICKNESS_M
+        bands.push({ from: from, to: end, placeholder: !real })
+        bottom = end
+    }
+    return { bands: bands, bottom: bottom }
+}
+// Web CalicataDetailPanel.validateStratumDepths: mismos mensajes para Hasta.
+function stratumToDepthError(fromText, toText) {
+    var from = parseCalicataDepthInput(fromText), to = parseCalicataDepthInput(toText)
+    if (!from.valid) return "Desde derivado no es válido."
+    if (!to.valid) return to.reason === "negative" ? "Hasta no puede ser negativo."
+        : to.reason === "step" || to.reason === "precision" ? "Hasta debe usar incrementos exactos de 0.05 m."
+        : "Hasta debe ser un número válido."
+    if (from.value !== null && to.value !== null && to.value <= from.value) return "Hasta debe ser mayor que Desde."
+    return ""
+}
+// Web projectCalicataStrataService.ts: colores frecuentes, normalización HEX y
+// el gris del perfil cuando el estrato no tiene color (CalicataDetailPanel 1296).
+var CALICATA_COLOR_PRESETS = [
+    { label: "Marrón", value: "#7A5230" }, { label: "Gris", value: "#777D86" },
+    { label: "Amarillo", value: "#D8B64A" }, { label: "Beige", value: "#CBB994" },
+    { label: "Rojizo", value: "#A44B3F" }]
+var CALICATA_STRATUM_FALLBACK_COLOR = "#64748B"
+var CALICATA_COLOR_FORMAT_ERROR = "Color debe usar el formato HEX RGB #RRGGBB."
+function normalizeCalicataColor(value) {
+    var normalized = String(value === undefined || value === null ? "" : value).trim().toUpperCase()
+    return /^#[0-9A-F]{6}$/.test(normalized) ? normalized : ""
+}
+// Paleta por nombre de versiones anteriores de Android (`stratum_color`): se lee
+// como su HEX y se migra a `color` al cargar, sin borrar el valor anterior.
+var LEGACY_STRATUM_COLORS = {
+    "Marrón": "#B97A56", "Marrón claro": "#D9B08C", "Marrón oscuro": "#7A4E32", "Beige": "#E8D5B0",
+    "Amarillento": "#E6C86E", "Rojizo": "#C0674A", "Gris claro": "#CFD2CE", "Gris": "#A7A9A6",
+    "Gris oscuro": "#6E716E", "Verdoso": "#9DB89A", "Negro": "#3A3A38", "Blanco / crema": "#F2EEE3" }
+function legacyStratumColor(name) {
+    var hex = LEGACY_STRATUM_COLORS[String(name || "")]
+    return hex ? hex : ""
+}
+// Color guardado del estrato (= Web `calicata_strata.color`); "" = sin color.
+function stratumColorValue(row) {
+    row = row || {}
+    var color = normalizeCalicataColor(row.color)
+    if (color.length || row.color_legacy_migrated === true) return color
+    return legacyStratumColor(row.stratum_color)
+}
+// Color de una fila del ListModel de estratos: _extraJson.color es el canónico;
+// el rol `color` solo se usa si el JSON no lo trae.
+function stratumRowColor(source) {
+    source = source || {}
+    var extra = {}
+    try { extra = JSON.parse(source._extraJson || "{}") || {} } catch (e) { extra = {} }
+    if ((extra.color === undefined || extra.color === null) && source.color !== undefined) extra.color = source.color
+    if (extra.stratum_color === undefined && source.stratum_color !== undefined) extra.stratum_color = source.stratum_color
+    return stratumColorValue(extra)
+}
+// Web colorLabel.ts getApproximateSpanishColorLabel (mismos umbrales).
+var EXACT_COLOR_LABELS = { "#7A5230": "Marrón", "#A44B3F": "Marrón rojizo", "#D8B64A": "Amarillo ocre",
+                           "#CBB994": "Beige claro", "#777D86": "Gris azulado" }
+function colorLabel(value) {
+    var normalized = String(value === undefined || value === null ? "" : value).trim().toUpperCase()
+    if (EXACT_COLOR_LABELS[normalized]) return EXACT_COLOR_LABELS[normalized]
+    if (!/^#[0-9A-F]{6}$/.test(normalized)) return "Color no válido"
+    var r = parseInt(normalized.slice(1, 3), 16) / 255, g = parseInt(normalized.slice(3, 5), 16) / 255,
+        b = parseInt(normalized.slice(5, 7), 16) / 255
+    var maximum = Math.max(r, g, b), minimum = Math.min(r, g, b), delta = maximum - minimum
+    var lightness = (maximum + minimum) / 2
+    var saturation = delta === 0 ? 0 : delta / (1 - Math.abs(2 * lightness - 1))
+    var hue = 0
+    if (delta !== 0) {
+        if (maximum === r) hue = 60 * (((g - b) / delta) % 6)
+        else if (maximum === g) hue = 60 * ((b - r) / delta + 2)
+        else hue = 60 * ((r - g) / delta + 4)
+    }
+    if (hue < 0) hue += 360
+    if (saturation < 0.12) {
+        if (lightness < 0.1) return "Negro"
+        if (lightness < 0.32) return "Gris muy oscuro"
+        if (lightness < 0.58) return "Gris"
+        if (lightness < 0.86) return "Gris claro"
+        return "Blanco"
+    }
+    var family = hue < 15 || hue >= 345 ? "Rojo"
+        : hue < 35 ? (lightness < 0.58 ? "Marrón rojizo" : "Naranja rojizo")
+        : hue < 55 ? (lightness < 0.55 ? "Marrón amarillento" : "Amarillo ocre")
+        : hue < 75 ? "Amarillo" : hue < 150 ? "Verde" : hue < 195 ? "Verde azulado"
+        : hue < 255 ? "Azul" : hue < 290 ? "Violeta azulado" : "Rojo violáceo"
+    var tone = lightness < 0.36 ? " oscuro" : lightness > 0.68 ? " claro" : ""
+    var muted = saturation < 0.3 ? " grisáceo" : ""
+    return family + tone + muted
+}
+
 function boundaryError(rows, index, value, maximum) {
-    var to = parseDecimalSafe(value)
-    var from = index > 0 ? parseDecimalSafe(rows[index - 1].a) : 0
-    if (!isFinite(to)) return "Hasta: ingresa una profundidad decimal válida."
-    var step = to / 0.05
-    if (Math.abs(step - Math.round(step)) > 0.000001) return "Hasta debe avanzar en pasos de 0.05 m."
-    if (!isFinite(from) || to <= from) return "Hasta debe ser mayor que Desde."
+    // Web validateStratumDepths: Desde = Hasta del anterior (0.00 el primero).
+    var fromText = index > 0 ? String(rows[index - 1].a === undefined || rows[index - 1].a === null ? "" : rows[index - 1].a) : "0.00"
+    var depthError = stratumToDepthError(fromText, value)
+    if (depthError) return depthError
+    var parsedTo = parseCalicataDepthInput(value)
+    if (parsedTo.value === null) return "Hasta debe ser un número válido."
+    var to = parsedTo.value
+    var from = index > 0 ? parseCalicataDepthInput(fromText).value : 0
+    if (from === null || !isFinite(from) || to <= from) return "Hasta debe ser mayor que Desde."
     if (isFinite(maximum) && maximum > 0 && to > maximum + 0.000001)
         return "Hasta no puede superar la profundidad total de " + maximum.toFixed(2) + " m."
     if (index + 1 < rows.length) {
@@ -261,12 +386,11 @@ function validateDocument(state) {
             add(4, i, label + "Intervalo inválido: Hasta debe superar Desde en pasos de 0.05 m.")
         if (isFinite(from) && isFinite(previous) && Math.abs(from - previous) > 0.001)
             add(4, i, label + (from < previous ? "se solapa con el intervalo anterior." : "hay un hueco antes del intervalo."))
-        var limit = number("requested_depth_m")
-        if (isFinite(limit) && limit > 0 && isFinite(to) && to > limit + 0.000001)
-            add(4, i, label + "Hasta supera la profundidad total de " + limit.toFixed(2) + " m.")
+        // Sin tope de profundidad (Web: exportModel.ts no valida contra la declarada).
         previous = to
         if (isFinite(to)) finalDepth = Math.max(finalDepth, to)
-        // Conserva datos ocultos al cambiar de origen; no bloquean el relleno antrópico.
+        // Campos de muestra y laboratorio no se editan en el relleno antrópico.
+        // Se conservan para cambiar de origen, pero no bloquean esta ficha.
         if (isAnthropicFill(row.material_origin)) continue
         if (text(row.muestra_desde) || text(row.muestra_hasta)) {
             var sf = parseDecimalSafe(row.muestra_desde), st = parseDecimalSafe(row.muestra_hasta)
@@ -301,11 +425,11 @@ function blockers(issues) { return issues.filter(function(issue) { return issue.
 
 // Profundidad de la regla: el valor ingresado no se reduce al último estrato.
 // Cero/vacío identifica fichas antiguas sin profundidad independiente.
+// Igual que la Web (exportModel.ts: totalDepthM = max(declarada, fondo del último
+// estrato)): los estratos pueden pasar la declarada y la escala los incluye.
 function profileDepth(requested, recorded) {
-    var depth = parseDecimalSafe(requested)
-    if (isFinite(depth) && depth > 0) return depth
-    var last = parseDecimalSafe(recorded)
-    return isFinite(last) && last > 0 ? last : 0
+    var depth = parseDecimalSafe(requested), last = parseDecimalSafe(recorded)
+    return Math.max(isFinite(depth) && depth > 0 ? depth : 0, isFinite(last) && last > 0 ? last : 0)
 }
 
 // ===== Revisión de cierre (pantalla Revisión) =====
@@ -951,9 +1075,9 @@ function validateFieldDates(startDate, endDate) {
 // g2=Nº10, g04=Nº40, g008=Nº200, wl=LL, lp=LP, hum2=humedad natural.
 // ===== Laboratorio: port exacto de Web feature/calicatas-cloud-media-04a =====
 // src/lib/calicatas/soilClassification.ts + laboratoryContract.ts. Sin
-// variantes Android: ni NP ni D10/D30/D60 influyen en la clasificación (Web no
-// los registra). Un grueso limpio sin Cu/Cc queda como conjunto de candidatos;
-// nunca se inventa GW/GP/SW/SP. Sugerir nunca escribe: adoptar es un clic.
+// SUCS: extensión de cálculo según FHWA NHI-05-037, tabla 4-13.
+// Los D10/D30/D60 se interpolan únicamente dentro de la curva medida.
+// Sin Cu/Cc no se inventa la graduación. Sugerir nunca escribe: adoptar es un clic.
 var LAB_CLEAN_COARSE_FINES = 5
 var LAB_REVIEW_LABELS = { empty: "Sin datos", conforme: "Conforme", incompleto: "Faltan datos", revisar: "Revisar" }
 
@@ -1058,38 +1182,83 @@ function _narrowToDivision(candidates, division, reason) {
     return { candidates: kept, conclusive: kept.length === 1, reason: reason + " " + divisionReason }
 }
 
+// Diámetro a p % pasante: interpolación semilogarítmica entre dos ensayos.
+// ln(Dp) = ln(Da) + (p-Pa)/(Pb-Pa) * ln(Db/Da). Nunca extrapolar.
+function sucsDiameterAt(points, percent) {
+    var curve = points.filter(function(p) { return typeof p.passing === "number" && isFinite(p.passing) && p.passing >= 0 && p.passing <= 100
+        && typeof p.diameter === "number" && isFinite(p.diameter) && p.diameter > 0 })
+        .sort(function(a,b) { return a.diameter-b.diameter })
+    for (var i=1; i<curve.length; ++i) if (curve[i].passing < curve[i-1].passing) return null
+    // A flat measured segment at the requested percentage has no unique Dp.
+    for (i=1; i<curve.length; ++i) if (curve[i].passing === percent && curve[i-1].passing === percent) return null
+    for (i=0; i<curve.length; ++i) {
+        var b=curve[i]
+        if (b.passing === percent) return b.diameter
+        if (i && curve[i-1].passing < percent && percent < b.passing) {
+            var a=curve[i-1]
+            return Math.exp(Math.log(a.diameter)+(percent-a.passing)/(b.passing-a.passing)*Math.log(b.diameter/a.diameter))
+        }
+    }
+    return null
+}
+function sucsDiameters(sample) {
+    // Nº 4 = 4.75 mm; Nº 10 = 2.00; Nº 40 = 0.425; Nº 200 = 0.075.
+    // Keys g04/g008 are historical names, not the actual sieve apertures.
+    var points=[{diameter:4.75,passing:sample.passing4},{diameter:2,passing:sample.passing10},
+                {diameter:0.425,passing:sample.passing40},{diameter:0.075,passing:sample.passing200}]
+    return { d10:sucsDiameterAt(points,10),d30:sucsDiameterAt(points,30),d60:sucsDiameterAt(points,60) }
+}
+function sucsGradation(division, d) {
+    if ((division!=="G" && division!=="S") || !d || ![d.d10,d.d30,d.d60].every(function(n) { return typeof n==="number" && isFinite(n) && n>0 })
+        || d.d10>d.d30 || d.d30>d.d60) return null
+    var cu=d.d60/d.d10, cc=d.d30*d.d30/(d.d10*d.d60), epsilon=1e-12
+    return division+((cu+epsilon >= (division==="G"?4:6) && cc+epsilon>=1 && cc-epsilon<=3)?"W":"P")
+}
+function sucsSelection(code) {
+    var parts=String(code||"").toUpperCase().split("-")
+    var duals=["GW-GM","GW-GC","GP-GM","GP-GC","SW-SM","SW-SC","SP-SM","SP-SC","GC-GM","SC-SM","CL-ML"]
+    if (parts.length===1 && _labCatalog(parts[0],webSucsCodes)) return {primary:parts[0],secondary:"",isComposite:false}
+    if (duals.indexOf(parts.join("-"))>=0) return {primary:parts[0],secondary:parts[1],isComposite:true}
+    return null
+}
+function selectedSucsCode(form) {
+    return form.primarySucs+(form.isComposite===true && form.secondarySucs ? "-"+form.secondarySucs : "")
+}
 function recommendSucs(sample) {
-    var passing200 = sample.passing200, liquidLimit = sample.liquidLimit, pi = labPlasticityIndex(sample)
-    if (passing200 === null) return null
-    var aLine
-    if (passing200 >= 50) {
-        if (liquidLimit === null || pi === null) return null
-        aLine = aLinePlasticity(liquidLimit)
-        if (liquidLimit >= 50)
-            return pi > aLine
-                ? { candidates: ["CH"], conclusive: true, reason: "Fino con LL ≥ 50 por encima de la línea A." }
-                : { candidates: ["MH", "OH"], conclusive: false, reason: "Fino con LL ≥ 50 bajo la línea A; separar MH de OH exige el ensayo de secado en horno." }
-        if (pi > aLine && pi > 7)
-            return { candidates: ["CL"], conclusive: true, reason: "Fino con LL < 50, IP > 7 y por encima de la línea A." }
-        if (pi < 4 || pi < aLine)
-            return { candidates: ["ML", "OL"], conclusive: false, reason: "Fino con LL < 50 bajo la línea A; separar ML de OL exige el ensayo de secado en horno." }
-        return { candidates: ["CL", "ML"], conclusive: false, reason: "Fino en la zona CL-ML de la carta de plasticidad (4 ≤ IP ≤ 7)." }
+    var f=sample.passing200, ll=sample.liquidLimit, pi=labPlasticityIndex(sample)
+    if (typeof f!=="number" || !isFinite(f) || f<0 || f>100) return null
+    var previous=null, values=[sample.passing4,sample.passing10,sample.passing40,f]
+    for (var i=0; i<values.length; ++i) if (values[i]!==null && values[i]!==undefined) {
+        if (!isFinite(values[i]) || values[i]<0 || values[i]>100 || (previous!==null && values[i]>previous)) return null
+        previous=values[i]
     }
-    var division = coarseDivision(sample)
-    if (passing200 < LAB_CLEAN_COARSE_FINES)
-        return _narrowToDivision(["GW", "GP", "SW", "SP"], division,
-            "Grueso limpio (finos < 5 %); la graduación exige Cu y Cc de la curva completa.")
-    if (passing200 > 12) {
-        if (pi === null || liquidLimit === null)
-            return _narrowToDivision(["GM", "GC", "SM", "SC"], division,
-                "Grueso con finos (> 12 %), sin límites de Atterberg para saber si son limosos o arcillosos.")
-        aLine = aLinePlasticity(liquidLimit)
-        return pi > aLine && pi > 7
-            ? _narrowToDivision(["GC", "SC"], division, "Grueso con finos arcillosos (sobre la línea A).")
-            : _narrowToDivision(["GM", "SM"], division, "Grueso con finos limosos (bajo la línea A o IP ≤ 7).")
+    if (ll!==null && (!isFinite(ll)||ll<0)) return null
+    if (pi!==null && (!isFinite(pi)||pi<0||pi>ll)) return null
+    var limits=ll!==null && pi!==null, line=limits?aLinePlasticity(ll):null
+    if (f>=50) {
+        if (!limits) return null
+        if (ll<50 && pi>=4 && pi<=7 && pi>=line)
+            return {candidates:["CL-ML"],conclusive:true,reason:"Zona rayada: LL < 50, 4 ≤ IP ≤ 7, sobre o en la línea A; símbolo doble CL-ML (suelo inorgánico)."}
+        var clay=pi>=line && (ll>=50 || pi>7), mineral=clay?(ll>=50?"CH":"CL"):(ll>=50?"MH":"ML")
+        return {candidates:[mineral,ll>=50?"OH":"OL"],conclusive:false,
+            reason:"IP = LL − LP; línea A = 0.73(LL − 20); LL = 50 separa baja y alta plasticidad. Separar suelo inorgánico de orgánico requiere ensayo de secado en horno."}
     }
-    return _narrowToDivision(["GW", "GP", "GM", "GC", "SW", "SP", "SM", "SC"], division,
-        "Grueso con 5–12 % de finos: la norma pide una clasificación doble, que esta ficha no registra.")
+    var division=coarseDivision(sample), groups=division?[division]:["G","S"], d=sucsDiameters(sample), codes=[]
+    var borderline=limits && pi>=4 && pi<=7 && pi>=line
+    var fines=limits?(borderline?["C","M"]:[pi>=line && pi>7?"C":"M"]):["C","M"]
+    for (i=0; i<groups.length; ++i) {
+        var g=groups[i], graded=sucsGradation(g,d), bases=graded?[graded]:[g+"W",g+"P"]
+        if (f<5) codes=codes.concat(bases)
+        else if (f<=12) for (var b=0; b<bases.length; ++b) for (var k=0; k<fines.length; ++k) codes.push(bases[b]+"-"+g+fines[k])
+        else if (borderline) codes.push(g+"C-"+g+"M")
+        else for (k=0; k<fines.length; ++k) codes.push(g+fines[k])
+    }
+    var reason=f<5?"Finos < 5 %: símbolo simple de graduación.":f<=12?"Finos entre 5 y 12 % inclusive: símbolo doble de graduación y finos.":"Finos > 12 %: la línea A y el IP determinan los finos; zona CL-ML produce GC-GM o SC-SM."
+    if (f<=12) reason+=" Cu = D60/D10; Cc = D30²/(D10·D60). W: Cu ≥ 4 (grava) o ≥ 6 (arena), y 1 ≤ Cc ≤ 3."
+    if (f<=12 && !sucsGradation("S",d)) reason+=" Falta D10, D30 o D60 dentro de la curva medida; no se extrapolan."
+    if (!division) reason+=" Falta Nº 4 para separar grava y arena."
+    if (f>=5 && !limits) reason+=" Faltan límites de Atterberg."
+    return {candidates:codes,conclusive:codes.length===1,reason:reason}
 }
 
 function reviewLaboratorySample(form) {
@@ -1126,7 +1295,7 @@ function reviewLaboratorySample(form) {
     if (aashto && form.aashto && form.aashto !== aashto.code)
         observations.push({ id: "aashto-mismatch", severity: "conflict",
             message: "AASHTO declarado " + form.aashto + ", pero los porcentajes y los límites dan " + aashto.code + ". " + aashto.reason })
-    if (sucs && form.primarySucs && sucs.candidates.indexOf(form.primarySucs) < 0)
+    if (sucs && form.primarySucs && sucs.candidates.indexOf(selectedSucsCode(form)) < 0)
         observations.push({ id: "sucs-mismatch", severity: "conflict",
             message: "SUCS declarado " + form.primarySucs + ", fuera de lo que permiten los datos (" + sucs.candidates.join(", ") + "). " + sucs.reason })
     // ip: el mismo derivado que la ficha Web muestra; nunca se guarda.
@@ -1156,7 +1325,7 @@ function labSuggestion(form, review) {
         aashto: review && review.aashto ? { code: review.aashto.code, current: form.aashto === review.aashto.code,
                                             reason: review.aashto.reason } : null,
         sucs: candidates.slice(0, LAB_VISIBLE_SUCS_CANDIDATES).map(function(code) {
-            return { code: code, current: form.primarySucs === code } }),
+            return { code: code, current: selectedSucsCode(form) === code } }),
         hidden: Math.max(0, candidates.length - LAB_VISIBLE_SUCS_CANDIDATES),
         reason: review && review.sucs ? review.sucs.reason : review && review.aashto ? review.aashto.reason : "",
         note: review && review.sucs ? (review.sucs.conclusive ? "Determinado por los datos" : "Varias opciones posibles") : ""

@@ -10,9 +10,11 @@ import "../lib/GpsBus.js" as GpsBus
 import "../lib/CalicataRules.js" as Rules
 import "../lib/CalicataElevation.js" as Elevation
 import "../lib/PropACalicataIconMap.js" as CalIcons
+import "../lib/IconCatalog.js" as GeneralIcons
 import "../flowcore" as FlowCore
 import "../components" as Components
 import InGe.CoreFlow 3.0 as Mobile
+import ".." as MobileGlass                         // DockGlassPanel (vidrio del Dock)
 
 
 Item {
@@ -205,11 +207,14 @@ Item {
     function labEditSampleInProfile(index) {
         if (index < 0 || index >= cortesModel.count) return
         if (stratumSheet.opened) root.finishStratum(false)
-        root.selectStratum(index, "field")
+        root.openStratumEditor(index)
     }
     property bool _labActionGuard: false
     Timer { id: labActionGuardTimer; interval: 450; repeat: false; onTriggered: root._labActionGuard = false }
     readonly property bool labDetailOpen: stratumSheet.visible && root.labSheetActive && !root.labDetailClosing
+    // Imperativo, no binding: labInfo() recorre funciones que pueden vaciar la
+    // revisión pendiente (_flushCortesRevision) mientras se evalúa -> «Binding loop
+    // detected for property labInfosAll». Se recalcula al subir _cortesRevision.
     property var labInfosAll: []
     property bool _labInfosBuilding: false
     function _rebuildLabInfos() {
@@ -395,7 +400,22 @@ Item {
         console.info("INGE_LAB_ADOPT field=" + key + " stratum=" + (index + 1))
         return true
     }
-    function adoptLabSucs(index, code) { return root.setLabClassification(index, "primary_sucs", code) }
+    function adoptLabSucs(index, code) {
+        if (index < 0 || index >= cortesModel.count) return false
+        var selected = Rules.sucsSelection(code)
+        if (!selected) return false
+        var extra = root._labAuthority(JSON.parse(cortesModel.get(index)._extraJson || "{}"))
+        // Adopt both symbols in a single write; no intermediate half-classification.
+        extra.primary_sucs = selected.primary
+        extra.is_composite = selected.isComposite
+        // Keep a previous secondary value while the simple classification hides it.
+        if (selected.isComposite) extra.secondary_sucs = selected.secondary
+        extra.lab_confirmed_at = new Date().toISOString()
+        cortesModel.setProperty(index, "_extraJson", JSON.stringify(root._labAuthority(extra)))
+        root._markDirty()
+        root.deriveLabFields()
+        return true
+    }
     function adoptLabAashto(index, code) { return root.setLabClassification(index, "aashto", code) }
     function pickLabClassification(index, key) {
         if (index < 0 || index >= cortesModel.count) return
@@ -769,6 +789,8 @@ Item {
         return true
     }
     property string photoFeedbackText: ""
+    // Última incidencia real de selección de foto/logo ({kind, code, message}) o null.
+    property var mediaSelectionIssue: null
     property bool _logoRequestPending: false
     property string _pendingLogoPickTarget: ""
     property string _pendingLogoDocId: ""
@@ -811,20 +833,20 @@ Item {
     readonly property color cWhite: "#FFFFFF"
 
     // Superficies del formulario técnico (claro / oscuro)
-    readonly property color cPage: darkMode ? root.brand.ingemaDeep : "#FCFCFC"
+    readonly property color cPage: darkMode ? "#0A0A0A" : "#FCFCFC"
     readonly property color cSurface: darkMode ? root.brand.ingemaNavy : "#FFFFFF"
     readonly property color cSurfaceAlt: darkMode ? "#2A3A5A" : "#F1F1EE"
     readonly property color cBorder: darkMode ? "#404F6C" : "#DFE2E6"
     readonly property color cText: darkMode ? "#FFFFFF" : root.brand.ingemaDeep
     readonly property color cMuted: darkMode ? root.brand.ingemaPaperSecondary : root.brand.ingemaInkTertiary
     readonly property color cField: darkMode ? "#182440" : "#FFFFFF"
-    readonly property color cAccent: darkMode ? root.brand.ingemaBlueTint : root.brand.ingemaBlue
+    readonly property color cAccent: darkMode ? "#8DB85A" : root.brand.ingemaBlue
     // Acentos semánticos de Ficha > General: planos, sin glass ni gradientes.
     // Blue = interacción/en curso, Green = confirmado, Navy = categorías
     // secundarias (antes violeta/turquesa). Naranja se conserva como
     // advertencia semántica ("sugerido").
-    readonly property color cGenBlue: darkMode ? root.brand.ingemaBlueTint : root.brand.ingemaBlue
-    readonly property color cGenBlueSoft: darkMode ? "#102B52" : root.brand.ingemaBlueWash
+    readonly property color cGenBlue: darkMode ? "#8DB85A" : root.brand.ingemaBlue
+    readonly property color cGenBlueSoft: darkMode ? "#243A1C" : root.brand.ingemaBlueWash
     readonly property color cGenOrange: darkMode ? "#FFB35C" : "#DE7A12"
     readonly property color cGenOrangeSoft: darkMode ? "#33271A" : "#FDF2E5"
     readonly property color cGenViolet: darkMode ? root.brand.ingemaPaperSecondary : root.brand.ingemaNavy
@@ -837,6 +859,15 @@ Item {
     // The six stages project the existing document. Historical section IDs
     // remain valid for review links.
     property int stageIndex: 0
+    // Read-only flag for CalicataUbicacionView to avoid camera recenter during
+    // fullscreen manual edits and gestures.
+    readonly property bool ubicacionMapOpen: ubicacionMap.open
+    // Pantalla de mapa enfocada: mantener el Dock global OCULTO durante
+    // toda la transición Hero, incluso al cerrar (open=false, t>0).
+    // El diseño y posición del Dock global no se modifican.
+    readonly property bool ubicacionMapCoversDock: ubicacionMap.open || ubicacionMap.t > 0.001
+    // Hoja de llenado del mapa abierta: el Dock vertical queda detrás (oculto).
+    readonly property bool ubicacionSheetCoversDock: ubicacionMap.open && ubicacionMap.sheetOpen
     property int sectionNavCurrent: 1
 
     property int _lastStageIndex: 0
@@ -851,7 +882,14 @@ Item {
     // "Timers cannot have negative intervals" que emite QtLocation al crear cada Map).
     property bool _locationMapWarm: false
     onStageIndexChanged: {
-        if (stageIndex === 1) _locationMapWarm = true
+        fichaStatusTimer.restart()
+        if (stageIndex === 1) {
+            _locationMapWarm = true
+            Qt.callLater(function() {
+                if (root.stageIndex===1 && root.doc)
+                    ubicacionView.initializeCamera(root._docInstanceId(root.doc))
+            })
+        }
         // Transición direccional corta: avanzar entra desde la derecha,
         // retroceder entra desde la izquierda.
         var forward = stageIndex > _lastStageIndex
@@ -1075,13 +1113,9 @@ Item {
         { key: "odor", label: "Olor" }, { key: "organic", label: "Materia orgánica" },
         { key: "stains", label: "Manchas / contaminación" }, { key: "roots", label: "Presencia de raíces" },
         { key: "voids", label: "Vacíos" }, { key: "other", label: "Otros" }]
-    readonly property var prfColors: [
-        { name: "Marrón", hex: "#B97A56" }, { name: "Marrón claro", hex: "#D9B08C" },
-        { name: "Marrón oscuro", hex: "#7A4E32" }, { name: "Beige", hex: "#E8D5B0" },
-        { name: "Amarillento", hex: "#E6C86E" }, { name: "Rojizo", hex: "#C0674A" },
-        { name: "Gris claro", hex: "#CFD2CE" }, { name: "Gris", hex: "#A7A9A6" },
-        { name: "Gris oscuro", hex: "#6E716E" }, { name: "Verdoso", hex: "#9DB89A" },
-        { name: "Negro", hex: "#3A3A38" }, { name: "Blanco / crema", hex: "#F2EEE3" }]
+    // Colores frecuentes = Web CALICATA_COLOR_PRESETS (Rules); la paleta anterior
+    // por nombre solo se lee para migrar (Rules.LEGACY_STRATUM_COLORS).
+    readonly property var prfColorPresets: Rules.CALICATA_COLOR_PRESETS
     readonly property var prfTemplates: [
         { key: "carretera", title: "Carretera", detail: "Subrasante, terraplenes y rellenos viales",
           method: "AASHTO", context: "Vial / carretera", aashtoFirst: true, featuresHint: false },
@@ -1160,23 +1194,30 @@ Item {
         root.setLabEvidence(index, "features", features)
     }
 
-    // Color del estrato: elegido por el usuario o, si no hay, tono de su grupo.
-    function prfColorHex(name) {
-        for (var i = 0; i < prfColors.length; ++i)
-            if (prfColors[i].name === name) return prfColors[i].hex
-        return ""
-    }
+    // Color del estrato = Web: `color` HEX #RRGGBB elegido por la persona; sin
+    // color, el perfil usa #64748B (CalicataDetailPanel). La trama SUCS va encima.
     function stratumColorFor(plain) {
-        var chosen = prfColorHex(plain.stratum_color)
-        if (chosen.length) return chosen
-        if (Rules.isAnthropicFill(plain.material_origin)) return "#E7B98F"
-        var code = String(Rules.labProjection(plain).primary || plain.sucs || "").toUpperCase()
-        if (/^G/.test(code)) return "#E3D8C3"
-        if (/^S/.test(code)) return "#F0D2B4"
-        if (/^M/.test(code)) return "#C9D8C0"
-        if (/^C/.test(code)) return "#C7CAD9"
-        if (/^(O|PT)/.test(code)) return "#9C8B6E"
-        return "#E7E7E4"
+        var chosen = Rules.stratumColorValue(plain)
+        return chosen.length ? chosen : Rules.CALICATA_STRATUM_FALLBACK_COLOR
+    }
+    // Guarda el color como la Web (HEX en mayúsculas, "" = sin color). Un texto no
+    // HEX se rechaza con el mismo mensaje que la Web y no toca el dato guardado.
+    function setStratumColor(index, value) {
+        if (index < 0 || index >= cortesModel.count) return false
+        var text = String(value || "").trim()
+        var color = Rules.normalizeCalicataColor(text)
+        if (text.length && !color.length) { root.showInfo("Color", Rules.CALICATA_COLOR_FORMAT_ERROR); return false }
+        var extra = JSON.parse(cortesModel.get(index)._extraJson || "{}")
+        extra.color = color
+        extra.color_legacy_migrated = true
+        cortesModel.setProperty(index, "_extraJson", JSON.stringify(extra))
+        if (cortesModel.get(index).color !== undefined) cortesModel.setProperty(index, "color", color)
+        root._markDirty()
+        return true
+    }
+    function stratumColorText(plain) {
+        var color = Rules.stratumColorValue(plain)
+        return color.length ? Rules.colorLabel(color) + " · " + color : ""
     }
     function prfInkOn(tone) {
         return tone.r * 0.299 + tone.g * 0.587 + tone.b * 0.114 < 0.55 ? "#FFFFFF" : "#111311"
@@ -1229,14 +1270,14 @@ Item {
     function requestDeleteStratum(index) {
         if (index < 0 || index >= cortesModel.count) return
         vFlick.forceActiveFocus()
+        // Siempre con confirmación: un estrato vacío recién agregado también puede
+        // tener UUID remoto (lápida -> borrado en la nube). Nunca sin pedirlo.
         if (cortesModel.count <= 1) {
-            root.removeCorte(index)
-        } else if (root.corteHasMeaningfulData(index)) {
-            root._pendingDeleteIdx = index
-            deleteConfirm.open()
-        } else {
-            root.removeCorte(index)
+            root.removeCorte(index)              // solo avisa: la ficha conserva un estrato
+            return
         }
+        root._pendingDeleteIdx = index
+        deleteConfirm.open()
     }
 
     // Añadir debajo del último estrato conserva los intervalos medidos.
@@ -1268,6 +1309,7 @@ Item {
         var extra = JSON.parse(cortesModel.get(target)._extraJson || "{}")
         var keys = ["natural_origin", "fill_type", "fill_context", "fill_control", "fill_compaction", "fill_matrix",
                     "fill_components", "fill_components_other", "structure", "consistency", "stratum_color",
+                    "color", "color_legacy_migrated",
                     "pattern_primary", "pattern_secondary", "pattern_anthropic", "features_enabled", "features", "features_other"]
         for (var k = 0; k < keys.length; ++k)
             if (source[keys[k]] !== undefined) extra[keys[k]] = source[keys[k]]
@@ -1352,6 +1394,13 @@ Item {
         return value.length ? Rules.parseDecimalSafe(value) : NaN
     }
     readonly property real prfGraphDepth: Rules.profileDepth(root.requestedDepthM, root.totalDepthM)
+    // Una banda por estrato, también sin Hasta (Rules.profileBands).
+    readonly property var prfBands: {
+        root._cortesRevision
+        var rows = []
+        for (var i = 0; i < cortesModel.count; ++i) rows.push({ a: cortesModel.get(i).a })
+        return Rules.profileBands(rows)
+    }
 
     // Resumen del perfil (espesores por grupo) a partir de los intervalos válidos.
     readonly property var prfStats: {
@@ -1498,6 +1547,7 @@ Item {
     function handleBack() {
         // Back Android solo cierra superficies/modales temporales. No recorre
         // General/Ubicación/Perfil/Laboratorio/Fotos/Revisión.
+        if (ubicacionMap.handleBack()) return true   // mapa de Ubicación (Hero inverso)
         if (aiReviewDialog.opened) { aiReviewDialog.close(); return true }
         if (tsDlg.visible) {
             tsDlg.close()
@@ -1529,6 +1579,19 @@ Item {
         return false
     }
 
+    function openLocationEditor(mode) {
+        if (!doc || doc.closed || !commitPendingField()) return false
+        if (stageIndex !== 1) {
+            stageIndex = 1
+            Qt.callLater(function() { if (root.stageIndex === 1) root.openLocationEditor(mode) })
+            return true
+        }
+        ubicacionMap.header = doc.header
+        ubicacionMap.documentId = root._docInstanceId(doc)
+        ubicacionMap.savedPoint = root._locationPoint()
+        ubicacionMap.openFrom(ubicacionView.mapCard,mode || "move")
+        return true
+    }
     function acceptMapPoint(latitude, longitude, altitude, accuracy, source) {
         if (!doc || doc.closed || !commitPendingField()) return false
         if (!isFinite(latitude) || !isFinite(longitude) || latitude < -80 || latitude > 84 || Math.abs(longitude) > 180) return false
@@ -1556,6 +1619,55 @@ Item {
     ]
     property string persistenceStatus: ""
     property bool persistenceError: false
+
+    // ===== Ficha estilo QField: campos obligatorios y faltantes =====
+    // Solo presentación: el estado sale de _exportIssues (Rules.validateDocument, la
+    // misma regla que Revisión); la navegación entre secciones es la del Dock.
+    readonly property color cFichaFocus: darkMode ? "#B8E986" : "#486426"
+    readonly property color cFichaMissing: darkMode ? "#FFB088" : "#A33800"
+    property var fichaMissingKeys: ({})
+    Timer {
+        id: fichaStatusTimer
+        interval: 300
+        onTriggered: root._refreshFichaStatus()
+    }
+    function _fichaIssueKey(issue) {
+        var m = String(issue.message || "")
+        if (issue.stratum >= 0) return "stratum"
+        if (/^Proyecto no asignado/.test(m)) return "project"
+        if (/código de calicata/.test(m)) return "codigo"
+        if (/nombre del proyecto/.test(m)) return "project_name"
+        if (/fecha válida de excavación/.test(m)) return "fecha_inicio"
+        if (/fecha de fin/.test(m)) return "fecha_fin"
+        if (/ubicación válida/.test(m)) return "location"
+        if (/^Este UTM/.test(m)) return "utm_x"
+        if (/^Norte UTM/.test(m)) return "utm_y"
+        if (/^Zona UTM/.test(m)) return "zona"
+        if (/^Datum/.test(m)) return "datum"
+        if (/^Altitud/.test(m)) return "utm_z"
+        if (/^Largo/.test(m)) return "length_m"
+        if (/^Ancho/.test(m)) return "width_m"
+        if (/al menos un estrato/.test(m)) return "strata"
+        if (/profundidad final/.test(m)) return "strata"   // derivada de los estratos (sin campo propio)
+        if (/[Nn]ivel freático/.test(m)) return "water"
+        if (/logos/.test(m)) return "logos"
+        if (issue.section === 7) return "photo"
+        return ""
+    }
+    function fichaIssueMessage(key) {
+        var issue = fichaMissingKeys[key]
+        return issue ? String(issue.message) : ""
+    }
+    function _refreshFichaStatus() {
+        if (!doc || _loading || !_ready) return
+        var list = Rules.blockers(_exportIssues(exportState()))
+        var keys = {}
+        for (var i = 0; i < list.length; ++i) {
+            var key = _fichaIssueKey(list[i])
+            if (key.length && !keys[key]) keys[key] = list[i]
+        }
+        fichaMissingKeys = keys
+    }
     signal requestExportExcel()
     // Calls the editor's existing map action; no map provider is created here.
     property var openMapAction: null
@@ -1615,6 +1727,40 @@ Item {
         case 8: return stageIndex === 5 && reviewNotesEditing
         }
         return false
+    }
+
+    // Visita de campo (pantalla de entrada): mismo avance y validador que Revisión,
+    // agrupado en los tres accesos directos. Sólo lee; no guarda ni navega.
+    function siteVisitSnapshot() {
+        if (!doc || !_ready || _loading) return null
+        var state = exportState()
+        var summary = Rules.reviewSummary(state, _exportIssues(state))
+        var h = state.header || {}
+        var byKey = {}
+        for (var i = 0; i < summary.components.length; ++i) byKey[summary.components[i].key] = summary.components[i]
+        function group(key, label, section, keys) {
+            var done = 0, complete = true, pct = 0
+            for (var k = 0; k < keys.length; ++k) {
+                var c = byKey[keys[k]] || { done: 0, required: 1, percent: 0, status: "pending" }
+                done += c.done
+                pct += c.percent
+                if (c.status !== "complete" && c.status !== "warning") complete = false
+            }
+            return { key: key, label: label, section: section, percent: Math.round(pct / keys.length),
+                     status: complete ? "complete" : done > 0 ? "progress" : "pending" }
+        }
+        var point = _locationPoint()             // WGS84 (UTM/PSAD56 convertidos)
+        return {
+            key: String(doc.instanceId || ""),
+            latitude: point.lat,
+            longitude: point.lon,
+            code: String(h.codigo || h.calicata || "").trim(),
+            project: String(h.project_full_name || h.projectName || "").trim(),
+            percent: summary.percent,
+            sections: [group("identity", "Identidad", 1, ["general", "location", "identity"]),
+                       group("lab", "Laboratorio y estratos", 4, ["profile", "lab"]),
+                       group("photos", "Fotos y resumen", 7, ["photos"])]
+        }
     }
 
     function reviewForExport() {
@@ -1687,7 +1833,9 @@ Item {
         id: prfEditorScroll
         interval: 60
         onTriggered: {
-            if (typeof prfEditorCard === "undefined" || !prfEditorCard.visible || !vFlick) return
+            // El editor del estrato vive en prfStratumPopup: no se desplaza la página.
+            if (typeof prfEditorCard === "undefined" || !prfEditorCard.visible || !vFlick
+                    || prfEditorCard.parent !== null) return
             var top = prfEditorCard.mapToItem(vFlick.contentItem, 0, 0).y
             var viewTop = vFlick.contentY, viewBottom = vFlick.contentY + vFlick.height
             if (top >= viewTop + root.dp(8) && top <= viewBottom - root.dp(160)) return
@@ -1840,7 +1988,7 @@ Item {
     readonly property int hLogoClear: root.dp(root.isPhone ? 42 : 50)
 
     // === Protección para no “ensuciar” cuando cargamos datos ===
-    on_LoadingChanged: { if (_loading) invalidateReview() }
+    on_LoadingChanged: { if (_loading) invalidateReview(); else fichaStatusTimer.restart() }
     property bool _loading: false
     property bool _syncingDocument: false
 
@@ -1935,7 +2083,9 @@ Item {
         function onRowsMoved() { root._bumpCortesRevisionNow() }
         function onModelReset() { root._bumpCortesRevisionNow() }
     }
-    readonly property real allowedDepthM: root.requestedDepthM > 0 ? root.requestedDepthM : root.depthMaxM
+    // Sin tope (como la Web): la profundidad objetivo es orientativa y no limita
+    // los estratos; la total = fondo del último estrato (escala del perfil automática).
+    readonly property real allowedDepthM: root.depthMaxM
     readonly property var sucsPatternCodes: [
         "GW", "GP", "GM", "GC",
         "SW", "SP", "SM", "SC",
@@ -2233,14 +2383,61 @@ Item {
         return full.substring(prefix.length).replace(/\\/g, "/")
     }
 
+    // Contrato Web (CalicataLogos.tsx + logoCloudSync.ts): la verdad es
+    // calicata_media (LOGO · ENTITY/PROJECT); una ranura vacía es "Sin logo".
+    // El recurso empaquetado ya no sustituye en silencio al logo remoto vigente.
     function _resolvedLogo(path, removed, target) {
         if (removed === true) return ""
-        return logoAbsUrlFromRel(path || (target === "mtc"
-            ? "qrc:/images/ICONO_LOGO_MTC.jpeg" : "qrc:/images/INGEMA_LOGO_COMPLETO.png"))
+        var rel = String(path || "").trim()
+        // Fichas antiguas que guardaron el recurso empaquetado como ruta: se
+        // siguen mostrando tal cual (es lo que tienen guardado), sin inventar otro.
+        return rel.length ? logoAbsUrlFromRel(rel) : ""
+    }
+
+    // ===== Logos antes de crear (Home › Nueva calicata › Identidad del reporte) =====
+    // Mismo selector real (identityPopup: Elegir del dispositivo / Recursos /
+    // biblioteca 10_RECURSOS, Restablecer, Vaciar). Mientras se prepara, las
+    // elecciones quedan en `stagedLogos` (archivos ya copiados a Recursos) y NO se
+    // escriben en ninguna ficha ni se publican en Media Cloud. Al pulsar Crear,
+    // CalicatasEditorPage las aplica a la ficha nueva con _storeLogoRelative
+    // (historial + outbox PUBLISH_LOGO). Cancelar descarta la preparación.
+    property var stagedLogos: null
+    readonly property bool logoStaging: stagedLogos !== null
+    property var _cloudLogoHistoryBeforeStaging: null
+    function beginLogoStaging() {
+        if (!root.logoStaging) {
+            root._cloudLogoHistoryBeforeStaging = root.cloudLogoHistory
+            root.cloudLogoHistory = ({ PROJECT: [], ENTITY: [] })      // Anteriores de otra ficha no aplican
+            root.stagedLogos = ({})
+        }
+        root.logoMtcSource = String(root.stagedLogos.mtc || "").length ? logoAbsUrlFromRel(root.stagedLogos.mtc) : ""
+        root.logoProyectoSource = String(root.stagedLogos.pro || "").length ? logoAbsUrlFromRel(root.stagedLogos.pro) : ""
+        root.logoFeedbackText = ""
+        identityPopup.open()
+    }
+    // Termina la preparación y devuelve lo elegido ({mtc, pro} con rutas relativas).
+    function endLogoStaging() {
+        if (!root.logoStaging) return ({})
+        var staged = Object.assign({}, root.stagedLogos)
+        if (identityPopup.opened) identityPopup.close()
+        root.stagedLogos = null
+        if (root._cloudLogoHistoryBeforeStaging) root.cloudLogoHistory = root._cloudLogoHistoryBeforeStaging
+        root._cloudLogoHistoryBeforeStaging = null
+        root.logoFeedbackText = ""
+        root._applyPendingToUI()                    // vuelve a mostrar los logos de la ficha abierta
+        return staged
     }
 
     function _storeLogoRelative(target, rel) {
         rel = String(rel || "").trim().replace(/\\/g, "/")
+        if (root.logoStaging) {
+            var staged = Object.assign({}, root.stagedLogos)
+            staged[target] = rel
+            root.stagedLogos = staged
+            if (target === "mtc") root.logoMtcSource = rel.length ? logoAbsUrlFromRel(rel) : ""
+            else if (target === "pro") root.logoProyectoSource = rel.length ? logoAbsUrlFromRel(rel) : ""
+            return
+        }
         if (target === "mtc")
             root.logoMtcSource = rel.length ? logoAbsUrlFromRel(rel) : ""
         else if (target === "pro")
@@ -2250,6 +2447,9 @@ Item {
 
         if (doc && doc.closed !== true) {
             var imgs = Object.assign({}, (doc.images || {}))
+            var prefix = target === "mtc" ? "logo_mtc" : "logo_proyecto"
+            delete imgs[prefix + "_cloud_media_id"]
+            delete imgs[prefix + "_cloud_path"]
             if (rel.length)
                 imgs[root._logoHistoryKey(target)] = root._logoHistoryWith(target, imgs, rel)
             if (target === "mtc") {
@@ -2278,13 +2478,17 @@ Item {
         root._markDirty()
     }
 
+    readonly property var officialLogoSources: ({
+        mtc: ":/images/ICONO_LOGO_MTC.jpeg",
+        pro: ":/images/INGEMA_LOGO_COMPLETO.png"
+    })
+    function _isOfficialLogoName(name) {
+        var s = String(name || "")
+        return s.indexOf("ICONO_LOGO_MTC") >= 0 || s.indexOf("INGEMA_LOGO_COMPLETO") >= 0
+    }
     function _useDefaultLogo(target) {
-        root._storeLogoRelative(target, target === "mtc"
-                                ? "qrc:/images/ICONO_LOGO_MTC.jpeg"
-                                : "qrc:/images/INGEMA_LOGO_COMPLETO.png")
-        root.logoFeedbackText = target === "mtc"
-                ? "Se usará el logo institucional predeterminado."
-                : "Se usará el logo de proyecto predeterminado."
+        root._beginLogoRequest(target)
+        root.logoFeedbackText = "Selecciona el recurso institucional de 10_RECURSOS y confirma. No hay un predeterminado asignado automáticamente."
     }
 
     function _deleteLogo(target) {
@@ -2361,7 +2565,7 @@ Item {
         root._pendingLogoDocId = ""
     }
 
-    function _beginLogoRequest(target) {
+    function _beginLogoRequest(target, deviceOnly) {
         if (root._logoRequestPending || root._photoRequestPending
                 || root._documentClosing)
             return
@@ -2377,6 +2581,12 @@ Item {
         if (!docsCtl.resourcesPath || !String(docsCtl.resourcesPath).length) {
             root.showInfo("No se pudo adjuntar el logo",
                           "No se encontró la carpeta persistente Recursos.")
+            return
+        }
+
+        if (deviceOnly !== true) {
+            resourcesPicker.pickTarget = target
+            resourcesPicker.open()
             return
         }
 
@@ -2648,7 +2858,7 @@ Item {
                 delete changes.idx
                 delete changes.category_code
                 doc.setPhotoCloudState(idx, changes)
-            }
+            } else if (idx === 0) root._confirmLogoPublication(c)
         }
         CalicataCloud.bindMediaIdentity(doc)
         CalicataCloud.flushMedia()
@@ -2659,8 +2869,7 @@ Item {
                 if (!String(doc.originalPhotoUrl(slotIdx)).length && root._photoSyncState(slotIdx) !== "PENDING")
                     CalicataCloud.downloadRemotePhoto(doc, slotIdx, "")
             ensureDocsRoots()
-            if (docsCtl.resourcesPath && String(docsCtl.resourcesPath).length)
-                CalicataCloud.loadRemoteLogos(doc, String(docsCtl.resourcesPath))
+            root._refreshRemoteLogos()
             root.activityRows = []
             CalicataCloud.loadActivity(doc, 0)
         }
@@ -2781,6 +2990,97 @@ Item {
 
     // ===== P5: versiones cloud de logos (PROJECT / ENTITY) =====
     property var cloudLogoHistory: ({ PROJECT: [], ENTITY: [] })
+    property var logoReadStates: ({})
+    property var remotePhotoReadIssues: ({})
+    property var remotePhotoMissing: ({})
+    readonly property bool remotePurged: root.doc && typeof CalicataCloud !== "undefined"
+        && CalicataCloud.purgedCalicataIds.indexOf(String(root.doc.header.remoteCalicataId || "").toLowerCase()) >= 0
+    readonly property string logoCloudScope: root.doc
+        ? String(root.doc.header.projectId || "") + ":" + String(root.doc.header.remoteCalicataId || "") : ""
+    onLogoCloudScopeChanged: {
+        root.cloudLogoHistory = ({ PROJECT: [], ENTITY: [] })
+        root.logoReadStates = ({})
+        root.remotePhotoReadIssues = ({})
+        root.remotePhotoMissing = ({})
+        Qt.callLater(root._refreshRemoteLogos)
+    }
+    function _setLogoReadState(category, state, message) {
+        var next = Object.assign({}, root.logoReadStates)
+        var previous = next[category] || {}
+        var retryingFailure = state === "LOADING" && (previous.state === "ERROR" || previous.failed === true)
+        next[category] = { state: state, message: retryingFailure ? previous.message : String(message || ""), failed: retryingFailure }
+        root.logoReadStates = next
+    }
+    function _refreshRemoteLogos() {
+        if (!doc || doc.closed === true || !String(doc.header.remoteCalicataId || "").length
+                || typeof CalicataCloud === "undefined") return
+        ensureDocsRoots()
+        if (!String(docsCtl.resourcesPath || "").length) return
+        root._setLogoReadState("PROJECT", "LOADING", "")
+        root._setLogoReadState("ENTITY", "LOADING", "")
+        CalicataCloud.loadRemoteLogos(doc, String(docsCtl.resourcesPath))
+    }
+    readonly property var mediaCloudIssues: {
+        if (root.remotePurged) return []
+        var revision = root.mediaQueueRevision
+        var issues = [], entries = root.doc && typeof CalicataCloud !== "undefined"
+            ? CalicataCloud.mediaEntriesFor(root.doc.instanceId) : []
+        for (var i = 0; i < entries.length; ++i) {
+            var entry = entries[i]
+            if (entry.state === "FAILED" || entry.state === "CONFLICT")
+                issues.push({ key: (entry.resource_type === "LOGO" ? "logo-" : "photo-") + entry.category_code, message: String(entry.error || "La publicación del medio falló."),
+                              area: entry.resource_type === "LOGO" ? "General · Logos" : "Fotos" })
+        }
+        for (var category in root.logoReadStates) {
+            var read = root.logoReadStates[category]
+            if (read.state === "ERROR" || read.failed) issues.push({ key: "logo-" + category, message: read.message, area: "General · Logos" })
+        }
+        for (var slot in root.remotePhotoReadIssues)
+            issues.push({ key: "photo-" + slot, message: root.remotePhotoReadIssues[slot], area: "Fotos" })
+        return issues
+    }
+    readonly property bool mediaCloudPending: {
+        if (root.remotePurged) return false
+        var revision = root.mediaQueueRevision
+        if (root.doc && typeof CalicataCloud !== "undefined" && CalicataCloud.mediaEntriesFor(root.doc.instanceId).length) return true
+        for (var category in root.logoReadStates)
+            if (root.logoReadStates[category].state === "LOADING") return true
+        return false
+    }
+    // Revisión de la cola de medios: re-evalúa el estado de las ranuras de logo.
+    property int mediaQueueRevision: 0
+    // Estado de sincronización REAL de una ranura de logo (contrato Web cloudNotice):
+    //   entrada en la outbox -> Pendiente / Sincronizando / Fallo de sincronización
+    //   sin entrada y versión vigente en calicata_media -> Sincronizado (Media Cloud)
+    //   con logo y sin nube confirmada -> Solo local; sin logo -> Sin logo.
+    function logoSlotSyncState(target, hasLogo) {
+        if (root.remotePurged) return "Purgada · copia local conservada"
+        if (root.logoStaging) return hasLogo ? "Se guardará al crear la ficha" : "Sin logo"
+        var revision = root.mediaQueueRevision
+        var category = target === "mtc" ? "ENTITY" : "PROJECT"
+        var entries = root.doc && typeof CalicataCloud !== "undefined"
+                ? CalicataCloud.mediaEntriesFor(root.doc.instanceId) : []
+        for (var i = entries.length - 1; i >= 0; --i) {
+            if (entries[i].category_code !== category || entries[i].resource_type !== "LOGO") continue
+            var st = String(entries[i].state || "")
+            if (st === "SYNCING") return "Sincronizando…"
+            if (st === "FAILED" || st === "CONFLICT") return "Fallo de sincronización"
+            return "Pendiente de sincronización"
+        }
+        var read = (root.logoReadStates || {})[category] || {}
+        if (read.state === "ERROR") return "No se pudo recuperar el logo · " + read.message
+        if (read.state === "LOADING") return "Recuperando logo…"
+        if (read.state === "MISSING") return "No disponible en la nube · copia local conservada"
+        if (read.state === "PURGED") return "Purgada · copia local conservada"
+        if (!hasLogo) return "Sin logo"
+        var cloud = root.cloudLogoHistory[category] || []
+        var imgs = root.doc ? (root.doc.images || {}) : {}
+        var prefix = category === "ENTITY" ? "logo_mtc" : "logo_proyecto"
+        if (cloud.length && !cloud[0].discarded_at
+                && String(imgs[prefix + "_cloud_media_id"] || "") === String(cloud[0].media_id || "")
+                && imgs[prefix + "_cloud_path"] === imgs[prefix + "_path"]) return "Sincronizado · Media Cloud"
+        return "Solo local"
+    }
     function restoreCloudLogo(target, entry) {
         if (!doc || !entry || typeof CalicataCloud === "undefined") return
         ensureDocsRoots()
@@ -2794,27 +3094,57 @@ Item {
     property bool activityHasMore: false
 
     // P5: el logo en uso en la nube manda, salvo un envío local pendiente.
+    function _confirmLogoPublication(changes) {
+        if (!doc || doc.closed === true || !changes || !changes.media_id) return
+        var category = String(changes.category_code || "")
+        if (category !== "ENTITY" && category !== "PROJECT") return
+        var prefix = category === "ENTITY" ? "logo_mtc" : "logo_proyecto", imgs = doc.images || {}
+        var rel = String(imgs[prefix + "_path"] || "")
+        var currentAbs = root._fileUrlToAbs(root.logoAbsUrlFromRel(rel)).replace(/\\/g, "/")
+        if (!rel.length || currentAbs !== String(changes.original_abs || "").replace(/\\/g, "/")) return
+        doc.cacheLogoFromCloud(category, rel, String(changes.media_id), root._logoHistoryFrom(category === "ENTITY" ? "mtc" : "pro", imgs))
+    }
+    function _legacyCloudLogoId(category, path) {
+        var name = String(path || "").replace(/\\/g, "/").split("/").pop()
+        var history = root.cloudLogoHistory[category] || []
+        for (var i = 0; i < history.length; ++i) {
+            var entry = history[i], id = String(entry.media_id || "")
+            var extension = String(entry.original_storage_path || "").split(".").pop()
+            if (id.length && (name === "logo_" + category.toLowerCase() + "_" + id.substring(0, 8) + "." + extension
+                    || name === "logo_" + category.toLowerCase() + "_" + id + "." + extension)) return id
+        }
+        return ""
+    }
     function _adoptRemoteLogo(category, absPath) {
-        if (!doc || doc.closed === true || !absPath.length) return
+        if (!doc || doc.closed === true) return
         var entries = CalicataCloud.mediaEntriesFor(doc.instanceId)
         for (var i = 0; i < entries.length; ++i)
             if (entries[i].category_code === category) return
-        var rel = root._relativeToDocsBase(absPath)
-        if (!rel.length) return
-        var imgs = Object.assign({}, doc.images || {})
-        var key = category === "ENTITY" ? "logo_mtc_path" : "logo_proyecto_path"
-        if (imgs[key] === rel) return
-        imgs[key] = rel
-        imgs[category === "ENTITY" ? "logo_mtc_removed" : "logo_proyecto_removed"] = false
-        imgs[root._logoHistoryKey(category === "ENTITY" ? "mtc" : "pro")] =
-                root._logoHistoryWith(category === "ENTITY" ? "mtc" : "pro", imgs, rel)
-        doc.images = imgs
+        var rel = absPath.length ? root._relativeToDocsBase(absPath) : ""
+        if (absPath.length && !rel.length) return
+        var imgs = doc.images || {}, prefix = category === "ENTITY" ? "logo_mtc" : "logo_proyecto"
+        var legacyId = root._legacyCloudLogoId(category, imgs[prefix + "_path"])
+        var knownCloud = imgs[prefix + "_cloud_media_id"] || legacyId
+        if (rel.length && imgs[prefix + "_path"] && !knownCloud) return
+        // Una ranura vacía confirmada retira sólo la copia cloud anterior.
+        // Una selección local sin publicar no se pierde por una lectura remota.
+        var cloudPath = imgs[prefix + "_cloud_path"] || (legacyId ? imgs[prefix + "_path"] : "")
+        if (!rel.length && (!knownCloud || cloudPath !== imgs[prefix + "_path"])) return
+        var target = category === "ENTITY" ? "mtc" : "pro"
+        var history = rel.length ? root._logoHistoryWith(target, imgs, rel) : root._logoHistoryFrom(target, imgs)
+        var active = (root.cloudLogoHistory[category] || [])[0] || {}
+        doc.cacheLogoFromCloud(category, rel, rel.length ? String(active.media_id || "") : "", history)
         root._applyPendingToUI()
     }
 
     Connections {
         target: root
         function onDocChanged() {
+            root.cloudLogoHistory = ({ PROJECT: [], ENTITY: [] })
+            root.logoReadStates = ({})
+            root.remotePhotoReadIssues = ({})
+            root.remotePhotoMissing = ({})
+            root.logoFeedbackText = ""
             if (!root.doc && typeof CalicataCloud !== "undefined") CalicataCloud.leavePresence()
             root._scheduleMediaCloudReconcile()
         }
@@ -2848,25 +3178,59 @@ Item {
             var next = Object.assign({}, root.cloudLogoHistory)
             next[category] = history || []
             root.cloudLogoHistory = next
+            root._setLogoReadState(category, localPath.length ? "READY" : "EMPTY", "")
             root._adoptRemoteLogo(category, localPath)
+        }
+        function onRemoteLogoReadFailed(localId, category, message) {
+            if (!root.doc || localId !== root.doc.instanceId) return
+            // Lifecycle/existence is authoritative; a read never republishes local media.
+            // FROZEN (purga en curso) es un estado del ciclo de vida, no un fallo de lectura.
+            var unavailable = message === "PURGED" || message === "OBJECT_NOT_FOUND" || message === "FROZEN"
+            root._setLogoReadState(category, message === "PURGED" ? "PURGED"
+                                   : message === "OBJECT_NOT_FOUND" || message === "FROZEN" ? "MISSING" : "ERROR",
+                                   unavailable ? "" : message)
         }
         // Restaurar = volver a publicar esos bytes como logo nuevo (contrato Web).
         function onRemoteLogoRestored(localId, category, localPath, error) {
             if (!root.doc || localId !== root.doc.instanceId) return
             var rel = localPath.length ? root._relativeToDocsBase(localPath) : ""
-            if (!rel.length) { root.logoFeedbackText = "No se pudo recuperar el logo: " + error; return }
+            if (!rel.length) {
+                root.logoFeedbackText = "No se pudo recuperar el logo: " + error
+                root._setLogoReadState(category, "ERROR", error)
+                return
+            }
+            root._setLogoReadState(category, "READY", "")
             root._storeLogoRelative(category === "ENTITY" ? "mtc" : "pro", rel)
             root.logoFeedbackText = "Versión restaurada; se publicará como logo en uso."
-            CalicataCloud.loadRemoteLogos(root.doc, String(docsCtl.resourcesPath || ""))
+            root._refreshRemoteLogos()
         }
         function onActivityLoaded(localId, rows, offset, hasMore) {
             if (!root.doc || localId !== root.doc.instanceId) return
             root.activityRows = offset > 0 ? root.activityRows.concat(rows) : rows
             root.activityHasMore = hasMore
         }
+        function onMediaQueueChanged() { root.mediaQueueRevision++ }
         function onMediaSyncChanged(localId, idx, state, message, changes) {
-            if (!root.doc || root.doc.closed === true || localId !== root.doc.instanceId || idx < 1) return
-            if (state === "REMOTE_EMPTY" || state === "REMOTE_FAILED") return
+            root.mediaQueueRevision++
+            if (!root.doc || root.doc.closed === true || localId !== root.doc.instanceId) return
+            if (idx === 0) {
+                if (state === "SYNCED") {
+                    root._confirmLogoPublication(changes)
+                    root._refreshRemoteLogos()
+                }
+                return
+            }
+            var readIssues = Object.assign({}, root.remotePhotoReadIssues)
+            var missing = Object.assign({}, root.remotePhotoMissing)
+            if (state === "REMOTE_FAILED") readIssues[idx] = message || "La lectura de la fotografía falló."
+            else delete readIssues[idx]
+            // Missing/purged bytes are terminal read states, never an upload request.
+            if (state === "REMOTE_MISSING") missing[idx] = true
+            else delete missing[idx]
+            root.remotePhotoReadIssues = readIssues
+            root.remotePhotoMissing = missing
+            if (state === "REMOTE_EMPTY" || state === "REMOTE_FAILED" || state === "REMOTE_MISSING"
+                    || state === "REMOTE_PURGED" || state === "PURGED") return
             if (state === "SYNCED") {
                 CalicataCloud.takeConfirmedMedia(localId)   // aplicado aquí; no repetir al reabrir
                 root.doc.setPhotoCloudState(idx, changes)
@@ -3228,23 +3592,18 @@ Item {
         // los campos, selectores y acciones de dentro son controles anidados del
         // mismo material. Las etapas que componen sus propias tarjetas primarias
         // (Fotos, Perfil, Laboratorio) la desactivan para no apilar vidrio.
-        property bool glassPanel: true
-        readonly property real panelPadding: sectionCard.glassPanel ? root.dp(14) : 0
+        property bool glassPanel: false           // compatibilidad: la hoja de la ficha es el único vidrio
+        readonly property real panelPadding: 0
         default property alias sectionContent: sectionBody.data
         visible: root.sectionVisible(sectionNumber)
+        // Cambio de etapa: la etapa nueva entra con un fundido corto (antes era instantáneo).
+        onVisibleChanged: if (visible && root.flowMotionEnabled) stageFadeIn.restart()
+        NumberAnimation { id: stageFadeIn; target: sectionCard; property: "opacity"; from: 0; to: 1; duration: 220; easing.type: Easing.OutCubic }
         width: parent ? parent.width : 0
         implicitHeight: sectionLayout.implicitHeight + root.dp(12) + 2 * sectionCard.panelPadding
         height: implicitHeight
         radius: root.dp(24)
         color: "transparent"
-        CalicataSurface {
-            visible: sectionCard.glassPanel
-            anchors.fill: parent
-            dark: root.darkMode
-            accent: root.cGenBlue
-            radius: sectionCard.radius
-            level: "card"
-        }
         ColumnLayout {
             id: sectionLayout
             anchors.left: parent.left
@@ -3293,7 +3652,7 @@ Item {
         }
         contentItem: Text {
             text: stageButton.text
-            color: stageButton.primary ? (root.darkMode ? root.brand.ingemaDeep : "#FFFFFF") : root.cText
+            color: stageButton.primary ? (root.darkMode ? "#0A0A0A" : "#FFFFFF") : root.cText
             font: stageButton.font
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
@@ -3502,6 +3861,7 @@ Item {
     // modelo ya en orden más reciente primero. Solo presentación; las acciones
     // siguen siendo restoreCloudLogo / _restoreLogoVersion.
     function _logoVersionRows(target) {
+        if (root.logoStaging) return []            // la ficha aún no existe: sin versiones anteriores
         var rows = []
         var cloud = root.cloudLogoHistory[target === "mtc" ? "ENTITY" : "PROJECT"] || []
         for (var i = 0; i < cloud.length; ++i) {
@@ -3593,7 +3953,7 @@ Item {
     }
 
     component PhotoAmbient: Rectangle {
-        color: root.darkMode ? root.brand.ingemaDeep : "#F2F4F7"
+        color: root.darkMode ? "#0A0A0A" : "#F2F4F7"
     }
 
     component PhotoBadge: Rectangle {
@@ -3772,7 +4132,7 @@ Item {
                 anchors.centerIn: parent
                 visible: glassCheck.checked
                 text: "✓"
-                color: root.darkMode ? root.brand.ingemaDeep : "#FFFFFF"
+                color: root.darkMode ? "#0A0A0A" : "#FFFFFF"
                 font.pixelSize: root.sp(13)
                 font.bold: true
             }
@@ -3882,23 +4242,14 @@ Item {
         Layout.fillWidth: true
         Layout.topMargin: root.dp(10)
         spacing: root.dp(8)
-        Rectangle {
-            Layout.preferredWidth: root.dp(4)
-            Layout.preferredHeight: root.dp(14)
-            radius: root.dp(2)
-            color: genGroup.accent
-        }
-        Text {
-            text: genGroup.title
-            color: root.cText
-            font.pixelSize: root.sp(12)
-            font.weight: Font.DemiBold
-            font.letterSpacing: 1.4
-        }
-        Rectangle {
+        Text {                                      // grupo de la ficha (patrón QField)
             Layout.fillWidth: true
-            Layout.preferredHeight: 1
-            color: root.cBorder
+            text: genGroup.title
+            color: root.cMuted
+            font.pixelSize: root.sp(12)
+            font.weight: Font.Bold
+            font.letterSpacing: 1.4
+            elide: Text.ElideRight
         }
     }
 
@@ -3919,6 +4270,10 @@ Item {
         property bool readOnly: false
         property string valueText: ""
         property string placeholder: ""
+        property bool mandatory: false             // «*» junto a la etiqueta
+        property bool missing: false               // BLOCKER del validador para este campo
+        property string rule: ""                   // texto de la regla cuando falta
+        property string unit: ""                   // unidad a la derecha (p. ej. «m»)
         property real contentHeight: genValue.visible ? genValue.implicitHeight + root.dp(14) : 0
         readonly property bool pressed: genTap.pressed
         default property alias content: genSlot.data
@@ -3931,10 +4286,9 @@ Item {
             Layout.fillWidth: true
             Layout.leftMargin: root.dp(2)
             visible: genShell.label.length > 0
-            text: genShell.labelCaps ? genShell.label.toUpperCase() : genShell.label
-            color: genShell.focused ? genShell.accent : root.cMuted
-            font.pixelSize: genShell.labelCaps ? root.sp(11) : root.sp(12)
-            font.letterSpacing: genShell.labelCaps ? 1.6 : 0.2
+            text: genShell.label + (genShell.mandatory ? " *" : "")
+            color: genShell.focused ? root.cFichaFocus : genShell.missing ? root.cFichaMissing : root.cMuted
+            font.pixelSize: root.sp(13)
             font.weight: Font.DemiBold
             wrapMode: Text.WordWrap
             Behavior on color { ColorAnimation { duration: 140 } }
@@ -3943,42 +4297,34 @@ Item {
         Rectangle {
             id: genBox
             Layout.fillWidth: true
-            implicitHeight: Math.max(root.dp(54), genShell.contentHeight + root.dp(6))
-            radius: root.dp(12)
-            color: "transparent"
+            implicitHeight: Math.max(root.dp(48), genShell.contentHeight + root.dp(6))
+            radius: root.dp(14)
+            // Caja de vidrio clara con borde fino (ficha QField).
+            color: genShell.pressed ? (root.darkMode ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(1, 1, 1, 0.92))
+                 : (root.darkMode ? Qt.rgba(1, 1, 1, 0.07) : Qt.rgba(1, 1, 1, 0.75))
+            border.width: 1
+            border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.16) : Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.16)
+            opacity: !genShell.readOnly || genShell.tappable || genShell.valueText.length > 0 ? 1 : 0.6
             scale: genShell.pressed ? 0.985 : 1
             Accessible.role: genShell.tappable ? Accessible.Button : Accessible.Grouping
             Accessible.name: genShell.label
             Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
 
-            CalicataSurface {
-                dark: root.darkMode
-                accent: genShell.accent
+            Rectangle {                                // foco verde / faltante (ficha QField)
                 anchors.fill: parent
                 radius: genBox.radius
-                tone: genShell.emphasized ? "tinted" : "glass"
-                pressed: genShell.pressed
-                focused: genShell.focused
-                enabledLook: !genShell.readOnly || genShell.tappable || genShell.valueText.length > 0
+                color: "transparent"
+                visible: genShell.focused || genShell.missing
+                border.width: root.dp(2)
+                border.color: genShell.focused ? root.cFichaFocus : root.cFichaMissing
             }
 
-            GenIconBadge {
-                id: genShellBadge
-                onGlassControl: true
-                anchors.left: parent.left
-                anchors.leftMargin: root.dp(9)
-                anchors.verticalCenter: parent.verticalCenter
-                iconName: genShell.iconName
-                glyph: genShell.glyph
-                accent: genShell.accent
-                accentSoft: genShell.accentSoft
-            }
             Item {
                 id: genSlot
-                anchors.left: genShellBadge.right
-                anchors.leftMargin: root.dp(12)
-                anchors.right: genChevron.visible ? genChevron.left : parent.right
-                anchors.rightMargin: genChevron.visible ? root.dp(6) : root.dp(12)
+                anchors.left: parent.left
+                anchors.leftMargin: root.dp(14)
+                anchors.right: genChevron.visible ? genChevron.left : genUnit.visible ? genUnit.left : parent.right
+                anchors.rightMargin: genChevron.visible || genUnit.visible ? root.dp(8) : root.dp(14)
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
             }
@@ -3987,14 +4333,24 @@ Item {
                 anchors.left: genSlot.left
                 anchors.right: genSlot.right
                 anchors.verticalCenter: parent.verticalCenter
-                visible: genShell.valueText.length > 0 || genShell.placeholder.length > 0
-                text: genShell.valueText.length ? genShell.valueText : genShell.placeholder
+                visible: genShell.valueText.length > 0 || genShell.placeholder.length > 0 || genSlot.children.length === 0
+                text: genShell.valueText.length ? genShell.valueText : genShell.placeholder.length ? genShell.placeholder : "—"
                 color: genShell.valueText.length ? root.cText : root.cMuted
                 font.pixelSize: root.fsField
                 font.weight: genShell.valueText.length && genShell.emphasized ? Font.DemiBold : Font.Normal
                 wrapMode: Text.WordWrap
                 maximumLineCount: 2
                 elide: Text.ElideRight
+            }
+            Text {
+                id: genUnit
+                anchors.right: genChevron.visible ? genChevron.left : parent.right
+                anchors.rightMargin: genChevron.visible ? root.dp(6) : root.dp(14)
+                anchors.verticalCenter: parent.verticalCenter
+                visible: genShell.unit.length > 0
+                text: genShell.unit
+                color: root.cMuted
+                font.pixelSize: root.sp(15)
             }
             Components.FlowIcon {
                 id: genChevron
@@ -4022,10 +4378,12 @@ Item {
         Text {
             Layout.fillWidth: true
             Layout.leftMargin: root.dp(2)
-            visible: genShell.caption.length > 0
-            text: genShell.caption
-            color: root.cMuted
-            font.pixelSize: root.sp(11)
+            readonly property bool showRule: genShell.missing && genShell.rule.length > 0
+            visible: showRule || genShell.caption.length > 0
+            text: showRule ? genShell.rule : genShell.caption
+            color: showRule ? root.cFichaMissing : root.cMuted
+            font.pixelSize: root.sp(13)
+            font.weight: showRule ? Font.DemiBold : Font.Normal
             wrapMode: Text.WordWrap
         }
     }
@@ -4040,7 +4398,8 @@ Item {
         // Tipo numérico y mínimo del campo interno (por defecto, el contrato previo).
         property string inputKind: genHeaderField.numeric ? Rules.DEPTH_METERS : Rules.FREE_TEXT
         property real inputMinimum: 0
-        property string hint: ""
+        property string hint: "—"                  // vacío = «—» (el placeholder sigue nombrando el campo)
+        function focusInput() { genHeaderInput.forceActiveFocus() }
         property string boundText: root.doc ? String(root.doc.header[genHeaderField.headerKey] || "") : ""
         property var commitHandler: function(t) {
             var h = Object.assign({}, root.doc.header)
@@ -4115,6 +4474,7 @@ Item {
         id: genDialogHeader
         property string title: ""
         property string subtitle: ""
+        property string badgeText: ""          // "3D Touch" en los selectores de General
         signal closeRequested()
         Layout.fillWidth: true
         spacing: root.dp(8)
@@ -4136,6 +4496,24 @@ Item {
                 color: root.cMuted
                 font.pixelSize: root.fsLabel
                 elide: Text.ElideRight
+            }
+        }
+        Rectangle {
+            visible: genDialogHeader.badgeText.length > 0
+            Layout.alignment: Qt.AlignVCenter
+            Layout.preferredHeight: root.dp(24)
+            Layout.preferredWidth: genDialogBadge.implicitWidth + root.dp(18)
+            radius: height / 2
+            color: Qt.rgba(root.cGenBlue.r, root.cGenBlue.g, root.cGenBlue.b, root.darkMode ? 0.18 : 0.10)
+            border.width: 1
+            border.color: Qt.rgba(root.cGenBlue.r, root.cGenBlue.g, root.cGenBlue.b, 0.30)
+            Text {
+                id: genDialogBadge
+                anchors.centerIn: parent
+                text: genDialogHeader.badgeText
+                color: root.cGenBlue
+                font.pixelSize: root.sp(11)
+                font.weight: Font.DemiBold
             }
         }
         GenRoundIconButton {
@@ -4196,7 +4574,7 @@ Item {
                     id: genBtnLabel
                     text: genBtn.text
                     font: genBtn.font
-                    color: genBtn.primary ? (root.darkMode ? root.brand.ingemaDeep : "#FFFFFF")
+                    color: genBtn.primary ? (root.darkMode ? "#0A0A0A" : "#FFFFFF")
                          : genBtn.soft ? genBtn.accent : root.cText
                 }
             }
@@ -4383,12 +4761,11 @@ Item {
         }
     }
 
-    component GenPopupSurface: Rectangle {
+    component GenPopupSurface: CalicataSurface {
         property var popupItem: null
         radius: root.dp(28)
-        color: root.darkMode ? "#171D29" : "#FFFFFF"
-        border.width: 1
-        border.color: root.darkMode ? "#3A4456" : "#D5DBE3"
+        dark: root.darkMode
+        level: "sheet"
     }
 
     component GenScrim: Rectangle {
@@ -4418,76 +4795,61 @@ Item {
         }
     }
 
-    // Cabecera de la etapa General: contexto de la ficha y título de la etapa.
-    component GenStageHeader: Column {
-        id: genHeader
-        property string codeText: ""
-        property string projectText: ""
-        property bool projectAssigned: false
-        property string stageText: "General"
-        property string stageIcon: "calgen.code"
-        spacing: root.dp(6)
+    // ===== Ficha (patrón QField): vidrio de la hoja y helpers de texto =====
+    function _genDash(v) { var t = String(v === undefined || v === null ? "" : v).trim(); return t.length ? t : "—" }
 
-        Text {
-            width: parent.width
-            text: genHeader.codeText || "NUEVA CALICATA"
-            color: root.cMuted
-            font.pixelSize: root.sp(11)
-            font.letterSpacing: 2.4
-            font.weight: Font.DemiBold
-            elide: Text.ElideRight
-        }
-        Row {
-            width: parent.width
-            spacing: root.dp(8)
-            Rectangle {
-                anchors.verticalCenter: parent.verticalCenter
-                width: root.dp(8)
-                height: width
-                radius: width / 2
-                color: genHeader.projectAssigned ? root.cGenBlue : root.cGenOrange
-            }
-            Text {
-                width: parent.width - root.dp(16)
-                text: genHeader.projectText
-                color: root.cText
-                font.pixelSize: root.sp(17)
-                maximumLineCount: 2
-                wrapMode: Text.WordWrap
-                elide: Text.ElideRight
-            }
-        }
-        Item { width: 1; height: root.dp(10) }
-        Row {
-            width: parent.width
-            spacing: root.dp(14)
-            GenIconBadge {
-                width: root.dp(54)
-                height: root.dp(54)
-                radius: root.dp(15)
-                iconName: genHeader.stageIcon
-            }
-            Column {
-                anchors.verticalCenter: parent.verticalCenter
-                width: parent.width - root.dp(68)
-                spacing: root.dp(2)
-                Text {
-                    text: "FICHA DE CALICATA"
-                    color: root.cMuted
-                    font.pixelSize: root.sp(11)
-                    font.letterSpacing: 3
-                    font.weight: Font.DemiBold
-                }
-                Text {
-                    width: parent.width
-                    text: genHeader.stageText
-                    color: root.cText
-                    font.pixelSize: root.sp(34)
-                    font.bold: true
-                    wrapMode: Text.WordWrap
-                }
-            }
-        }
+    // Captura de las auras de CalicatasEditorPage (fondo real) para el vidrio:
+    // auras -> blur suave (8–12 u, sin mosaico) -> textura del DockGlassPanel.
+    readonly property Item genAuraBackdrop: {
+        for (var host = root.parent; host; host = host.parent)
+            if ("healthAuraMode" in host && host.background) return host.background
+        return null
+    }
+    readonly property bool genGlassLive: root.visible && root.genAuraBackdrop !== null
+                                         && (root.stageIndex === 0 || !fichaSheetGlass.fallbackOn)
+    readonly property real genGlassDivisor: GraphicsCore.deviceTier === "HIGH" ? 1 : 2
+    ShaderEffectSource {
+        id: genAuraCapture
+        sourceItem: root.genAuraBackdrop
+        hideSource: false
+        visible: false
+        smooth: true
+        mipmap: true
+        live: root.genGlassLive
+        textureSize: root.genAuraBackdrop
+            ? Qt.size(Math.max(1, Math.round(root.genAuraBackdrop.width / root.genGlassDivisor)),
+                      Math.max(1, Math.round(root.genAuraBackdrop.height / root.genGlassDivisor)))
+            : Qt.size(1, 1)
+    }
+    MultiEffect {
+        id: genAuraBlurred                           // oculto por genAuraBlurTex (hideSource)
+        width: root.genAuraBackdrop ? root.genAuraBackdrop.width : 1
+        height: root.genAuraBackdrop ? root.genAuraBackdrop.height : 1
+        source: genAuraCapture
+        autoPaddingEnabled: false
+        blurEnabled: true
+        blurMax: 32
+        blur: root.genGlassDivisor > 1 ? 0.5 : 0.8
+    }
+    ShaderEffectSource {
+        id: genAuraBlurTex
+        sourceItem: genAuraBlurred
+        hideSource: true
+        visible: false
+        smooth: true
+        mipmap: true
+        live: root.genGlassLive
+    }
+    QtObject {
+        id: genGlassUi
+        readonly property Item backdrop: root.genAuraBackdrop
+        readonly property var glassTexture: root.genAuraBackdrop ? genAuraBlurTex : null
+        readonly property bool glassReady: root.genAuraBackdrop !== null
+        property int glassTick: 0
+    }
+    Connections {                                    // el vidrio sigue al desplazamiento
+        target: vFlick
+        function onContentYChanged() { if (root.stageIndex === 0) genGlassUi.glassTick++ }
     }
 
     // ===== Perfil (rediseño): piezas visuales propias de la etapa =====
@@ -4500,34 +4862,27 @@ Item {
         default property alias cardContent: prfCardBody.data
         property alias headerTrailing: prfCardTrailing.data
         Layout.fillWidth: true
-        implicitHeight: prfCardLayout.implicitHeight + root.dp(32)
-        radius: root.dp(18)
+        // Grupo plano de la ficha (patrón QField): título en versalitas y contenido
+        // en lista; el vidrio es la hoja, no cada tarjeta.
+        implicitHeight: prfCardLayout.implicitHeight + root.dp(8)
         color: "transparent"
-        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: prfCard.radius; level: "card" }
         ColumnLayout {
             id: prfCardLayout
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: root.dp(16)
-            spacing: root.dp(14)
+            spacing: root.dp(10)
             RowLayout {
                 Layout.fillWidth: true
                 visible: prfCard.title.length > 0
                 spacing: root.dp(10)
-                GenIconBadge {
-                    Layout.preferredWidth: root.dp(32)
-                    Layout.preferredHeight: root.dp(32)
-                    visible: prfCard.iconName.length > 0
-                    iconName: prfCard.iconName
-                    accent: Qt.colorEqual(prfCard.iconTint, root.cText) ? root.cGenBlue : prfCard.iconTint
-                }
                 Text {
                     Layout.fillWidth: true
-                    text: prfCard.title
-                    color: root.cText
-                    font.pixelSize: root.sp(17)
-                    font.weight: Font.DemiBold
+                    text: prfCard.title.toUpperCase()
+                    color: root.cMuted
+                    font.pixelSize: root.sp(12)
+                    font.weight: Font.Bold
+                    font.letterSpacing: 1.4
                     elide: Text.ElideRight
                 }
                 Row {
@@ -4554,39 +4909,31 @@ Item {
         property bool resizable: false
         property real manualHeight: -1
         property real maxHeight: Math.max(root.dp(240), root.height * (root.isPhone ? 0.8 : 0.9))
-        readonly property real naturalHeight: prfSubLayout.implicitHeight + root.dp(28)
+        readonly property real naturalHeight: prfSubLayout.implicitHeight + root.dp(14)
         Layout.fillWidth: true
         Layout.alignment: Qt.AlignTop
         implicitHeight: prfSub.resizable && prfSub.manualHeight > 0
                         ? Math.max(prfSub.naturalHeight, Math.min(prfSub.manualHeight, prfSub.maxHeight))
                         : prfSub.naturalHeight
-        radius: root.dp(14)
         color: "transparent"
-        CalicataSurface { dark: root.darkMode; accent: prfSub.accent; anchors.fill: parent; radius: prfSub.radius }
+        Rectangle { width: parent.width; height: 1; color: root.cBorder }   // separador de subgrupo
         ColumnLayout {
             id: prfSubLayout
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: root.dp(14)
+            anchors.topMargin: root.dp(10)
             spacing: root.dp(10)
             RowLayout {
                 Layout.fillWidth: true
                 spacing: root.dp(8)
-                GenIconBadge {
-                    Layout.preferredWidth: root.dp(28)
-                    Layout.preferredHeight: root.dp(28)
-                    radius: root.dp(8)
-                    onGlassControl: true
-                    iconName: prfSub.iconName
-                    accent: prfSub.accent
-                }
                 Text {
                     Layout.fillWidth: true
-                    text: prfSub.title
-                    color: root.cText
-                    font.pixelSize: root.sp(14)
-                    font.weight: Font.DemiBold
+                    text: prfSub.title.toUpperCase()
+                    color: root.cMuted
+                    font.pixelSize: root.sp(12)
+                    font.weight: Font.Bold
+                    font.letterSpacing: 1.4
                     elide: Text.ElideRight
                 }
             }
@@ -4659,6 +5006,7 @@ Item {
         property string valueText: ""
         property string placeholder: "Seleccionar"
         property bool sideLabel: false
+        property bool readOnly: false
         property real labelWidth: root.dp(116)
         property real boxHeight: root.dp(42)
         property color swatch: "transparent"
@@ -4734,6 +5082,7 @@ Item {
                     Layout.preferredWidth: root.dp(14)
                     Layout.preferredHeight: root.dp(14)
                     name: "calgen.chevron"
+                    visible: !prfPickField.readOnly
                     rotation: 90
                     flow: root.flow
                     tintColor: root.cMuted
@@ -4744,8 +5093,8 @@ Item {
             MouseArea {
                 id: prfPickTap
                 anchors.fill: parent
-                enabled: prfPickField.enabled
-                onClicked: prfPickField.activated()
+                enabled: prfPickField.enabled && !prfPickField.readOnly
+                onClicked: if (!prfPickField.readOnly) prfPickField.activated()
             }
         }
     }
@@ -5028,7 +5377,7 @@ Item {
             }
             onTextChanged: {
                 if (root._loading || !activeFocus) return
-                if (prfArea.maxLength > 0 && text.length > prfArea.maxLength) {
+                if (prfArea.maxLength > 0 && text.length > prfArea.maxLength) {   // 0 = sin límite
                     var position = Math.min(cursorPosition, prfArea.maxLength)
                     text = text.substring(0, prfArea.maxLength)
                     cursorPosition = position
@@ -5050,7 +5399,7 @@ Item {
             anchors.right: prfAreaGrip.left
             anchors.bottom: parent.bottom
             anchors.margins: root.dp(8)
-            text: prfAreaEdit.length + " / " + prfArea.maxLength
+            text: prfArea.maxLength > 0 ? prfAreaEdit.length + " / " + prfArea.maxLength : String(prfAreaEdit.length)
             color: root.cMuted
             font.pixelSize: root.sp(11)
         }
@@ -5518,12 +5867,13 @@ Item {
         contentItem: ColumnLayout {
             spacing: root.dp(12)
             GenDialogHeader {
-                title: "Seleccionar proyecto"
+                title: "Seleccionar carpeta"
+                badgeText: "3D Touch"
                 onCloseRequested: projectPickerPopup.close()
             }
             GenSearchField {
                 id: projectSearchField
-                placeholderText: "Buscar proyecto…"
+                placeholderText: "Buscar carpeta…"
             }
             Text {
                 Layout.fillWidth: true
@@ -5583,6 +5933,33 @@ Item {
         }
     }
 
+    // ===== General · paneles contextuales (3D Touch de Calicatas = GenPopup) =====
+    // Los campos son los MISMOS controles y bindings del General anterior: solo
+    // cambia dónde se muestran. Aceptar confirma; Cancelar devuelve los valores
+    // que tenía la ficha al abrir el panel (la carpeta tiene su propio selector
+    // con su propia confirmación).
+    function _generalIdentitySummary() {
+        var parts = []
+        if (txtCodigo.text.trim().length) parts.push(txtCodigo.text.trim())
+        var project = root.doc && root.doc.header.projectId ? String(root._projectDisplayName()) : ""
+        if (project.length) parts.push(project)
+        return parts.length ? parts.join(" · ") : "Información general del proyecto"
+    }
+    function _openSheetTypePicker() {
+        var sheetTypes = ["FICHA DE CALICATA", "FICHA DE CANTERA"]
+        var current = root.doc ? String(root.doc.header.description || "") : ""
+        root._openOptionPicker("Seleccionar tipo de ficha", sheetTypes,
+                               Math.max(0, sheetTypes.indexOf(current)), "calgen.code",
+                               root.cGenGreen, root.cGenGreenSoft,
+                               function(i) {
+                                   if (!root.doc || i < 0 || i >= sheetTypes.length) return
+                                   var h = Object.assign({}, root.doc.header)
+                                   h.description = sheetTypes[i]
+                                   root.doc.header = h
+                                   root._markDirty()
+                               })
+    }
+
     // Selector de maquinaria (Ficha > General). Mismo modelo y mismo commit
     // que el ComboBox previo: índice 0 limpia, catálogo escribe, histórico se conserva.
     property int _pendingMachineIndex: 0
@@ -5623,6 +6000,7 @@ Item {
             spacing: root.dp(12)
             GenDialogHeader {
                 title: "Seleccionar maquinaria"
+                badgeText: "3D Touch"
                 onCloseRequested: machinePickerPopup.close()
             }
             GenSearchField {
@@ -5882,7 +6260,8 @@ Item {
                 model: cortesModel
                 bandInfo: root.stratumBandInfo
                 selectedIndex: root.selectedStratum
-                totalDepth: root.prfGraphDepth
+                totalDepth: Math.max(root.prfGraphDepth, root.prfBands.bottom)
+                bands: root.prfBands.bands
                 waterDepth: root.prfWaterDepth
                 showWater: root.profileSetup.show_water_table !== false
                 scaleFactor: root.uiScale
@@ -5894,7 +6273,464 @@ Item {
                 paper: Qt.rgba(root.cSurface.r, root.cSurface.g, root.cSurface.b, root.darkMode ? 0.18 : 0.40)   // papel del gráfico sobre el vidrio de la tarjeta
                 onSelected: function(index) {
                     prfGraphPopup.close()
-                    root.selectStratum(index, "field")
+                    root.openStratumEditor(index)
+                }
+            }
+        }
+    }
+
+
+    // ===== Perfil: tocar la barra de un estrato = editarlo (todos sus campos) =====
+    // Mismo vidrio de los diálogos (GenPopup). Los campos usan los setters ya
+    // portados (commitBoundary, setStratumColor, setStratumExtra…).
+    function openStratumEditor(index) {
+        if (index < 0 || index >= cortesModel.count) return
+        root.selectStratum(index, "field")
+        if (root.selectedStratum === index && !prfStratumPopup.opened) prfStratumPopup.open()
+    }
+    GenPopup {
+        id: prfStratumPopup
+        preferredWidth: root.dp(560)
+        preferredHeight: Math.min(root.dp(760), Math.max(root.dp(180), prfStratumPopup.freeHeight * 0.82))
+        onClosed: {
+            root.commitPendingField()
+            root.flushRequested()
+        }
+        contentItem: ColumnLayout {
+            spacing: root.dp(10)
+            GenDialogHeader {
+                title: root.selectedStratum >= 0 ? "Estrato " + (root.selectedStratum + 1) : "Estrato"
+                subtitle: root.prfSel ? (String(root.prfSel.de || "0.00") + " – "
+                                         + (String(root.prfSel.a || "").length ? String(root.prfSel.a) + " m" : "sin Hasta"))
+                                      : ""
+                onCloseRequested: prfStratumPopup.close()
+            }
+            Flickable {
+                id: prfStratumFlick
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                contentWidth: width
+                contentHeight: prfStratumCol.implicitHeight
+                boundsBehavior: Flickable.StopAtBounds
+                ColumnLayout {
+                    id: prfStratumCol
+                    width: prfStratumFlick.width
+                    spacing: root.dp(12)
+                        PrfCard {
+                            id: prfEditorCard
+                            visible: cortesModel.count > 0
+                            readonly property int idx: root.selectedStratum
+                            readonly property var s: root.prfSel || ({})
+                            readonly property bool hasStratum: !!root.prfSel
+                            readonly property string origin: root.prfOriginLabel(s.material_origin)
+                            readonly property bool anthropicLike: origin === "Antrópico"
+                            readonly property real innerWidth: width - root.dp(32)
+                            readonly property int subColumns: innerWidth >= root.dp(860) ? 3 : innerWidth >= root.dp(560) ? 2 : 1
+                            readonly property real subWidth: (innerWidth - (subColumns - 1) * root.dp(12)) / subColumns
+                            readonly property bool sideLabels: subWidth >= root.dp(300)
+                            readonly property var projection: Rules.labProjection(s)
+                            readonly property real fromDepth: Rules.parseDecimalSafe(s.de)
+                            readonly property real toDepth: Rules.parseDecimalSafe(s.a)
+                            readonly property var features: s.features || ({})
+                            readonly property var components: Array.isArray(s.fill_components) ? s.fill_components : []
+
+                            Text {
+                                Layout.fillWidth: true
+                                visible: !prfEditorCard.hasStratum
+                                text: "Selecciona un estrato de la tabla para editar su detalle."
+                                color: root.cMuted
+                                font.pixelSize: root.fsLabel
+                                wrapMode: Text.WordWrap
+                            }
+
+                            // Cabecera: estrato activo + navegación entre estratos.
+                            RowLayout {
+                                Layout.fillWidth: true
+                                visible: prfEditorCard.hasStratum
+                                spacing: root.dp(10)
+                                Rectangle {
+                                    Layout.preferredWidth: root.dp(32)
+                                    Layout.preferredHeight: root.dp(32)
+                                    radius: root.dp(8)
+                                    color: root.stratumColorFor(prfEditorCard.s)
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: prfEditorCard.idx + 1
+                                        color: root.prfInkOn(parent.color)
+                                        font.pixelSize: root.sp(14)
+                                        font.bold: true
+                                    }
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "Estrato " + (prfEditorCard.idx + 1)
+                                          + (prfEditorCard.origin.length ? " – " + prfEditorCard.origin : "")
+                                          + (root.stratumTypeText(prfEditorCard.s).length
+                                             ? " (" + root.stratumTypeText(prfEditorCard.s) + ")" : "")
+                                    color: root.cText
+                                    font.pixelSize: root.sp(17)
+                                    font.weight: Font.DemiBold
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
+                                }
+                                PrfToolButton {
+                                    visible: root.reviewCorrectionActive
+                                    text: "Volver a revisión"
+                                    iconName: "action.check"
+                                    primaryTone: true
+                                    onClicked: root.finishReviewCorrection()
+                                }
+                                GenRoundIconButton {
+                                    iconName: "calgen.chevronLeft"
+                                    enabled: prfEditorCard.idx > 0
+                                    opacity: enabled ? 1 : 0.35
+                                    Accessible.name: "Estrato anterior"
+                                    onClicked: root.selectStratum(prfEditorCard.idx - 1, "field")
+                                }
+                                GenRoundIconButton {
+                                    iconName: "calgen.chevron"
+                                    enabled: prfEditorCard.idx < cortesModel.count - 1
+                                    opacity: enabled ? 1 : 0.35
+                                    Accessible.name: "Estrato siguiente"
+                                    onClicked: root.selectStratum(prfEditorCard.idx + 1, "field")
+                                }
+                            }
+
+                                PrfSubsection {
+                                    title: "Origen del estrato"
+                                    iconName: "map.marker"
+                                    accent: root.cGenOrange
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: root.dp(6)
+                                        Repeater {
+                                            model: root.prfOriginOptions
+                                            delegate: PrfSegment {
+                                                required property var modelData
+                                                implicitHeight: root.dp(40)
+                                                label: modelData === "Mixto / intervenido" ? "Mixto" : modelData
+                                                isOn: prfEditorCard.origin === modelData
+                                                accent: root.cGenOrange
+                                                accentSoft: root.cGenOrangeSoft
+                                                onPicked: root.setStratumOrigin(prfEditorCard.idx, modelData)
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        visible: !prfEditorCard.origin.length
+                                        text: "Elige el origen. Antrópico habilita sus componentes de relleno."
+                                        color: root.cMuted
+                                        font.pixelSize: root.sp(11)
+                                        wrapMode: Text.WordWrap
+                                    }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        visible: prfEditorCard.anthropicLike
+                                        spacing: root.dp(8)
+                                        Text {
+                                            Layout.fillWidth: true
+                                            Layout.topMargin: root.dp(4)
+                                            text: "Componentes antrópicos"
+                                            color: root.cMuted
+                                            font.pixelSize: root.fsLabel
+                                        }
+                                        Flow {
+                                            Layout.fillWidth: true
+                                            spacing: root.dp(6)
+                                            Repeater {
+                                                model: root.prfFillComponents
+                                                delegate: PrfChip {
+                                                    required property var modelData
+                                                    label: modelData
+                                                    isOn: prfEditorCard.components.indexOf(modelData) >= 0
+                                                    onFlipped: root.toggleStratumListValue(prfEditorCard.idx, "fill_components", modelData)
+                                                }
+                                            }
+                                        }
+                                        BoundTextField {
+                                            Layout.fillWidth: true
+                                            visible: prfEditorCard.components.indexOf("Otros") >= 0
+                                            placeholderText: "Especifica otros componentes"
+                                            modelText: String(prfEditorCard.s.fill_components_other || "")
+                                            onCommit: function(t) { root.setStratumExtra(prfEditorCard.idx, "fill_components_other", t) }
+                                        }
+                                    }
+                                }
+
+                            // 1. Rango y geometría.
+                            GridLayout {
+                                Layout.fillWidth: true
+                                visible: prfEditorCard.hasStratum
+                                columns: prfEditorCard.innerWidth >= root.dp(760) ? 5 : prfEditorCard.innerWidth >= root.dp(460) ? 3 : 2
+                                columnSpacing: root.dp(10)
+                                rowSpacing: root.dp(10)
+                                MobileReadOnlyField {
+                                    Layout.fillWidth: true
+                                    fieldLabel: "Desde (m)"
+                                    fieldText: String(prfEditorCard.s.de || "")
+                                }
+                                PrfLabeledInput {
+                                    label: "Hasta (m)"
+                                    BoundTextField {
+                                        Layout.fillWidth: true
+                                        numericKind: Rules.DEPTH_METERS
+                                        maximumValue: root.allowedDepthM
+                                        placeholderText: "Hasta (m)"
+                                        modelText: String(prfEditorCard.s.a || "")
+                                        onCommit: function(t) { return root.commitBoundary(prfEditorCard.idx, t) }
+                                    }
+                                }
+                                MobileReadOnlyField {
+                                    Layout.fillWidth: true
+                                    fieldLabel: "Espesor (m)"
+                                    fieldText: isFinite(prfEditorCard.fromDepth) && isFinite(prfEditorCard.toDepth)
+                                               && prfEditorCard.toDepth > prfEditorCard.fromDepth
+                                               ? (prfEditorCard.toDepth - prfEditorCard.fromDepth).toFixed(2) : ""
+                                }
+                                // Patrón = proyección del laboratorio (solo lectura).
+                                PrfPickField {
+                                    visible: !prfEditorCard.anthropicLike
+                                    label: "Símbolo / patrón (Laboratorio)"
+                                    readOnly: true
+                                    boxHeight: root.hField
+                                    patterns: root.stratumPatternFilesFor(prfEditorCard.s)
+                                    swatch: root.stratumColorFor(prfEditorCard.s)
+                                    valueText: root.stratumPatternLabel(prfEditorCard.s)
+                                    placeholder: "Pendiente de laboratorio"
+                                }
+                                // Selector = Web CalicataLiveColor: colores frecuentes, HEX libre y limpiar.
+                                PrfPickField {
+                                    visible: !prfEditorCard.anthropicLike
+                                    label: "Color"
+                                    boxHeight: root.hField
+                                    swatch: root.stratumColorFor(prfEditorCard.s)
+                                    valueText: root.stratumColorText(prfEditorCard.s)
+                                    placeholder: "Sin color registrado"
+                                    onActivated: {
+                                        var presets = root.prfColorPresets
+                                        var labels = presets.map(function(c) { return c.label + " · " + c.value })
+                                        var current = Rules.stratumColorValue(prfEditorCard.s), selected = ""
+                                        for (var i = 0; i < presets.length; ++i) if (presets[i].value === current) selected = labels[i]
+                                        var idx = prfEditorCard.idx
+                                        root.prfPick("Color del estrato", labels, selected, "calgen.default",
+                                                     function(v) { root.setStratumColor(idx, v.length ? v.split(" · ")[1] : "") })
+                                    }
+                                }
+                                BoundTextField {
+                                    Layout.fillWidth: true
+                                    placeholderText: "#806F64"
+                                    modelText: Rules.stratumColorValue(prfEditorCard.s)
+                                    onCommit: function(t) { return root.setStratumColor(prfEditorCard.idx, t) }
+                                }
+                            }
+
+                            GridLayout {
+                                Layout.fillWidth: true
+                                visible: prfEditorCard.hasStratum
+                                columns: prfEditorCard.subColumns
+                                columnSpacing: root.dp(12)
+                                rowSpacing: root.dp(12)
+
+                                // 2-3. Origen del estrato y sistema global de relleno antrópico.
+
+
+                                // 4. Clasificación geotécnica.
+                                PrfSubsection {
+                                    title: prfEditorCard.origin === "Antrópico" ? "Descripción del relleno" : "Clasificación geotécnica"
+                                    iconName: "geotechnical.stratigraphy"
+                                    accent: root.cGenBlue
+
+                                    Text {   // solo lectura: SUCS/AASHTO se llenan en Laboratorio
+                                        Layout.fillWidth: true
+                                        visible: !(prfEditorCard.origin === "Antrópico")
+                                        text: (prfEditorCard.projection.sucs || prfEditorCard.projection.aashto)
+                                              ? [prfEditorCard.projection.sucs, prfEditorCard.projection.aashto].filter(function(x) { return !!x }).join(" · ") + " (desde Laboratorio)"
+                                              : "Pendiente de laboratorio"
+                                        color: root.cMuted
+                                        font.pixelSize: root.sp(15)
+                                        font.weight: Font.DemiBold
+                                        wrapMode: Text.WordWrap
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "Descripción"
+                                        color: root.cMuted
+                                        font.pixelSize: root.fsLabel
+                                    }
+                                    PrfTextArea {
+                                        label: "Descripción"
+                                        modelText: String(prfEditorCard.s.descripcion || "")
+                                        maxLength: 0   // sin límite
+                                        placeholder: "Material, color, textura, compacidad, humedad…"
+                                        onCommit: function(t) {
+                                            cortesModel.setProperty(prfEditorCard.idx, "descripcion", t)
+                                            root._markDirtySoon()
+                                        }
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "Observaciones del estrato"
+                                        color: root.cMuted
+                                        font.pixelSize: root.fsLabel
+                                    }
+                                    PrfTextArea {
+                                        label: "Observaciones del estrato"
+                                        modelText: String(prfEditorCard.s.observations || "")
+                                        maxLength: 0   // sin límite
+                                        placeholder: "Observaciones del estrato…"
+                                        onCommit: function(t) { root.setStratumExtra(prfEditorCard.idx, "observations", t) }
+                                    }
+                                    PrfPickField {
+                                        visible: !(prfEditorCard.origin === "Antrópico")
+                                        sideLabel: prfEditorCard.sideLabels
+                                        label: "Humedad"
+                                        valueText: prfEditorCard.s.humedad >= 0 && prfEditorCard.s.humedad < root.humItems.length
+                                                   ? root.humItems[prfEditorCard.s.humedad] : ""
+                                        onActivated: root.prfPickIndex("Humedad", root.humItems, prfEditorCard.s.humedad, "calgen.water",
+                                                                       function(i) {
+                                                                           cortesModel.setProperty(prfEditorCard.idx, "humedad", i)
+                                                                           root._markDirty()
+                                                                       })
+                                    }
+                                    PrfPickField {
+                                        visible: !(prfEditorCard.origin === "Antrópico")
+                                        sideLabel: prfEditorCard.sideLabels
+                                        label: "Consistencia / densidad"
+                                        valueText: String(prfEditorCard.s.consistency || "")
+                                        onActivated: root.prfPick("Consistencia / densidad",
+                                                                  root.stratumConsistencyOptions(prfEditorCard.s),
+                                                                  prfEditorCard.s.consistency, "calgen.depth",
+                                                                  function(v) { root.setStratumExtra(prfEditorCard.idx, "consistency", v) })
+                                    }
+                                    PrfPickField {
+                                        visible: !(prfEditorCard.origin === "Antrópico")
+                                        sideLabel: prfEditorCard.sideLabels
+                                        label: "Estabilidad"
+                                        valueText: prfEditorCard.s.estabilidad >= 0 && prfEditorCard.s.estabilidad < root.estItems.length
+                                                   ? root.estItems[prfEditorCard.s.estabilidad] : ""
+                                        onActivated: root.prfPickIndex("Estabilidad", root.estItems, prfEditorCard.s.estabilidad,
+                                                                       "status.warning",
+                                                                       function(i) {
+                                                                           cortesModel.setProperty(prfEditorCard.idx, "estabilidad", i)
+                                                                           root._markDirty()
+                                                                       })
+                                    }
+                                    PrfPickField {
+                                        visible: !(prfEditorCard.origin === "Antrópico")
+                                        sideLabel: prfEditorCard.sideLabels
+                                        label: "Excavabilidad"
+                                        valueText: prfEditorCard.s.excavabilidad >= 0 && prfEditorCard.s.excavabilidad < root.excItems.length
+                                                   ? root.excItems[prfEditorCard.s.excavabilidad] : ""
+                                        onActivated: root.prfPickIndex("Excavabilidad", root.excItems, prfEditorCard.s.excavabilidad,
+                                                                       "calgen.machine",
+                                                                       function(i) {
+                                                                           cortesModel.setProperty(prfEditorCard.idx, "excavabilidad", i)
+                                                                           root._markDirty()
+                                                                       })
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    Layout.alignment: Qt.AlignTop
+                                    spacing: root.dp(12)
+
+                                    // 5. Muestreo (opcional). Fuente de verdad; Laboratorio la lee.
+                                    PrfSubsection {
+                                        visible: !(prfEditorCard.origin === "Antrópico")   // el relleno antrópico no tiene muestra
+                                        title: "Muestra (opcional)"
+                                        iconName: "calgen.attach"
+                                        accent: root.cGenViolet
+                                        resizable: true
+
+                                        BoundTextField {
+                                            Layout.fillWidth: true
+                                            visible: String(prfEditorCard.s.tipo_muestra || "") === "Otro"
+                                            placeholderText: "Especifica el tipo"
+                                            modelText: String(prfEditorCard.s.tipo_otro || "")
+                                            onCommit: function(t) {
+                                                cortesModel.setProperty(prfEditorCard.idx, "tipo_otro", t)
+                                                cortesModel.setProperty(prfEditorCard.idx, "tipoText", t)
+                                            }
+                                        }
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: root.dp(8)
+                                            PrfLabeledInput {
+                                                label: "Desde (m)"
+                                                BoundTextField {
+                                                    Layout.fillWidth: true
+                                                    numericKind: Rules.DEPTH_METERS
+                                                    minimumValue: isFinite(prfEditorCard.fromDepth) ? prfEditorCard.fromDepth : 0
+                                                    maximumValue: isFinite(prfEditorCard.toDepth) ? prfEditorCard.toDepth : root.depthMaxM
+                                                    placeholderText: "Desde"
+                                                    modelText: Rules.sampleIntervalValue(prfEditorCard.s, "muestra_desde")
+                                                    onCommit: function(t) { return root.commitSampleInterval(prfEditorCard.idx, "muestra_desde", t) }
+                                                }
+                                            }
+                                            PrfLabeledInput {
+                                                label: "Hasta (m)"
+                                                BoundTextField {
+                                                    Layout.fillWidth: true
+                                                    numericKind: Rules.DEPTH_METERS
+                                                    minimumValue: isFinite(prfEditorCard.fromDepth) ? prfEditorCard.fromDepth : 0
+                                                    maximumValue: isFinite(prfEditorCard.toDepth) ? prfEditorCard.toDepth : root.depthMaxM
+                                                    placeholderText: "Hasta"
+                                                    modelText: Rules.sampleIntervalValue(prfEditorCard.s, "muestra_hasta")
+                                                    onCommit: function(t) { return root.commitSampleInterval(prfEditorCard.idx, "muestra_hasta", t) }
+                                                }
+                                            }
+                                        }
+                                        PrfLabeledInput {
+                                            visible: false   // DIOS: sin ID de muestra
+                                            label: "ID de muestra"
+                                            BoundTextField {
+                                                Layout.fillWidth: true
+                                                placeholderText: (txtCodigo.text.trim().length ? txtCodigo.text.trim() : "CALICATA")
+                                                                 + "-M" + (prfEditorCard.idx + 1)
+                                                maximumLength: 40
+                                                modelText: String(prfEditorCard.s.sample_code || "")
+                                                onCommit: function(t) { root.setStratumExtra(prfEditorCard.idx, "sample_code", t) }
+                                            }
+                                        }
+                                    }
+
+                                    // 6. Características adicionales.
+                                }
+                            }
+                        }
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: root.dp(10)
+                GenDialogButton {
+                    text: "Duplicar"
+                    iconName: "action.copy"
+                    soft: true
+                    enabled: root.selectedStratum >= 0
+                    onClicked: root.duplicateStratum(root.selectedStratum)
+                }
+                GenDialogButton {
+                    text: "Eliminar estrato"
+                    iconName: "action.delete"
+                    soft: true
+                    enabled: root.selectedStratum >= 0 && cortesModel.count > 1
+                    onClicked: {
+                        var idx = root.selectedStratum
+                        prfStratumPopup.close()
+                        root.requestDeleteStratum(idx)
+                    }
+                }
+                GenDialogButton {
+                    text: "Listo"
+                    iconName: "action.check"
+                    primary: true
+                    onClicked: prfStratumPopup.close()
                 }
             }
         }
@@ -6429,6 +7265,7 @@ Item {
             root.coreFeedback = "La ficha cambió. Vuelve a ejecutar InGe AI para revisar la versión actual."
         }
         setDirty(true)
+        fichaStatusTimer.restart()
 
         if (!doc || doc.closed === true) return
         if (doc.markDirty) {
@@ -6670,6 +7507,14 @@ Item {
         var input = (x && typeof x === "object") ? x : {}
         var o = Object.assign({}, JSON.parse(input._extraJson || "{}"), input)
         delete o._extraJson
+        // Migración al leer (paridad Web): un color de la paleta anterior por nombre
+        // (stratum_color) pasa a `color` HEX, que es lo que sincroniza. El nombre se
+        // conserva; la marca evita volver a migrar un color que la persona limpió.
+        if (o.color_legacy_migrated !== true) {
+            var migratedColor = Rules.normalizeCalicataColor(o.color) || Rules.stratumColorValue(o)
+            if (migratedColor.length) o.color = migratedColor
+            o.color_legacy_migrated = true
+        }
         var d = _defaultCorte()
         // Esquema de PRESENTACIÓN estable: ListModel no crea rol para un miembro
         // null ("Adding an object with a null member..."). Un null conserva el
@@ -6725,6 +7570,9 @@ Item {
             ip: JSON.parse(source._extraJson || "{}").nonplastic_confirmed === true ? "NP" : Rules.plasticityIndex(source.wl, source.lp),
             percentage_fields: JSON.parse(source._percentageFieldsJson || "[]"),
             descripcion: String(source.descripcion || ""),
+            // Web exportModel.ts: color HEX + colorLabel aproximado (Excel/PDF lo leen).
+            color: Rules.stratumRowColor(source),
+            color_label: Rules.stratumRowColor(source).length ? Rules.colorLabel(Rules.stratumRowColor(source)) : "",
             humedad: isFinite(Number(source.humedad)) ? Number(source.humedad) : -1,
             excavabilidad: isFinite(Number(source.excavabilidad)) ? Number(source.excavabilidad) : -1,
             estabilidad: isFinite(Number(source.estabilidad)) ? Number(source.estabilidad) : -1,
@@ -7050,7 +7898,7 @@ Item {
 
         var row = cortesModel.get(index)
         var previousDe = String(row.de || ""), previousA = String(row.a || "")
-        cortesModel.setProperty(index, "a", Rules.normalizeDecimalText(text, Rules.DEPTH_METERS, false))
+        cortesModel.setProperty(index, "a", Rules.parseCalicataDepthInput(text).canonical)   // Web: canónico 0.00
         root._inheritSampleInterval(index, previousDe, previousA)
         renumerarCortesYIntervalos(true)
         return true
@@ -7718,6 +8566,7 @@ Item {
         ignoreUnknownSignals: true
 
         function onPhotoSelected(targetIdx, localUrl, sourceKind) {
+            root.mediaSelectionIssue = null                       // incidencia resuelta
             if (targetIdx < 1 || targetIdx > 3) return   // slot de otra subapp (Rendiciones)
             if (root._logoRequestPending
                     && targetIdx === root._logoPickerIndex(root._pendingLogoPickTarget)
@@ -7770,6 +8619,10 @@ Item {
 
         function onPhotoSelectionError(targetIdx, code, message) {
             if (targetIdx < 1 || targetIdx > 3) return
+            root.mediaSelectionIssue = {
+                kind: root._logoRequestPending && targetIdx === root._logoPickerIndex(root._pendingLogoPickTarget) ? "logo" : "photo",
+                code: String(code || ""), message: String(message || "")
+            }
             if (root._logoRequestPending
                     && targetIdx === root._logoPickerIndex(root._pendingLogoPickTarget)) {
                 root._releasePendingLogoRequest()
@@ -7876,6 +8729,10 @@ Item {
     }
 
     Dialog {
+        // Entrada/salida suaves (fundido + leve escala).
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
+                            NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 220; easing.type: Easing.OutCubic } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 140; easing.type: Easing.InCubic } }
         id: replaceDlg
         parent: Overlay.overlay
         modal: true
@@ -7935,6 +8792,10 @@ Item {
     // Decisión del técnico ante una cota automática con discrepancia o frente a una
     // cota MANUAL: "Usar automática" o "Ingresar manual" (nunca se reemplaza sola).
     Dialog {
+        // Entrada/salida suaves (fundido + leve escala).
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
+                            NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 220; easing.type: Easing.OutCubic } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 140; easing.type: Easing.InCubic } }
         id: altitudeReplaceDialog
         parent: Overlay.overlay
         modal: true
@@ -7990,6 +8851,10 @@ Item {
     }
 
     Dialog {
+        // Entrada/salida suaves (fundido + leve escala).
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
+                            NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 220; easing.type: Easing.OutCubic } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 140; easing.type: Easing.InCubic } }
         id: coordsConfirm
         parent: Overlay.overlay
         modal: true
@@ -8296,6 +9161,10 @@ Item {
     }
 
     Dialog {
+        // Entrada/salida suaves (fundido + leve escala).
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
+                            NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 220; easing.type: Easing.OutCubic } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 140; easing.type: Easing.InCubic } }
         id: resourcesPicker
         parent: Overlay.overlay
         modal: true
@@ -8323,6 +9192,37 @@ Item {
         property string pickTarget: ""
         property string selectedFileName: ""
         property url selectedUrl: ""
+        property bool libraryMode: true
+        property var libraryRows: []
+        property var selectedCloudEntry: null
+        property string librarySpaceId: ""
+        property string libraryParentId: ""
+        property var libraryParents: []
+        property string libraryMessage: ""
+        property string requestDocId: ""
+        property string requestScope: ""
+
+        function loadLibrary(parentId) {
+            libraryParentId = parentId
+            libraryRows = []
+            selectedCloudEntry = null
+            selectedFileName = ""
+            selectedUrl = ""
+            libraryMessage = "Consultando 10_RECURSOS con tu cuenta…"
+            CalicataCloud.listLogoLibrary(root.doc, parentId)
+        }
+        Connections {
+            target: typeof CalicataCloud !== "undefined" ? CalicataCloud : null
+            function onLogoLibraryListed(localId, spaceId, parentId, items, error) {
+                if (!resourcesPicker.opened || localId !== resourcesPicker.requestDocId
+                        || parentId !== resourcesPicker.libraryParentId) return
+                resourcesPicker.librarySpaceId = spaceId
+                resourcesPicker.libraryRows = items || []
+                resourcesPicker.libraryMessage = error.length ? error
+                    : (items.length ? "10_RECURSOS · confirma para descargar y publicar la imagen elegida."
+                                    : "Esta carpeta no contiene imágenes disponibles.")
+            }
+        }
 
         function _folderUrlForResources() {
             var p = (docsCtl.resourcesPath || "").toString().replace(/\\/g, "/")
@@ -8349,20 +9249,56 @@ Item {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: root.cMuted
-                text: (docsCtl.resourcesPath && docsCtl.resourcesPath.length)
+                text: resourcesPicker.libraryMode ? resourcesPicker.libraryMessage
+                      : (docsCtl.resourcesPath && docsCtl.resourcesPath.length)
                       ? ("Selecciona un logo dentro de:\n" + root._prettyFromUserRoot(docsCtl.resourcesPath))
                       : "No se pudo ubicar la carpeta Recursos."
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                GenDialogButton {
+                    text: "Dispositivo"
+                    Accessible.name: "Elegir una imagen de los archivos del dispositivo"
+                    Layout.fillWidth: true
+                    onClicked: {
+                        var target = resourcesPicker.pickTarget
+                        resourcesPicker.close()
+                        root._beginLogoRequest(target, true)
+                    }
+                }
+                GenDialogButton {
+                    text: resourcesPicker.libraryMode ? "Recursos locales" : "10_RECURSOS"
+                    onClicked: {
+                        resourcesPicker.libraryMode = !resourcesPicker.libraryMode
+                        resourcesPicker.selectedFileName = ""
+                        resourcesPicker.selectedUrl = ""
+                        resourcesPicker.selectedCloudEntry = null
+                        if (resourcesPicker.libraryMode) resourcesPicker.loadLibrary("")
+                    }
+                }
+            }
+            GenDialogButton {
+                visible: resourcesPicker.libraryMode && resourcesPicker.libraryParents.length > 0
+                text: "Carpeta anterior"
+                onClicked: {
+                    var parents = resourcesPicker.libraryParents.slice()
+                    var parentId = parents.pop()
+                    resourcesPicker.libraryParents = parents
+                    resourcesPicker.loadLibrary(parentId)
+                }
             }
 
             ListView {
                 id: resList
                 Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(240, resourcesPicker.height * 0.35)
+                Layout.preferredHeight: Math.min(root.dp(180), resourcesPicker.height * 0.28)
                 clip: true
-                model: resModel
+                model: resourcesPicker.libraryMode ? resourcesPicker.libraryRows : resModel
                 currentIndex: -1
 
                 delegate: Item {
+                    readonly property var cloudItem: resourcesPicker.libraryMode ? modelData : null
                     width: resList.width
                     height: 44
 
@@ -8380,7 +9316,7 @@ Item {
                         anchors.leftMargin: 10
                         anchors.right: parent.right
                         anchors.rightMargin: 10
-                        text: fileName
+                        text: parent.cloudItem ? (parent.cloudItem.node_type === "FOLDER" ? "› " : "") + parent.cloudItem.name : fileName
                         elide: Text.ElideRight
                         color: root.cText
                     }
@@ -8388,6 +9324,19 @@ Item {
                     MouseArea {
                         anchors.fill: parent
                         onClicked: {
+                            if (resourcesPicker.libraryMode) {
+                                var item = parent.cloudItem
+                                if (item.node_type === "FOLDER") {
+                                    resourcesPicker.libraryParents = resourcesPicker.libraryParents.concat([resourcesPicker.libraryParentId])
+                                    resourcesPicker.loadLibrary(item.id)
+                                    return
+                                }
+                                resList.currentIndex = index
+                                resourcesPicker.selectedCloudEntry = item
+                                resourcesPicker.selectedFileName = item.name
+                                resourcesPicker.selectedUrl = ""
+                                return
+                            }
                             resList.currentIndex = index
                             resourcesPicker.selectedFileName = fileName
                             resourcesPicker.selectedUrl = fileUrl   // ✅ role correcto
@@ -8434,14 +9383,27 @@ Item {
 
             selectedFileName = ""
             selectedUrl = ""
+            selectedCloudEntry = null
+            requestDocId = root._docInstanceId(root.doc)
+            requestScope = root.logoCloudScope
+            libraryMode = true
+            libraryParents = []
             resList.currentIndex = -1
 
             // ✅ refresca folder si resourcesPath recién se calculó
             resModel.folder = _folderUrlForResources()
+            loadLibrary("")
         }
 
         onAccepted: {
             if (!selectedFileName || !selectedFileName.length) return
+            if (requestDocId !== root._docInstanceId(root.doc) || requestScope !== root.logoCloudScope) return
+            if (selectedCloudEntry) {
+                CalicataCloud.selectLibraryLogo(root.doc, pickTarget === "mtc" ? "ENTITY" : "PROJECT",
+                    librarySpaceId, selectedCloudEntry.id, String(docsCtl.resourcesPath || ""))
+                root.logoFeedbackText = "Descargando la versión autorizada de 10_RECURSOS…"
+                return
+            }
 
             var rel = "Recursos/" + selectedFileName
             root._storeLogoRelative(pickTarget, rel)
@@ -8460,13 +9422,18 @@ Item {
         property string subtitle: ""
         property bool hasLogo: false
         property url logoSource: ""
-        // Los predeterminados son ICONO_LOGO_MTC / INGEMA_LOGO_COMPLETO (_useDefaultLogo).
-        readonly property string logoState: {
-            if (!genLogoSlot.hasLogo) return "Sin logo"
-            var s = String(genLogoSlot.logoSource)
-            return s.indexOf("ICONO_LOGO_MTC") >= 0 || s.indexOf("INGEMA_LOGO_COMPLETO") >= 0
-                    ? "Predeterminado" : "Personalizado"
-        }
+        // Recursos empaquetados antiguos son locales; no equivalen a la biblioteca Web.
+        readonly property bool isDefault: genLogoSlot.hasLogo && root._isOfficialLogoName(String(genLogoSlot.logoSource))
+        readonly property var readState: root.logoReadStates[genLogoSlot.target === "mtc" ? "ENTITY" : "PROJECT"] || {}
+        readonly property bool readFailed: readState.state === "ERROR" || readState.failed === true
+        readonly property string logoState: readFailed ? "Sin verificar" : !genLogoSlot.hasLogo ? "Sin logo"
+                                          : genLogoSlot.isDefault ? "Recurso local" : "Seleccionado"
+        readonly property var versionRows: root._logoVersionRows(genLogoSlot.target)
+        readonly property string resourceName: genLogoSlot.hasLogo
+            ? root._logoVersionName(decodeURIComponent(String(genLogoSlot.logoSource).split("/").pop())) : ""
+        // Estado REAL (outbox Media Cloud + calicata_media); nunca "sincronizado" sin confirmación.
+        readonly property string syncState: root.logoSlotSyncState(genLogoSlot.target, genLogoSlot.hasLogo)
+        property bool showVersions: false
         Layout.fillWidth: true
         implicitHeight: genLogoLayout.implicitHeight + root.dp(24)
         radius: root.dp(14)
@@ -8507,12 +9474,12 @@ Item {
                     Layout.preferredHeight: root.dp(24)
                     Layout.preferredWidth: genLogoState.implicitWidth + root.dp(16)
                     radius: height / 2
-                    color: genLogoSlot.hasLogo ? root.cGenGreenSoft : root.cGenOrangeSoft
+                    color: genLogoSlot.hasLogo && !genLogoSlot.readFailed ? root.cGenGreenSoft : root.cGenOrangeSoft
                     Text {
                         id: genLogoState
                         anchors.centerIn: parent
                         text: genLogoSlot.logoState
-                        color: genLogoSlot.hasLogo ? root.cGenGreen : root.cGenOrange
+                        color: genLogoSlot.hasLogo && !genLogoSlot.readFailed ? root.cGenGreen : root.cGenOrange
                         font.pixelSize: root.sp(11)
                         font.weight: Font.DemiBold
                     }
@@ -8570,28 +9537,43 @@ Item {
                 }
             }
 
-            // Acciones compactas: mismo tamaño, radio e iconografía.
+            Text {
+                Layout.fillWidth: true
+                text: genLogoSlot.hasLogo ? genLogoSlot.resourceName + " · " + genLogoSlot.syncState
+                                          : genLogoSlot.syncState
+                color: genLogoSlot.syncState === "Fallo de sincronización" ? (root.flow ? root.flow.theme.error : "#B4232E")
+                     : genLogoSlot.syncState.indexOf("Sincronizado") === 0 ? root.cGenGreen
+                     : genLogoSlot.syncState === "Sin logo" ? root.cMuted : root.cGenOrange
+                font.pixelSize: root.fsLabel
+                wrapMode: Text.WordWrap
+            }
+
+            // Acciones (contrato Web): Elegir · Anteriores · Restablecer · Vaciar.
             RowLayout {
                 Layout.fillWidth: true
                 spacing: root.dp(8)
                 Repeater {
                     model: [
-                        { label: "Adjuntar", full: "Adjuntar", icon: "calgen.attach", action: "attach" },
-                        { label: "Predeterminado", full: "Usar predeterminado", icon: "calgen.default", action: "default" },
-                        { label: "Dejar vacío", full: "Dejar vacío", icon: "calgen.clear", action: "clear" }
+                        { label: "Elegir", full: "Elegir imagen", icon: "calgen.attach", action: "attach" },
+                        { label: "Anteriores", full: "Ver versiones anteriores", icon: "calgen.history", action: "versions" },
+                        { label: "Restablecer", full: "Elegir recurso institucional de la biblioteca compartida", icon: "calgen.default", action: "default" },
+                        { label: "Vaciar", full: "Dejar vacío", icon: "calgen.clear", action: "clear" }
                     ]
                     delegate: GenDialogButton {
                         required property var modelData
+                        Layout.fillWidth: true
                         Layout.preferredWidth: 1
-                        visible: modelData.action !== "clear" || genLogoSlot.hasLogo
                         stacked: true
                         soft: modelData.action !== "clear"
                         text: modelData.label
                         iconName: modelData.icon
                         Accessible.name: modelData.full
                         enabled: !root._logoRequestPending
+                                 && (modelData.action !== "clear" || genLogoSlot.hasLogo)
+                                 && (modelData.action !== "versions" || genLogoSlot.versionRows.length > 0)
                         onClicked: {
                             if (modelData.action === "attach") root._beginLogoRequest(genLogoSlot.target)
+                            else if (modelData.action === "versions") genLogoSlot.showVersions = !genLogoSlot.showVersions
                             else if (modelData.action === "default") root._useDefaultLogo(genLogoSlot.target)
                             else root._deleteLogo(genLogoSlot.target)
                         }
@@ -8599,9 +9581,12 @@ Item {
                 }
             }
 
+            // Versiones anteriores (nube y locales): nunca se borran al cambiar.
             LogoHistoryStrip {
                 Layout.fillWidth: true
                 target: genLogoSlot.target
+                visible: genLogoSlot.showVersions && rows.length > 0
+                expanded: true
             }
         }
     }
@@ -8620,7 +9605,8 @@ Item {
 
             GenDialogHeader {
                 title: "Identidad del reporte"
-                subtitle: "Código, proyecto y logos usados al exportar"
+                subtitle: "Logos utilizados en la exportación"
+                badgeText: "3D Touch"
                 onCloseRequested: root._closeIdentityPopup()
             }
 
@@ -8635,54 +9621,6 @@ Item {
                     id: mobileIdentitySection
                     width: identityScroll.availableWidth
                     spacing: root.dp(12)
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: identityInfoColumn.implicitHeight + root.dp(20)
-                        radius: root.dp(12)
-                        color: "transparent"
-                        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: "tinted" }
-                        ColumnLayout {
-                            id: identityInfoColumn
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            anchors.margins: root.dp(10)
-                            spacing: root.dp(4)
-                            Repeater {
-                                model: [
-                                    { label: "Código", value: txtCodigo.text || "Sin definir" },
-                                    { label: "Proyecto", value: txtProjectFullName.text || "Sin definir" }
-                                ]
-                                delegate: RowLayout {
-                                    required property var modelData
-                                    Layout.fillWidth: true
-                                    spacing: root.dp(8)
-                                    Text {
-                                        Layout.preferredWidth: root.dp(70)
-                                        text: modelData.label
-                                        color: root.cMuted
-                                        font.pixelSize: root.fsLabel
-                                    }
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: modelData.value
-                                        color: root.cText
-                                        font.pixelSize: root.fsLabel
-                                        font.weight: Font.DemiBold
-                                        wrapMode: Text.WordWrap
-                                    }
-                                }
-                            }
-                            Text {
-                                Layout.fillWidth: true
-                                text: "Puedes editarlos en Datos generales."
-                                color: root.cGenBlue
-                                font.pixelSize: root.fsLabel
-                                wrapMode: Text.WordWrap
-                            }
-                        }
-                    }
 
                     Text {
                         Layout.fillWidth: true
@@ -8724,9 +9662,11 @@ Item {
         }
     }
 
-    // Fondo de la ficha.
+    // Fondo de la ficha: el mismo color lo pinta CalicatasEditorPage junto con las
+    // auras de Estado de Calicatas; aquí queda transparente para no taparlas.
     PhotoAmbient {
         anchors.fill: parent
+        color: "transparent"
     }
 
     // Visor de fotografía: fondo oscuro, zoom con pellizco/doble toque, acciones claras.
@@ -9826,6 +10766,42 @@ Item {
         }
     }
 
+    // ===== Hoja de la ficha (patrón QField) =====
+    // Franja de auras arriba (fondo real de CalicatasEditorPage), hoja con el Liquid
+    // Glass del Dock, cabecera ✕ · código · guardado y pestañas con estado en texto.
+    Item {
+        id: fichaSheet
+        anchors.fill: parent
+        anchors.topMargin: root.dp(44)
+        anchors.bottomMargin: -root.dp(40)         // las esquinas inferiores quedan fuera
+        MobileGlass.DockGlassPanel {
+            id: fichaSheetGlass
+            glassUi: genGlassUi
+            radius: root.dp(28)
+            u: root.dp(1)
+            dark: root.darkMode
+            reducedMotion: root.flowReduceMotion
+            lowFallback: false                         // como el Dock en LOW: lente sin refracción
+            // Esmerilado visible: auras difuminadas + velo blanco 25 % / grafito 30 %.
+            tint: root.darkMode ? Qt.rgba(28 / 255, 28 / 255, 30 / 255, 0.30) : Qt.rgba(1, 1, 1, 0.25)
+        }
+        Rectangle {                                    // asa
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: root.dp(8); width: root.dp(40); height: root.dp(5); radius: height / 2
+            color: root.darkMode ? Qt.rgba(1, 1, 1, 0.3) : Qt.rgba(0, 0, 0, 0.18)
+        }
+        Text {                                         // cabecera: solo el nombre de la calicata
+            id: fichaCodeText
+            x: root.dp(20); y: root.dp(22)
+            width: parent.width - root.dp(40)
+            text: root._genDash(txtCodigo.text)
+            color: root.cText
+            font.pixelSize: root.sp(22); font.weight: Font.DemiBold
+            elide: Text.ElideRight
+            Accessible.role: Accessible.Heading
+        }
+    }
+
     // Capa visual mínima de la etapa entrante durante el swipe. Replica la
     // cabecera real de finalPageCol (misma posición con contentY = 0) para
     // que al confirmar la etapa real aparezca exactamente debajo. Sin input.
@@ -9843,26 +10819,7 @@ Item {
             x: root._swipePeekFrozen ? 0
                : stageSlideTranslate.x + root._swipeDir * parent.width
             opacity: 1 - 0.2 * Math.min(1, Math.abs(x) / Math.max(1, parent.width))
-            color: root.cPage
-            PhotoAmbient { anchors.fill: parent }
-
-            Column {
-                x: Math.round((parent.width - width) / 2)
-                y: root.dp(12)
-                width: parent.width - root.dp(28)
-                spacing: root.dp(7)
-                GenStageHeader {
-                    width: parent.width
-                    visible: root._swipePeekStage >= 0
-                    codeText: txtCodigo.text
-                    projectText: root._projectDisplayName()
-                    projectAssigned: !!(root.doc && root.doc.header.projectId)
-                    stageText: root.sectionNavigation[Math.max(0, root._swipePeekStage)].shortLabel
-                    stageIcon: root._swipePeekStage === 5 ? root.iconNotesName : root._swipePeekStage === 4 ? root.iconPhotosName
-                             : root._swipePeekStage === 3 ? root.iconSamplesName : root._swipePeekStage === 2 ? root.iconStrataName
-                             : root._swipePeekStage === 1 ? "map.location" : "calgen.code"
-                }
-            }
+            color: "transparent"                   // la cabecera fija vive en la hoja (fichaSheet)
         }
     }
 
@@ -9872,6 +10829,8 @@ Item {
         id: vFlick
         flow: root.flow
         anchors.fill: parent
+        anchors.topMargin: root.dp(44 + 62)           // franja de auras + nombre de la calicata
+        anchors.bottomMargin: root.fichaDockClearance          // el contenido llega hasta el Dock
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         pressDelay: root.touchPressDelay
@@ -9880,7 +10839,7 @@ Item {
         flickableDirection: Flickable.VerticalFlick
 
         contentWidth: width
-        contentHeight: finalPageCol.implicitHeight + root.dp(110)
+        contentHeight: finalPageCol.implicitHeight + root.dp(24)
 
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
         ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AlwaysOff }
@@ -10004,7 +10963,7 @@ Item {
                         Text {
                             anchors.centerIn: parent
                             text: dayCell.model.day
-                            color: dayCell.isSelected ? (root.darkMode ? root.brand.ingemaDeep : "#FFFFFF")
+                            color: dayCell.isSelected ? (root.darkMode ? "#0A0A0A" : "#FFFFFF")
                                  : dayCell.model.today ? root.cGenBlue : root.cText
                             opacity: dayCell.inMonth ? 1 : 0.35
                             font.pixelSize: root.fsField
@@ -10071,20 +11030,9 @@ Item {
             spacing: root.dp(12)
 
             Column {
+                id: stageHeaderColumn
                 width: parent.width
                 spacing: root.dp(7)
-                // Una sola cabecera para TODAS las etapas (General … Revisión): código,
-                // proyecto, "FICHA DE CALICATA", insignia de vidrio con el icono y título.
-                GenStageHeader {
-                    width: parent.width
-                    codeText: txtCodigo.text
-                    projectText: root._projectDisplayName()
-                    projectAssigned: !!(root.doc && root.doc.header.projectId)
-                    stageText: root.sectionNavigation[root.stageIndex].shortLabel
-                    stageIcon: root.stageIndex === 5 ? root.iconNotesName : root.stageIndex === 4 ? root.iconPhotosName
-                             : root.stageIndex === 3 ? root.iconSamplesName : root.stageIndex === 2 ? root.iconStrataName
-                             : root.stageIndex === 1 ? "map.location" : "calgen.code"
-                }
                 // Presencia (Supabase Realtime): quién está en esta ficha.
                 Flow {
                     width: parent.width
@@ -10116,37 +11064,67 @@ Item {
             MobileStageBody {
                 id: mobileGeneralSection
                 sectionNumber: 1
+                glassPanel: false
 
-                // ---- Identificación ----
-                GenGroupHeader { title: "IDENTIFICACIÓN"; accent: root.cGenBlue }
-
-                GenHeaderField {
-                    label: "Código"
-                    labelCaps: true
-                    iconName: "calgen.code"
-                    boundText: txtCodigo.text
-                    inputPlaceholder: "Sin registrar"
-                    commitHandler: function(t) {
-                        root._setCanonicalCalicataCode(t)
-                        // Un código que termina en progresiva válida la refleja.
-                        var pkFromCode = Rules.progresivaFromCode(t)
-                        if (pkFromCode.length && pkFromCode !== txtPk.text.trim())
-                            root._setProgresiva(pkFromCode, false)
+                // General como lista vertical (ficha QField): los mismos campos y
+                // guardados que tenían los paneles, en línea; selectores con chevron.
+                ColumnLayout {
+                    id: generalList
+                    Layout.fillWidth: true
+                    spacing: root.dp(10)
+                    GenGroupHeader { title: "CÓDIGO / PROYECTO / SUPERVISOR"; Layout.topMargin: 0 }
+                    GenHeaderField {
+                        objectName: "fichaField_codigo"
+                        mandatory: true
+                        missing: !!root.fichaMissingKeys.codigo
+                        rule: root.fichaIssueMessage("codigo")
+                        label: "Código"
+                        iconName: "calgen.code"
+                        boundText: txtCodigo.text
+                        inputPlaceholder: "Sin registrar"
+                        commitHandler: function(t) {
+                            root._setCanonicalCalicataCode(t)
+                            // Un código que termina en progresiva válida la refleja.
+                            var pkFromCode = Rules.progresivaFromCode(t)
+                            if (pkFromCode.length && pkFromCode !== txtPk.text.trim())
+                                root._setProgresiva(pkFromCode, false)
+                        }
                     }
-                }
-
-                // Proyecto = projects.name (contrato Web: una sola fuente para la
-                // ficha, el rótulo de fotos y la exportación). Ni nombre largo ni
-                // nombre corto se editan por ficha; los valores antiguos
-                // (project_full_name / project_short_name) se conservan en el
-                // documento y solo se muestran si la ficha aún no tiene proyecto.
+                    GenHeaderField {
+                        objectName: "fichaField_project_name"
+                        mandatory: true
+                        missing: !!root.fichaMissingKeys.project_name
+                        rule: root.fichaIssueMessage("project_name")
+                        label: "Nombre del proyecto"
+                        iconName: "calgen.project"
+                        headerKey: "project_full_name"
+                        inputPlaceholder: "Denominación oficial completa del proyecto"
+                        inputMaximumLength: 600
+                    }
+                    GenHeaderField {
+                        label: "Supervisor"
+                        iconName: "calgen.supervisor"
+                        accent: root.cGenViolet
+                        accentSoft: root.cGenVioletSoft
+                        boundText: txtSupervisor.text
+                        inputMaximumLength: Rules.SUPERVISOR_MAX_LENGTH
+                        inputPlaceholder: "Sin registrar"
+                        commitHandler: function(t) { txtSupervisor.text = t }
+                    }
+                // Único subselector: proyectos/carpetas reales autorizados
+                // (búsqueda, selección y confirmación del selector existente).
                 GenFieldShell {
-                    label: "Proyecto"
-                    caption: "Nombre del proyecto en InGe+. Elegirlo define dónde se guarda y sincroniza la ficha."
+                    objectName: "fichaField_project"
+                    mandatory: true
+                    missing: !!root.fichaMissingKeys.project
+                    rule: root.fichaIssueMessage("project")
+                    label: "Carpeta del proyecto"
+                    caption: "Proyecto / carpeta de trabajo. Define dónde se guarda y sincroniza la ficha."
                     iconName: "calgen.project"
                     tappable: true
                     emphasized: true
-                    valueText: root._projectDisplayName()
+                    valueText: root.doc && root.doc.header.projectId ? root._projectDisplayName() : ""
+                    placeholder: "Seleccionar carpeta"
                     onActivated: root._openProjectPicker()
                 }
                 Text {
@@ -10159,294 +11137,144 @@ Item {
                     font.pixelSize: root.fsLabel
                     wrapMode: Text.WordWrap
                 }
-                // Denominación oficial completa (header.project_full_name; dato de la
-                // ficha, independiente de projects.name y del nombre corto).
-                GenHeaderField {
-                    label: "Nombre del proyecto"
-                    labelCaps: true
-                    iconName: "calgen.project"
-                    headerKey: "project_full_name"
-                    inputPlaceholder: "Denominación oficial completa del proyecto"
-                    inputMaximumLength: 600
-                }
-                // Nombre corto (rótulo de fotografías y vistas compactas).
-                GenHeaderField {
-                    label: "Nombre corto del proyecto"
-                    labelCaps: true
-                    iconName: "calgen.project"
-                    headerKey: "project_short_name"
-                    inputPlaceholder: "Ej.: Lechemayo"
-                    inputMaximumLength: 80
-                }
-
-                // ---- Fechas y responsable ----
-                GenGroupHeader { title: "FECHAS Y RESPONSABLE"; accent: root.cGenOrange }
-
-                GenFieldShell {
-                    label: "Fecha inicio"
-                    iconName: "calgen.date"
-                    accent: root.cGenOrange
-                    accentSoft: root.cGenOrangeSoft
-                    tappable: true
-                    valueText: btnFechaInicio.text === "Seleccionar fecha" ? "" : btnFechaInicio.text
-                    placeholder: "Seleccionar fecha"
-                    onActivated: root._openDatePicker(btnFechaInicio, "FECHA INICIO")
-                }
-                // Hora de la ficha (opcional, HH:mm:ss): rótulo de las fotografías.
-                // Vacía = cada foto conserva la hora del sistema fijada al tomarla.
-                GenHeaderField {
-                    id: horaInicioField
-                    label: "Hora (opcional)"
-                    iconName: "calgen.date"
-                    accent: root.cGenOrange
-                    accentSoft: root.cGenOrangeSoft
-                    headerKey: "hora_inicio"
-                    inputPlaceholder: "HH:mm:ss"
-                    inputMaximumLength: 8
-                    commitHandler: function(t) {
-                        var normalized = Rules.normalizeOptionalTime(t)
-                        if (normalized === null) {
-                            horaInicioField.inputValidationError = "Usa el formato HH:mm:ss (por ejemplo 20:06:33) o déjala vacía."
-                            return false
-                        }
-                        var h = Object.assign({}, root.doc.header)
-                        h.hora_inicio = normalized
-                        h.start_time = normalized   // columna remota (cross-device)
-                        root.doc.header = h
-                    }
-                }
-                GenFieldShell {
-                    label: "Fecha fin"
-                    iconName: "calgen.date"
-                    accent: root.cGenOrange
-                    accentSoft: root.cGenOrangeSoft
-                    tappable: true
-                    valueText: btnFechaFin.text === "Seleccionar fecha" ? "" : btnFechaFin.text
-                    placeholder: "Seleccionar fecha"
-                    onActivated: root._openDatePicker(btnFechaFin, "FECHA FIN")
-                }
-                Text {
-                    Layout.fillWidth: true
-                    visible: text.length > 0
-                    text: Rules.validateFieldDates(root.doc ? String(root.doc.header.fecha_inicio || "") : "",
-                                                   root.doc ? String(root.doc.header.fecha_fin || "") : "")
-                    color: root.flow ? root.flow.theme.error : "#B4232E"
-                    font.pixelSize: root.fsLabel
-                    wrapMode: Text.WordWrap
-                }
-
-                GenHeaderField {
-                    label: "Supervisor"
-                    labelCaps: true
-                    iconName: "calgen.supervisor"
-                    accent: root.cGenViolet
-                    accentSoft: root.cGenVioletSoft
-                    boundText: txtSupervisor.text
-                    inputMaximumLength: Rules.SUPERVISOR_MAX_LENGTH
-                    inputPlaceholder: "Sin registrar"
-                    commitHandler: function(t) { txtSupervisor.text = t }
-                }
-
-                GenFieldShell {
-                    readonly property int machineIndex: root._catalogIndex(txtMaquina.text, Rules.MACHINE_OPTIONS, root.machineHistorical)
-                    label: "Maquinaria"
-                    iconName: "calgen.machine"
-                    accent: root.cGenTeal
-                    accentSoft: root.cGenTealSoft
-                    tappable: true
-                    valueText: machineIndex > 0 ? String(root.machineModel[machineIndex]) : ""
-                    placeholder: String(root.machineModel[0])
-                    onActivated: root._openMachinePicker()
-                }
-
-                // ---- Ficha ----
-                // `description` es el "Título de la ficha / testificación" de Web.
-                // `title` solo se fija al crear (Web: "Título" del alta) y no se
-                // edita en el detalle; su valor se conserva y viaja tal cual.
-                GenGroupHeader { title: "FICHA"; accent: root.cGenBlue }
-
-                // Tipo de ficha = calicatas.description (Web: "Título de la ficha /
-                // testificación"). Solo dos valores; un texto antiguo se muestra tal cual.
-                GenFieldShell {
-                    readonly property var sheetTypes: ["FICHA DE CALICATA", "FICHA DE CANTERA"]
-                    readonly property string current: root.doc ? String(root.doc.header.description || "") : ""
-                    label: "Título / Testificación"
-                    iconName: "calgen.code"
-                    tappable: true
-                    valueText: current
-                    placeholder: "Seleccionar tipo de ficha"
-                    onActivated: root._openOptionPicker("Título / Testificación", sheetTypes,
-                                                        Math.max(0, sheetTypes.indexOf(current)), "calgen.code",
-                                                        root.cGenBlue, root.cGenBlueSoft,
-                                                        function(i) {
-                                                            if (!root.doc || i < 0 || i >= sheetTypes.length) return
-                                                            var h = Object.assign({}, root.doc.header)
-                                                            h.description = sheetTypes[i]
-                                                            root.doc.header = h
-                                                            root._markDirty()
-                                                        })
-                }
-
-                // ---- Excavación ----
-                GenGroupHeader { title: "EXCAVACIÓN"; accent: root.cGenGreen }
-
-                GridLayout {
-                    Layout.fillWidth: true
-                    columns: width >= root.dp(300) ? 2 : 1
-                    columnSpacing: root.dp(10)
-                    rowSpacing: root.dp(10)
-                    GenHeaderField {
-                        Layout.preferredWidth: 1
-                        Layout.alignment: Qt.AlignTop
-                        label: "Largo de excavación (m)"
-                        iconName: "calgen.length"
-                        accent: root.cGenGreen
-                        accentSoft: root.cGenGreenSoft
-                        headerKey: "length_m"
-                        numeric: true
-                        hint: "Ej. 2.5"
-                    }
-                    GenHeaderField {
-                        Layout.preferredWidth: 1
-                        Layout.alignment: Qt.AlignTop
-                        label: "Ancho de excavación (m)"
-                        iconName: "calgen.width"
-                        accent: root.cGenGreen
-                        accentSoft: root.cGenGreenSoft
-                        headerKey: "width_m"
-                        numeric: true
-                        hint: "Ej. 1.8"
-                    }
-                }
-
-                GenHeaderField {
-                    label: "Descripción técnica (solo Android)"
-                    iconName: "calgen.description"
-                    accent: root.cGenGreen
-                    accentSoft: root.cGenGreenSoft
-                    headerKey: "technical_description"
-                }
-
-                GridLayout {
-                    Layout.fillWidth: true
-                    columns: width >= root.dp(300) ? 2 : 1
-                    columnSpacing: root.dp(10)
-                    rowSpacing: root.dp(10)
+                    GenGroupHeader { title: "FICHA Y PERIODO" }
                     GenFieldShell {
-                        Layout.preferredWidth: 1
-                        Layout.alignment: Qt.AlignTop
-                        label: "Profundidad (m)"
-                        labelCaps: false
-                        caption: "Derivada de los cortes"
-                        iconName: "calgen.depth"
-                        accent: root.cGenGreen
-                        accentSoft: root.cGenGreenSoft
-                        readOnly: true
-                        valueText: root.derivedDepthText
-                        placeholder: "Sin cortes completos"
+                        label: "Tipo de ficha"
+                        tappable: true
+                        valueText: root.doc ? String(root.doc.header.description || "") : ""
+                        placeholder: "Seleccionar tipo de ficha"
+                        onActivated: root._openSheetTypePicker()
                     }
                     GenFieldShell {
-                        Layout.preferredWidth: 1
-                        Layout.alignment: Qt.AlignTop
-                        label: "Nivel freático (m)"
-                        labelCaps: false
-                        caption: root.groundwaterCustom ? "Personalizado" : "Primer corte con AGUA"
-                        iconName: "calgen.water"
+                        objectName: "fichaField_fecha_inicio"
+                        mandatory: true
+                        missing: !!root.fichaMissingKeys.fecha_inicio
+                        rule: root.fichaIssueMessage("fecha_inicio")
+                        label: "Fecha inicio"
+                        iconName: "calgen.date"
+                        accent: root.cGenOrange
+                        accentSoft: root.cGenOrangeSoft
+                        tappable: true
+                        valueText: btnFechaInicio.text === "Seleccionar fecha" ? "" : btnFechaInicio.text
+                        placeholder: "Seleccionar fecha"
+                        onActivated: root._openDatePicker(btnFechaInicio, "FECHA INICIO")
+                    }
+                    GenFieldShell {
+                        objectName: "fichaField_fecha_fin"
+                        missing: !!root.fichaMissingKeys.fecha_fin
+                        rule: root.fichaIssueMessage("fecha_fin")
+                        label: "Fecha fin"
+                        iconName: "calgen.date"
+                        accent: root.cGenOrange
+                        accentSoft: root.cGenOrangeSoft
+                        tappable: true
+                        valueText: btnFechaFin.text === "Seleccionar fecha" ? "" : btnFechaFin.text
+                        placeholder: "Seleccionar fecha"
+                        onActivated: root._openDatePicker(btnFechaFin, "FECHA FIN")
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        visible: text.length > 0
+                        text: Rules.validateFieldDates(root.doc ? String(root.doc.header.fecha_inicio || "") : "",
+                                                       root.doc ? String(root.doc.header.fecha_fin || "") : "")
+                        color: root.flow ? root.flow.theme.error : "#B4232E"
+                        font.pixelSize: root.fsLabel
+                        wrapMode: Text.WordWrap
+                    }
+                    GenFieldShell {
+                        objectName: "fichaField_logos"
+                        missing: !!root.fichaMissingKeys.logos
+                        rule: root.fichaIssueMessage("logos")
+                        label: "Identidad del reporte y logos"
+                        caption: "Logo MTC / entidad y logo del proyecto"
+                        iconName: "calgen.identity"
+                        tappable: true
+                        valueText: (root.hasLogoMtc ? "MTC / entidad" : "Sin MTC") + " · " + (root.hasLogoProyecto ? "Proyecto" : "Sin proyecto")
+                        onActivated: identityPopup.open()
+                    }
+                    GenGroupHeader { title: "TRABAJO DE CAMPO" }
+                    GenFieldShell {
+                        objectName: "generalBoxMachine"
+                        readonly property int machineIndex: root._catalogIndex(txtMaquina.text, Rules.MACHINE_OPTIONS, root.machineHistorical)
+                        label: "Maquinaria"
+                        tappable: true
+                        valueText: machineIndex > 0 ? String(root.machineModel[machineIndex]) : ""
+                        placeholder: "Elegir equipo"
+                        onActivated: root._openMachinePicker()
+                    }
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: width >= root.dp(300) ? 2 : 1
+                        columnSpacing: root.dp(10)
+                        rowSpacing: root.dp(10)
+                        GenHeaderField {
+                            objectName: "fichaField_length_m"
+                            missing: !!root.fichaMissingKeys.length_m
+                            rule: root.fichaIssueMessage("length_m")
+                            Layout.preferredWidth: 1
+                            Layout.alignment: Qt.AlignTop
+                            label: "Largo de excavación (m)"
+                            iconName: "calgen.length"
+                            accent: root.cGenGreen
+                            accentSoft: root.cGenGreenSoft
+                            headerKey: "length_m"
+                            numeric: true
+                            hint: "Ej. 2.5"
+                        }
+                        GenHeaderField {
+                            objectName: "fichaField_width_m"
+                            missing: !!root.fichaMissingKeys.width_m
+                            rule: root.fichaIssueMessage("width_m")
+                            Layout.preferredWidth: 1
+                            Layout.alignment: Qt.AlignTop
+                            label: "Ancho de excavación (m)"
+                            iconName: "calgen.width"
+                            accent: root.cGenGreen
+                            accentSoft: root.cGenGreenSoft
+                            headerKey: "width_m"
+                            numeric: true
+                            hint: "Ej. 1.8"
+                        }
+                    }
+
+                    GenHeaderField {
+                        label: "Descripción técnica"
+                        iconName: "calgen.description"
                         accent: root.cGenGreen
                         accentSoft: root.cGenGreenSoft
-                        readOnly: true
-                        valueText: root.effectiveGroundwaterText
-                        placeholder: "No registrado"
+                        headerKey: "technical_description"
                     }
-                }
 
-                // ---- Identidad del reporte ----
-                Button {
-                    id: genIdentityEntry
-                    Layout.fillWidth: true
-                    Layout.topMargin: root.dp(10)
-                    implicitHeight: Math.max(root.dp(76), genIdentityRow.implicitHeight + topPadding + bottomPadding)
-                    padding: root.dp(12)
-                    onClicked: identityPopup.open()
-                    scale: down ? 0.985 : 1
-                    Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-                    background: CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; radius: root.dp(14); tone: "tinted"; selected: true; pressed: genIdentityEntry.down }
-                    contentItem: RowLayout {
-                        id: genIdentityRow
-                        spacing: root.dp(12)
-                        GenIconBadge {
-                            Layout.preferredWidth: root.dp(44)
-                            Layout.preferredHeight: root.dp(44)
-                            Layout.alignment: Qt.AlignVCenter
-                            radius: root.dp(12)
-                            iconName: "calgen.identity"
-                            accentSoft: root.cField
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: width >= root.dp(300) ? 2 : 1
+                        columnSpacing: root.dp(10)
+                        rowSpacing: root.dp(10)
+                        GenFieldShell {
+                            Layout.preferredWidth: 1
+                            Layout.alignment: Qt.AlignTop
+                            label: "Profundidad (m)"
+                            labelCaps: false
+                            caption: "Derivada de los cortes"
+                            iconName: "calgen.depth"
+                            accent: root.cGenGreen
+                            accentSoft: root.cGenGreenSoft
+                            readOnly: true
+                            valueText: root.derivedDepthText
+                            placeholder: "Sin cortes completos"
                         }
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: root.dp(3)
-                            Text {
-                                Layout.fillWidth: true
-                                text: "Identidad del reporte"
-                                color: root.cText
-                                font.bold: true
-                                font.pixelSize: root.fsField + 1
-                                elide: Text.ElideRight
-                            }
-                            Text {
-                                Layout.fillWidth: true
-                                text: "Configura logos e información del reporte"
-                                color: root.cMuted
-                                font.pixelSize: root.fsLabel
-                                wrapMode: Text.WordWrap
-                            }
-                            Flow {
-                                Layout.fillWidth: true
-                                Layout.topMargin: root.dp(3)
-                                spacing: root.dp(6)
-                                Repeater {
-                                    model: [
-                                        { ok: root.hasLogoProyecto, text: root.hasLogoProyecto ? "Proyecto listo" : "Proyecto pendiente" },
-                                        { ok: root.hasLogoMtc, text: root.hasLogoMtc ? "MTC / entidad listo" : "MTC / entidad pendiente" }
-                                    ]
-                                    delegate: Rectangle {
-                                        required property var modelData
-                                        width: identityChipRow.implicitWidth + root.dp(16)
-                                        height: root.dp(24)
-                                        radius: height / 2
-                                        color: "transparent"
-                                        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
-                                        Row {
-                                            id: identityChipRow
-                                            anchors.centerIn: parent
-                                            spacing: root.dp(5)
-                                            Rectangle {
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                width: root.dp(6)
-                                                height: width
-                                                radius: width / 2
-                                                color: modelData.ok ? root.cGenGreen : root.cGenOrange
-                                            }
-                                            Text {
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                text: modelData.text
-                                                color: root.cText
-                                                font.pixelSize: root.sp(11)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        Components.FlowIcon {
-                            Layout.preferredWidth: root.dp(18)
-                            Layout.preferredHeight: root.dp(18)
-                            Layout.alignment: Qt.AlignVCenter
-                            name: "calgen.chevron"
-                            flow: root.flow
-                            tintColor: root.cGenBlue
-                            activeTintColor: root.cGenBlue
-                            inactiveOpacity: 1
+                        GenFieldShell {
+                            Layout.preferredWidth: 1
+                            Layout.alignment: Qt.AlignTop
+                            label: "Nivel freático (m)"
+                            labelCaps: false
+                            caption: root.groundwaterCustom ? "Personalizado" : "Primer corte con AGUA"
+                            iconName: "calgen.water"
+                            accent: root.cGenGreen
+                            accentSoft: root.cGenGreenSoft
+                            readOnly: true
+                            valueText: root.effectiveGroundwaterText
+                            placeholder: "No registrado"
                         }
                     }
                 }
@@ -10458,480 +11286,104 @@ Item {
                 sectionTitle: "Ubicación"
                 sectionSubtitle: "Coordenadas UTM del documento"
 
-                // ---- Mapa (protagonista) ----
-                Item {
-                    id: locationMapCard
-                    readonly property var point: root.doc ? root._locationPoint() : ({ lat: NaN, lon: NaN })
-                    readonly property bool hasPoint: isFinite(point.lat) && isFinite(point.lon)
-                    readonly property real cardRadius: root.dp(16)
+                // Section 2 is a read-only summary. ALL location fields are
+                // entered in CalicataMapEditor; no duplicate field models.
+                CalicataUbicacionView {
+                    id: ubicacionView
                     Layout.fillWidth: true
-                    Layout.preferredHeight: root.dp(300)
-                    visible: Qt.platform.os === "android"
-
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: locationMapCard.cardRadius
-                        color: "transparent"
-                        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
+                    Layout.preferredHeight: implicitHeight
+                    form: root
+                    title: root._headerCode(root.doc ? root.doc.header : {})
+                    header: root.doc ? root.doc.header : ({})
+                    point: root.doc ? root._locationPoint() : ({ lat: NaN, lon: NaN })
+                    onOpenMap: function(mode) {
+                        if (root.openLocationEditor(mode))
+                            console.info("INGE_CALICATA_MAP_EDITOR_OPEN mode="+mode)
                     }
-
-                    Loader {
-                        id: locationPreview
-                        anchors.fill: parent
-                        active: Qt.platform.os === "android" && root._locationMapWarm && !root.coordinatePickerOpen
-                        // Creación incremental: no bloquea el frame de la transición a Ubicación.
-                        asynchronous: true
-                        source: active ? Qt.resolvedUrl("CalicataPointPicker.qml") : ""
-                        function updatePoint() {
-                            if (!item) return
-                            var p = root._locationPoint()
-                            var h = root.doc ? root.doc.header : {}
-                            item.selected = false
-                            if (isFinite(p.lat) && isFinite(p.lon))
-                                item.selectCoordinate(p.lat, p.lon, Rules.parseDecimalSafe(h.utm_z))
+                    Connections {
+                        target: root.doc
+                        function onDataChanged() {
+                            ubicacionView.header = root.doc ? root.doc.header : ({})
+                            ubicacionView.point = root.doc ? root._locationPoint() : ({lat:NaN,lon:NaN})
+                            if (root.doc)
+                                ubicacionView.initializeCamera(root._docInstanceId(root.doc))
                         }
-                        onLoaded: {
-                            item.flow = root.flow
-                            item.interactive = false
-                            item.statusCardOnly = true
-                            item.darkMode = root.darkMode
-                            updatePoint()
-                        }
-                        Connections {
-                            target: root.doc
-                            function onDataChanged() { locationPreview.updatePoint() }
-                        }
-                        TapHandler { onTapped: if (root.openMapAction) root.openMapAction() }
                     }
-
-                    // Esquinas redondeadas sin capa/máscara sobre el panel de ubicación: un
-                    // anillo del color de página recorta visualmente el mapa.
-                    Rectangle {
-                        anchors.fill: parent
-                        anchors.margins: -root.dp(8)
-                        radius: locationMapCard.cardRadius + root.dp(8)
-                        color: "transparent"
-                        border.width: root.dp(8)
-                        border.color: root.cPage
+                }
+                CalicataMapEditor {
+                    id: ubicacionMap
+                    parent: root
+                    form: root
+                    map: ubicacionView.topoMap
+                    onClosed: {
+                        ubicacionView.recenter()
+                        console.info("INGE_CALICATA_MAP_EDITOR_CLOSED")
                     }
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: locationMapCard.cardRadius
-                        color: "transparent"
-                        border.width: 1
-                        border.color: root.cBorder
-                    }
-
-                    // Material de los flotantes: tokens del peek "Información de
-                    // la calicata"; el backdrop es solo el mapa de esta tarjeta.
-
-                    // Ubicación de la calicata (lat/lon reales guardados en la ficha).
-                    Item {
-                        x: root.dp(10)
-                        y: root.dp(10)
-                        // El rotulo tiene texto minimo de 12 px (sp): el recuadro crece
-                        // con el y nunca pasa del ancho disponible del mapa.
-                        width: Math.min(parent.width - root.dp(20),
-                                        Math.max(root.dp(230), locationPointTitle.implicitWidth + root.dp(24)))
-                        height: locationPointColumn.implicitHeight + root.dp(20)
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: root.dp(14)
-                            color: Mobile.InGeCoreFlow.darkMode ? "#171D29" : "#FFFFFF"
-                            border.width: 1
-                            border.color: Mobile.InGeCoreFlow.darkMode ? "#3A4456" : "#D5DBE3"
+                    onCommitLocation: function(draft) {
+                        if (!root.doc || root.doc.closed ||
+                                ubicacionMap.documentId !== root._docInstanceId(root.doc)) {
+                            console.warn("INGE_CALICATA_MAP_COMMIT_REJECTED reason=document_changed")
+                            return
                         }
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: root.dp(14)
-                            color: root.darkMode ? Qt.rgba(0.0824, 0.102, 0.1882, 0.62) : Qt.rgba(0.98, 0.99, 1.0, 0.78)
-                            border.width: 1
-                            border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(1, 1, 1, 0.55)
+                        // Same setters/document schema as the historical fields.
+                        // No extra storage model and no changes to export schema.
+                        // Fail before mutating ANY field when the map point
+                        // is invalid. The UI retains the sheet on rejection.
+                        if (draft.mode !== "manual" &&
+                                (!isFinite(draft.latitude) || !isFinite(draft.longitude) ||
+                                 draft.latitude < -80 || draft.latitude > 84 ||
+                                 Math.abs(draft.longitude) > 180)) {
+                            console.warn("INGE_CALICATA_MAP_COMMIT_REJECTED reason=invalid_point")
+                            return
                         }
-                        Column {
-                            id: locationPointColumn
-                            x: root.dp(12)
-                            y: root.dp(10)
-                            width: parent.width - root.dp(24)
-                            spacing: root.dp(2)
-                            Text {
-                                id: locationPointTitle
-                                width: Math.min(implicitWidth, parent.width)
-                                elide: Text.ElideRight
-                                text: "UBICACIÓN DE LA CALICATA"
-                                color: root.cMuted
-                                font.pixelSize: root.sp(10)
-                                font.letterSpacing: 1.4
-                                font.weight: Font.DemiBold
-                            }
-                            Repeater {
-                                model: locationMapCard.hasPoint
-                                       ? [{ k: "Lat", v: locationMapCard.point.lat.toFixed(6) },
-                                          { k: "Lon", v: locationMapCard.point.lon.toFixed(6) }]
-                                       : [{ k: "", v: "Sin ubicación GPS" }]
-                                delegate: Row {
-                                    required property var modelData
-                                    spacing: root.dp(8)
-                                    Text {
-                                        visible: modelData.k.length > 0
-                                        width: root.dp(28)
-                                        text: modelData.k
-                                        color: root.cMuted
-                                        font.pixelSize: root.fsLabel
-                                    }
-                                    Text {
-                                        text: modelData.v
-                                        color: root.cText
-                                        font.pixelSize: root.fsField
-                                        font.weight: Font.DemiBold
-                                    }
-                                }
+                        var previousAltitude = String(root.doc.header.utm_z || "")
+                        root.roadSideValue = String(draft.roadSide || "")
+                        root._setProgresiva(String(draft.progresiva || ""),false)
+                        txtUbicacion.text = String(draft.tramo || "")
+                        var roadHeader=Object.assign({},root.doc.header || {})
+                        roadHeader.location=root.roadSideValue
+                        roadHeader.lado_via=root.roadSideValue
+                        roadHeader.ubicacion=txtUbicacion.text
+                        roadHeader.tramo=txtUbicacion.text
+                        root.doc.header=roadHeader
+
+                        if (draft.mode==="manual") {
+                            if (draft.datum !== String(root.doc.header.datum || ""))
+                                root._changeDatum(draft.datum)
+                            txtUTMX.text=String(draft.easting || "")
+                            txtUTMY.text=String(draft.northing || "")
+                            txtZona.text=String(draft.zone || "").toUpperCase()
+                            root._manualCoordinatesChanged()
+                            if (draft.altitudePatch)
+                                root._applyAltitudePatch(draft.altitudePatch)
+                            else if (String(draft.elevation || "") !==
+                                     String(root.doc.header.utm_z || ""))
+                                root._applyAltitudePatch(Elevation.manualHeaderPatch(draft.elevation))
+                            root._markDirty()
+                            root.flushRequested()
+                            ubicacionMap.commitAccepted=true
+                        } else {
+                            ubicacionMap.commitAccepted=root.acceptMapPoint(
+                                draft.latitude,draft.longitude,
+                                draft.altitude,draft.accuracy,draft.source)
+                            // A point picked on the map may also have a newly
+                            // entered Z (same fullscreen sheet). Preserve it
+                            // without recasting an unchanged DEM/GPS Z as manual.
+                            if (ubicacionMap.commitAccepted) {
+                                if (draft.altitudePatch)
+                                    root._applyAltitudePatch(draft.altitudePatch)
+                                else if (String(draft.elevation || "") !== previousAltitude)
+                                    root._applyAltitudePatch(Elevation.manualHeaderPatch(draft.elevation))
                             }
                         }
-                    }
-
-                    // Acción real: abre la pantalla de ubicación GPS del dispositivo.
-                    Item {
-                        id: locationAdjust
-                        anchors.right: parent.right
-                        anchors.bottom: parent.bottom
-                        anchors.margins: root.dp(10)
-                        width: locationAdjustRow.implicitWidth + root.dp(28)
-                        height: root.dp(42)
-                        scale: locationAdjustTap.pressed ? 0.985 : 1
-                        Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
-                        Accessible.role: Accessible.Button
-                        Accessible.name: locationMapCard.hasPoint ? "Actualizar ubicación GPS" : "Obtener ubicación GPS"
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: height / 2
-                            color: Mobile.InGeCoreFlow.darkMode ? "#171D29" : "#FFFFFF"
-                            border.width: 1
-                            border.color: Mobile.InGeCoreFlow.darkMode ? "#3A4456" : "#D5DBE3"
-                        }
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: height / 2
-                            color: locationAdjustTap.pressed ? root.cGenBlueSoft
-                                   : (root.darkMode ? Qt.rgba(0.0824, 0.102, 0.1882, 0.62) : Qt.rgba(0.98, 0.99, 1.0, 0.78))
-                            border.width: 1
-                            border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(1, 1, 1, 0.55)
-                            Behavior on color { ColorAnimation { duration: 130 } }
-                        }
-                        Row {
-                            id: locationAdjustRow
-                            anchors.centerIn: parent
-                            spacing: root.dp(6)
-                            Components.FlowIcon {
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: root.dp(18)
-                                height: root.dp(18)
-                                name: "map.location"
-                                flow: root.flow
-                                tintColor: root.cGenBlue
-                                activeTintColor: root.cGenBlue
-                                inactiveOpacity: 1
-                            }
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: locationMapCard.hasPoint ? "Actualizar ubicación" : "Obtener ubicación GPS"
-                                color: root.cGenBlue
-                                font.pixelSize: root.fsLabel
-                                font.weight: Font.DemiBold
-                            }
-                        }
-                        MouseArea {
-                            id: locationAdjustTap
-                            anchors.fill: parent
-                            onClicked: if (root.openMapAction) root.openMapAction()
-                        }
-                    }
-                }
-                Label { Layout.fillWidth: true; visible: locationPreview.status === Loader.Error; text: "No se pudo cargar el panel de ubicación. Revisa el módulo de GPS."; color: root.cMuted; wrapMode: Text.WordWrap }
-                Label { Layout.fillWidth: true; visible: Qt.platform.os !== "android"; text: "Mapa disponible en Android. En Desktop puedes editar las coordenadas UTM."; color: root.cMuted; wrapMode: Text.WordWrap }
-
-                Rectangle {
-                    visible: root.gpsCaptureTone !== "idle"
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: root.dp(40)
-                    radius: root.dp(12)
-                    color: root.gpsCaptureTone === "success"
-                           ? (root.darkMode ? "#24302D" : root.brand.ingemaGreenWash)
-                           : (root.gpsCaptureTone === "error"
-                              ? (root.darkMode ? "#402326" : "#FDECEC")
-                              : root.cSurfaceAlt)
-                    border.width: 1
-                    border.color: root.gpsCaptureTone === "success"
-                                  ? (root.darkMode ? "#34462A" : "#BFC9B3")
-                                  : (root.gpsCaptureTone === "error"
-                                     ? (root.darkMode ? "#8B454C" : "#F2B9BE")
-                                     : root.cBorder)
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: root.dp(10)
-                        anchors.rightMargin: root.dp(10)
-                        spacing: root.dp(8)
-
-                        FlowCore.FlowBusyIndicator {
-                            Layout.preferredWidth: root.dp(18)
-                            Layout.preferredHeight: root.dp(18)
-                            flow: root.flow
-                            running: root.gpsCaptureActive
-                                     && (!root.flow || root.flow.motionAllowed)
-                            accent: root.cAccent
-                            track: root.cBorder
-                            stroke: 2
-                        }
-                        Components.FlowIcon {
-                            visible: !root.gpsCaptureActive
-                                     || (root.flow && !root.flow.motionAllowed)
-                            Layout.preferredWidth: root.dp(18)
-                            Layout.preferredHeight: root.dp(18)
-                            sourceOverride: root.icLocation
-                            flow: root.flow
-                            active: root.gpsCaptureTone === "success"
-                            tintEnabled: false
-                        }
-                        Text {
-                            Layout.fillWidth: true
-                            text: root.gpsCaptureStatus
-                            color: root.gpsCaptureTone === "success"
-                                   ? (root.darkMode ? root.brand.ingemaGreenTint : root.brand.ingemaGreen)
-                                   : (root.gpsCaptureTone === "error"
-                                      ? (root.darkMode ? "#FFADB4" : "#A93640")
-                                      : root.cMuted)
-                            font.pixelSize: root.fsLabel
-                            elide: Text.ElideRight
-                        }
+                        if (ubicacionMap.commitAccepted)
+                            console.info("INGE_CALICATA_MAP_DOCUMENT_COMMITTED mode="+draft.mode)
                     }
                 }
 
-                // ---- Coordenadas UTM (2 × 2, editables como antes) ----
-                GenGroupHeader { title: "COORDENADAS UTM"; accent: root.cGenBlue }
+                // There are deliberately no editable Cota/Referencia vial fields
+                // under this card. The fullscreen sheet owns all inputs.
 
-                GridLayout {
-                    Layout.fillWidth: true
-                    columns: width >= root.dp(300) ? 2 : 1
-                    columnSpacing: root.dp(10)
-                    rowSpacing: root.dp(10)
-                    GenHeaderField {
-                        Layout.preferredWidth: 1
-                        Layout.alignment: Qt.AlignTop
-                        label: "X UTM (Este)"
-                        iconName: "calgen.length"
-                        inputKind: Rules.COORDINATE
-                        inputPlaceholder: "X UTM"
-                        boundText: txtUTMX.text
-                        commitHandler: function(t) { txtUTMX.text = t; root._manualCoordinatesChanged() }
-                    }
-                    GenHeaderField {
-                        Layout.preferredWidth: 1
-                        Layout.alignment: Qt.AlignTop
-                        label: "Y UTM (Norte)"
-                        iconName: "calgen.width"
-                        inputKind: Rules.COORDINATE
-                        inputPlaceholder: "Y UTM"
-                        boundText: txtUTMY.text
-                        commitHandler: function(t) { txtUTMY.text = t; root._manualCoordinatesChanged() }
-                    }
-                    GenHeaderField {
-                        Layout.preferredWidth: 1
-                        Layout.alignment: Qt.AlignTop
-                        label: "Z UTM / Cota"
-                        iconName: "calgen.depth"
-                        accent: root.cGenGreen
-                        accentSoft: root.cGenGreenSoft
-                        inputKind: Rules.ELEVATION
-                        inputMinimum: -12000
-                        inputPlaceholder: "Z UTM / Cota"
-                        boundText: txtUTMZ.text
-                        // Escrita a mano = fuente MANUAL (nunca se reemplaza en silencio).
-                        commitHandler: function(t) { root._applyAltitudePatch(Elevation.manualHeaderPatch(t)) }
-                    }
-                    GenHeaderField {
-                        Layout.preferredWidth: 1
-                        Layout.alignment: Qt.AlignTop
-                        label: "Zona UTM"
-                        iconName: "nav.map"
-                        accent: root.cGenTeal
-                        accentSoft: root.cGenTealSoft
-                        inputPlaceholder: "Zona (ej. 18L)"
-                        boundText: txtZona.text
-                        commitHandler: function(t) { txtZona.text = t.toUpperCase(); root._manualCoordinatesChanged() }
-                    }
-                }
-                // Altitud / Cota Z: valor, origen y acción explícita "Obtener altitud".
-                // En columna: el resultado DEM (largo) ocupa todo el ancho y el
-                // botón va debajo, sin solaparse en pantallas estrechas.
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: root.dp(8)
-                    Text {
-                        Layout.fillWidth: true
-                        Layout.preferredWidth: parent ? parent.width : implicitWidth
-                        text: (root.elevationStatus.length ? root.elevationStatus
-                              : Elevation.statusText(root.doc ? root.doc.header : {}))
-                              + (root.elevationWarning.length ? "\nAdvertencia: " + root.elevationWarning : "")
-                        color: root.elevationWarning.length ? (root.flow ? root.flow.theme.warning : "#B26A00") : root.cMuted
-                        font.pixelSize: root.fsLabel
-                        wrapMode: Text.WordWrap
-                    }
-                    GenDialogButton {
-                        Layout.alignment: Qt.AlignRight
-                        text: root.elevationBusy ? "Consultando…" : "Obtener altitud"
-                        enabled: !root.elevationBusy && !!root.doc
-                        onClicked: root.resolveAltitude("explicit", NaN)
-                    }
-                }
-                // La nube guarda solo el número (utm_zone 1..60); la banda es local.
-                Text {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: root.dp(2)
-                    Layout.topMargin: -root.dp(4)
-                    readonly property var zoneMatch: /^(\d{1,2})\s*([C-HJ-NP-X])?$/i.exec(txtZona.text.trim())
-                    readonly property bool zoneValid: !!zoneMatch && Number(zoneMatch[1]) >= 1 && Number(zoneMatch[1]) <= 60
-                    visible: txtZona.text.trim().length > 0
-                    text: zoneValid ? "Nube: zona " + Number(zoneMatch[1]) + " · " + (root.doc && root.doc.header.datum === "PSAD56" ? "PSAD56" : "WGS84")
-                                    : "Zona no reconocida: se conserva localmente y no se envía a la nube."
-                    color: zoneValid ? root.cMuted : (root.flow ? root.flow.theme.error : "#B4232E")
-                    font.pixelSize: root.sp(11)
-                    wrapMode: Text.WordWrap
-                }
-
-                // ---- Sistema geodésico ----
-                GenGroupHeader { title: "SISTEMA GEODÉSICO"; accent: root.cGenTeal }
-
-                GenFieldShell {
-                    readonly property var datumOptions: ["Seleccionar datum", "WGS84", "PSAD56"]
-                    readonly property int datumIndex: root.doc && root.doc.header.datum === "WGS84" ? 1
-                                                      : root.doc && root.doc.header.datum === "PSAD56" ? 2 : 0
-                    label: "Datum"
-                    iconName: "map.layers"
-                    accent: root.cGenTeal
-                    accentSoft: root.cGenTealSoft
-                    tappable: true
-                    valueText: datumIndex > 0 ? datumOptions[datumIndex] : ""
-                    placeholder: datumOptions[0]
-                    onActivated: root._openOptionPicker("Seleccionar datum", datumOptions, datumIndex,
-                                                        "map.layers", root.cGenTeal, root.cGenTealSoft,
-                                                        function(i) {
-                                                            root._changeDatum(i === 1 ? "WGS84" : i === 2 ? "PSAD56" : "")
-                                                            root._markDirty()
-                                                        })
-                }
-
-                // ---- Referencia vial ----
-                GenGroupHeader { title: "REFERENCIA VIAL"; accent: root.cGenOrange }
-
-                GenFieldShell {
-                    readonly property int roadIndex: root._catalogIndex(root.roadSideValue, Rules.ROAD_SIDE_OPTIONS, root.roadSideHistorical)
-                    label: "Lado de la vía"
-                    iconName: "map.marker"
-                    accent: root.cGenOrange
-                    accentSoft: root.cGenOrangeSoft
-                    tappable: true
-                    valueText: roadIndex > 0 ? String(root.roadSideModel[roadIndex]) : ""
-                    placeholder: String(root.roadSideModel[0])
-                    onActivated: root._openOptionPicker("Lado de la vía", root.roadSideModel, roadIndex,
-                                                        "map.marker", root.cGenOrange, root.cGenOrangeSoft,
-                                                        function(i) {
-                                                            if (i <= 0) root.roadSideValue = ""
-                                                            else if (i <= Rules.ROAD_SIDE_OPTIONS.length) root.roadSideValue = Rules.ROAD_SIDE_OPTIONS[i - 1]
-                                                            // El valor histórico se conserva tal cual.
-                                                            root._markDirty()
-                                                        })
-                }
-
-                GenFieldShell {
-                    label: "Progresiva (XX+XXX)"
-                    labelCaps: false
-                    glyph: "PK"
-                    accent: root.cGenOrange
-                    accentSoft: root.cGenOrangeSoft
-                    focused: progresivaField.activeFocus
-                    contentHeight: progresivaField.implicitHeight
-                    BoundTextField {
-                        id: progresivaField
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        leftPadding: 0
-                        rightPadding: 0
-                        background: Item {}
-                        placeholderText: "Progresiva"
-                        numericKind: Rules.CHAINAGE_PK
-                        inputMethodHints: Qt.ImhDigitsOnly
-                        modelText: txtPk.text
-                        inputFilter: function(previous, next) { return Rules.acceptProgresivaDraft(previous, next) }
-                        onCommit: function(t) {
-                            var normalized = Rules.normalizeProgresiva(t)
-                            if (normalized.length && !Rules.isValidProgresiva(normalized)
-                                    && normalized !== txtPk.text.trim()) {
-                                progresivaField.validationError = "Completa la progresiva con el formato XX+XXX o XXX+XXX."
-                                return false
-                            }
-                            // La progresiva es un campo propio de la ficha: nunca
-                            // se agrega al código (ni, por tanto, al nombre del XLSX).
-                            root._setProgresiva(normalized, false)
-                        }
-                    }
-                }
-                ListView {
-                    id: progresivaSuggestionList
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: root.dp(34)
-                    Layout.topMargin: -root.dp(4)
-                    visible: progresivaField.activeFocus || progresivaField.editPending
-                    orientation: ListView.Horizontal
-                    spacing: root.dp(6)
-                    clip: true
-                    boundsBehavior: Flickable.StopAtBounds
-                    model: visible ? Rules.progresivaSuggestions(progresivaField.text) : []
-                    delegate: Button {
-                        id: progresivaChip
-                        required property string modelData
-                        readonly property bool isCurrent: modelData === progresivaField.text
-                        height: root.dp(32)
-                        leftPadding: root.dp(12)
-                        rightPadding: root.dp(12)
-                        text: modelData
-                        font.pixelSize: root.fsLabel
-                        font.weight: Font.DemiBold
-                        focusPolicy: Qt.NoFocus
-                        scale: down ? 0.985 : 1
-                        Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
-                        background: CalicataSurface {
-                            dark: root.darkMode
-                            accent: root.cGenOrange
-                            radius: height / 2
-                            tone: progresivaChip.isCurrent ? "tinted" : "glass"
-                            selected: progresivaChip.isCurrent
-                            pressed: progresivaChip.down
-                        }
-                        contentItem: Text {
-                            text: progresivaChip.text
-                            font: progresivaChip.font
-                            color: progresivaChip.isCurrent ? root.cGenOrange : root.cText
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        onClicked: {
-                            progresivaField.text = modelData
-                            progresivaField.editPending = true
-                            progresivaField.commitPending()
-                        }
-                    }
-                }
-
-                GenHeaderField {
-                    label: "Ubicación / Tramo"
-                    iconName: "calgen.description"
-                    accent: root.cGenOrange
-                    accentSoft: root.cGenOrangeSoft
-                    inputPlaceholder: "Ubicación o tramo"
-                    boundText: txtUbicacion.text
-                    commitHandler: function(t) { txtUbicacion.text = t }
-                }
             }
 
             MobileStageBody {
@@ -11312,17 +11764,9 @@ Item {
                             iconName: "calgen.depth"
 
                             GenHeaderField {
-                                label: "Profundidad total (m)"
-                                iconName: "calgen.depth"
-                                numeric: true
-                                boundText: root.requestedDepthM > 0 ? root.requestedDepthM.toFixed(2) : ""
-                                hint: root.totalDepthM > 0 ? root.totalDepthM.toFixed(2) : "0.00"
-                                inputPlaceholder: "Profundidad total"
-                                caption: "Registrada por estratos: " + root.totalDepthM.toFixed(2)
-                                         + " m · sin límite de profundidad"
-                                commitHandler: function(t) { return root.commitProfileDepth(t) }
-                            }
-                            GenHeaderField {
+                                objectName: "fichaField_water"
+                                missing: !!root.fichaMissingKeys.water
+                                rule: root.fichaIssueMessage("water")
                                 label: "Nivel freático (m)"
                                 iconName: "calgen.water"
                                 accent: root.cGenTeal
@@ -11345,113 +11789,12 @@ Item {
                         }
 
                         PrfCard {
-                            title: "Tipo de excavación"
-                            iconName: "geotechnical.calicata"
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: root.dp(10)
-                                PrfSegment {
-                                    label: "Cielo abierto"
-                                    iconName: "geotechnical.calicata"
-                                    isOn: root.profileSetupText("excavation_type") === "Cielo abierto"
-                                    onPicked: root.updateProfileSetup({ excavation_type: "Cielo abierto" })
-                                }
-                                PrfSegment {
-                                    label: "Otro"
-                                    iconName: "action.more"
-                                    isOn: root.profileSetupText("excavation_type") === "Otro"
-                                    onPicked: root.updateProfileSetup({ excavation_type: "Otro" })
-                                }
-                            }
-                            BoundTextField {
-                                Layout.fillWidth: true
-                                visible: root.profileSetupText("excavation_type") === "Otro"
-                                placeholderText: "Describe la excavación"
-                                modelText: root.profileSetupText("excavation_other")
-                                onCommit: function(t) { root.updateProfileSetup({ excavation_other: t }) }
-                            }
-                        }
-
-                        PrfCard {
-                            title: "Método de descripción"
-                            iconName: "calgen.description"
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: root.dp(10)
-                                PrfSegment {
-                                    label: "SUCS"
-                                    iconName: root.iconStrataName
-                                    isOn: root.profileSetupText("description_method") === "SUCS"
-                                    onPicked: root.updateProfileSetup({ description_method: "SUCS" })
-                                }
-                                PrfSegment {
-                                    label: "AASHTO"
-                                    iconName: "map.layers"
-                                    isOn: root.profileSetupText("description_method") === "AASHTO"
-                                    onPicked: root.updateProfileSetup({ description_method: "AASHTO" })
-                                }
-                            }
-                            Text {
-                                Layout.fillWidth: true
-                                text: root.profileSetupText("description_method") === "AASHTO"
-                                      ? "La tabla de estratos muestra la clasificación AASHTO."
-                                      : root.profileSetupText("description_method") === "SUCS"
-                                        ? "La tabla de estratos muestra la clasificación SUCS."
-                                        : "No registrado. La tabla muestra SUCS mientras no se elija."
-                                color: root.cMuted
-                                font.pixelSize: root.sp(11)
-                                wrapMode: Text.WordWrap
-                            }
-                        }
-
-                        PrfCard {
-                            title: "Plantillas globales"
-                            iconName: "documents.file"
-                            headerTrailing: [
-                                GenRoundIconButton {
-                                    width: root.dp(36)
-                                    height: root.dp(36)
-                                    iconName: "calgen.chevron"
-                                    Accessible.name: "Ver plantillas globales"
-                                    onClicked: prfTemplatePopup.openPicker()
-                                }
-                            ]
-
-                            Flow {
-                                Layout.fillWidth: true
-                                spacing: root.dp(8)
-                                Repeater {
-                                    model: root.prfTemplates
-                                    delegate: PrfChip {
-                                        required property var modelData
-                                        label: modelData.title
-                                        isOn: root.profileSetupText("template") === modelData.key
-                                        onFlipped: root.applyProfileTemplate(isOn ? "vacia" : modelData.key, false)
-                                    }
-                                }
-                            }
-                            Text {
-                                Layout.fillWidth: true
-                                text: {
-                                    var template = root.prfTemplate(root.profileSetupText("template"))
-                                    return template ? template.detail
-                                                    : "Carretera, edificación, cantera, ambiental / exploración o plantilla vacía."
-                                }
-                                color: root.cMuted
-                                font.pixelSize: root.sp(11)
-                                wrapMode: Text.WordWrap
-                            }
-                        }
-
-                        PrfCard {
                             title: "Observaciones generales"
                             iconName: "calgen.description"
                             PrfTextArea {
                                 label: "Observaciones generales"
                                 modelText: root.observacionesText
-                                maxLength: 500
+                                maxLength: 0   // observaciones generales sin límite
                                 placeholder: "Observaciones generales del perfil…"
                                 onCommit: function(t) {
                                     root.observacionesText = t
@@ -11477,6 +11820,17 @@ Item {
                         PrfCard {
                             title: "Estratigrafía"
                             iconName: root.iconStrataName
+                            headerTrailing: [
+                                GenRoundIconButton {
+                                    width: root.dp(36)
+                                    height: root.dp(36)
+                                    iconName: "documents.open"
+                                    enabled: cortesModel.count > 0
+                                    opacity: enabled ? 1 : 0.35
+                                    Accessible.name: "Ampliar vista del perfil"
+                                    onClicked: prfGraphPopup.open()
+                                }
+                            ]
 
                             Flow {
                                 Layout.fillWidth: true
@@ -11487,31 +11841,6 @@ Item {
                                     iconName: "action.addStratum"
                                     primaryTone: true
                                     onClicked: root.addStratumFromProfile()
-                                }
-                                PrfToolButton {
-                                    text: "Insertar"
-                                    iconName: "action.add"
-                                    enabled: prfCenterCol.hasSelection
-                                    onClicked: root.insertStratumBelow(root.selectedStratum)
-                                }
-                                PrfToolButton {
-                                    text: "Eliminar"
-                                    iconName: "action.delete"
-                                    enabled: prfCenterCol.hasSelection
-                                    onClicked: root.requestDeleteStratum(root.selectedStratum)
-                                }
-                                PrfToolButton {
-                                    text: "Duplicar"
-                                    iconName: "action.copy"
-                                    enabled: prfCenterCol.hasSelection
-                                    onClicked: root.duplicateStratum(root.selectedStratum)
-                                }
-                                PrfToolButton {
-                                    text: "Reordenar"
-                                    iconName: "action.menu"
-                                    enabled: cortesModel.count > 1
-                                    checked: root.prfReorderMode
-                                    onClicked: root.prfReorderMode = !root.prfReorderMode
                                 }
                             }
 
@@ -11541,8 +11870,8 @@ Item {
                                     Layout.fillWidth: true
                                     Layout.maximumWidth: root.dp(460)
                                     Layout.alignment: Qt.AlignHCenter
-                                    text: "Registra el primer estrato desde la superficie (0.00 m). Una plantilla global "
-                                          + "preconfigura el método de descripción y el contexto del relleno."
+                                    text: "Registra el primer estrato desde la superficie (0.00 m). Las plantillas globales "
+                                          + "están en el Dock: mantén pulsado «Estratos»."
                                     color: root.cMuted
                                     font.pixelSize: root.fsLabel
                                     horizontalAlignment: Text.AlignHCenter
@@ -11560,647 +11889,31 @@ Item {
                                         primary: true
                                         onClicked: root.addStratumFromProfile()
                                     }
-                                    GenDialogButton {
-                                        text: "Usar plantilla global"
-                                        iconName: "documents.file"
-                                        soft: true
-                                        onClicked: prfTemplatePopup.openPicker()
-                                    }
                                 }
                                 Item { Layout.preferredHeight: root.dp(8) }
                             }
 
-                            // Encabezado de la tabla (solo en ancho de tablet).
-                            RowLayout {
-                                Layout.fillWidth: true
-                                visible: prfCenterCol.tableMode && cortesModel.count > 0
-                                spacing: root.dp(8)
-                                Repeater {
-                                    model: [
-                                        { t: "", w: 22 }, { t: "#", w: 32 }, { t: "De (m)", w: 58 }, { t: "A (m)", w: 58 },
-                                        { t: "Espesor", w: 64 }, { t: "Símbolo", w: 58 }, { t: "Origen / tipo", w: 0, s: 2 },
-                                        { t: root.profileSetupText("description_method") === "AASHTO" ? "AASHTO" : "SUCS", w: 92 },
-                                        { t: "Descripción", w: 0, s: 3 }, { t: "", w: root.prfReorderMode ? 96 : 40 }]
-                                    delegate: Text {
-                                        required property var modelData
-                                        Layout.preferredWidth: modelData.w > 0 ? root.dp(modelData.w) : 1
-                                        Layout.fillWidth: modelData.w === 0
-                                        Layout.horizontalStretchFactor: modelData.w === 0 ? (modelData.s || 1) : -1
-                                        text: modelData.t
-                                        color: root.cMuted
-                                        font.pixelSize: root.sp(12)
-                                        font.weight: Font.DemiBold
-                                        elide: Text.ElideRight
-                                    }
-                                }
-                            }
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 1
-                                visible: prfCenterCol.tableMode && cortesModel.count > 0
-                                color: root.cBorder
-                            }
-
-                            ColumnLayout {
-                                Layout.fillWidth: true
+                            // Columna estratigráfica: cada estrato añadido (Perfil o Dock «Agregar estrato»)
+                            // aparece directamente aquí; la escala se ajusta sola a la profundidad total.
+                            CalicataProfile {
                                 visible: cortesModel.count > 0
-                                spacing: root.dp(4)
-                                Repeater {
-                                    model: cortesModel
-                                    delegate: Rectangle {
-                                        id: prfRow
-                                        readonly property int rowIdx: index
-                                        readonly property var plain: {
-                                            var evidence = _extraJson + material_origin + sucs + aashto + descripcion + de + a
-                                            return root.corteToPlainObject(cortesModel.get(index))
-                                        }
-                                        readonly property bool isSel: rowIdx === root.selectedStratum
-                                        readonly property real fromDepth: Rules.parseDecimalSafe(de)
-                                        readonly property real toDepth: Rules.parseDecimalSafe(a)
-                                        readonly property bool validInterval: isFinite(fromDepth) && isFinite(toDepth) && toDepth > fromDepth
-                                        readonly property color tone: root.stratumColorFor(plain)
-                                        readonly property var files: root.stratumPatternFilesFor(plain)
-                                        readonly property string originText: root.prfOriginLabel(material_origin)
-                                        readonly property string typeText: root.stratumTypeText(plain)
-                                        readonly property string classText: root.stratumClassText(plain)
-                                        readonly property string descText: String(descripcion || "")
-                                        function depthText(value) { return isFinite(value) ? value.toFixed(2) : "—" }
-                                        Layout.fillWidth: true
-                                        // Loader publica el alto implícito de la variante cargada.
-                                        readonly property real contentImplicitHeight: prfRowLoader.implicitHeight
-                                        implicitHeight: prfCenterCol.tableMode
-                                                        ? Math.max(root.dp(64), contentImplicitHeight + root.dp(16))
-                                                        : Math.max(root.dp(76), contentImplicitHeight + root.dp(20))
-                                        radius: root.dp(10)
-                                        color: "transparent"
-                                        CalicataSurface {
-                                            dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
-                                            anchors.fill: parent
-                                            radius: parent.radius
-                                            tone: isSel ? "tinted" : "clear"
-                                            selected: isSel
-                                            pressed: prfRowTap.pressed
-                                        }
-                                        Accessible.role: Accessible.Button
-                                        Accessible.name: "Estrato " + (rowIdx + 1) + ", " + depthText(fromDepth) + " a "
-                                                         + depthText(toDepth) + " m, " + (classText || "sin clasificar")
-
-                                        MouseArea {
-                                            id: prfRowTap
-                                            anchors.fill: parent
-                                            onClicked: root.selectStratum(prfRow.rowIdx, "field")
-                                        }
-
-                                        // Solo se instancia la variante visible (tabla o tarjeta):
-                                        // una sola trama/imagen por fila.
-                                        Loader {
-                                            id: prfRowLoader
-                                            anchors.fill: parent
-                                            anchors.topMargin: root.dp(prfCenterCol.tableMode ? 8 : 10)
-                                            anchors.bottomMargin: root.dp(prfCenterCol.tableMode ? 8 : 10)
-                                            anchors.leftMargin: root.dp(prfCenterCol.tableMode ? 4 : 8)
-                                            anchors.rightMargin: root.dp(4)
-                                            sourceComponent: prfCenterCol.tableMode ? prfRowTableComponent : prfRowCompactComponent
-                                        }
-
-                                        // Fila de tabla (tablet).
-                                        Component {
-                                        id: prfRowTableComponent
-                                        RowLayout {
-                                            spacing: root.dp(8)
-                                            Text {
-                                                Layout.preferredWidth: root.dp(22)
-                                                text: "⋮"
-                                                color: root.cMuted
-                                                font.pixelSize: root.sp(18)
-                                                horizontalAlignment: Text.AlignHCenter
-                                            }
-                                            PrfStratumBadge {
-                                                number: prfRow.rowIdx + 1
-                                                tone: prfRow.tone
-                                                Layout.preferredWidth: root.dp(32)
-                                                Layout.preferredHeight: root.dp(44)
-                                                Layout.fillHeight: true
-                                            }
-                                            Text { Layout.preferredWidth: root.dp(58); text: prfRow.depthText(prfRow.fromDepth); color: root.cText; font.pixelSize: root.fsLabel }
-                                            Text { Layout.preferredWidth: root.dp(58); text: prfRow.depthText(prfRow.toDepth); color: root.cText; font.pixelSize: root.fsLabel }
-                                            Text {
-                                                Layout.preferredWidth: root.dp(64)
-                                                text: prfRow.validInterval ? (prfRow.toDepth - prfRow.fromDepth).toFixed(2) : "—"
-                                                color: root.cText
-                                                font.pixelSize: root.fsLabel
-                                            }
-                                            PrfStratumSymbol {
-                                                tone: prfRow.tone
-                                                files: prfRow.files
-                                                Layout.preferredWidth: root.dp(50)
-                                                Layout.preferredHeight: root.dp(44)
-                                            }
-                                            ColumnLayout {
-                                                Layout.fillWidth: true
-                                                Layout.preferredWidth: 1
-                                                Layout.horizontalStretchFactor: 2
-                                                spacing: root.dp(2)
-                                                Text {
-                                                    Layout.fillWidth: true
-                                                    text: prfRow.originText.length ? prfRow.originText : "Sin origen"
-                                                    color: prfRow.originText.length ? root.cText : root.cMuted
-                                                    font.pixelSize: root.fsLabel
-                                                    font.weight: Font.DemiBold
-                                                    elide: Text.ElideRight
-                                                }
-                                                Text {
-                                                    Layout.fillWidth: true
-                                                    visible: prfRow.typeText.length > 0
-                                                    text: prfRow.typeText
-                                                    color: root.cMuted
-                                                    font.pixelSize: root.sp(12)
-                                                    wrapMode: Text.WordWrap
-                                                    maximumLineCount: 2
-                                                    elide: Text.ElideRight
-                                                }
-                                            }
-                                            Text {
-                                                Layout.preferredWidth: root.dp(92)
-                                                text: prfRow.classText.length ? prfRow.classText : "Sin clasificar"
-                                                color: prfRow.classText.length ? root.cText : root.cMuted
-                                                font.pixelSize: root.fsLabel
-                                                font.weight: Font.DemiBold
-                                                horizontalAlignment: Text.AlignHCenter
-                                            }
-                                            Text {
-                                                Layout.fillWidth: true
-                                                Layout.preferredWidth: 1
-                                                Layout.horizontalStretchFactor: 3
-                                                text: !prfRow.validInterval ? "Completa o corrige el intervalo"
-                                                      : prfRow.descText.length ? prfRow.descText : "Sin descripción"
-                                                color: !prfRow.validInterval ? (root.flow ? root.flow.theme.error : "#B4232E")
-                                                       : prfRow.descText.length ? root.cText : root.cMuted
-                                                font.pixelSize: root.sp(12)
-                                                wrapMode: Text.WordWrap
-                                                maximumLineCount: 3
-                                                elide: Text.ElideRight
-                                            }
-                                            PrfRowActions {
-                                                rowIdx: prfRow.rowIdx
-                                                Layout.preferredWidth: root.prfReorderMode ? root.dp(96) : root.dp(40)
-                                            }
-                                        }
-                                        }
-
-                                        // Tarjeta compacta (teléfono): misma información, en bloque.
-                                        Component {
-                                        id: prfRowCompactComponent
-                                        RowLayout {
-                                            spacing: root.dp(10)
-                                            PrfStratumBadge {
-                                                number: prfRow.rowIdx + 1
-                                                tone: prfRow.tone
-                                                Layout.preferredWidth: root.dp(28)
-                                                Layout.preferredHeight: root.dp(52)
-                                            }
-                                            PrfStratumSymbol {
-                                                tone: prfRow.tone
-                                                files: prfRow.files
-                                                Layout.preferredWidth: root.dp(48)
-                                                Layout.preferredHeight: root.dp(52)
-                                            }
-                                            ColumnLayout {
-                                                Layout.fillWidth: true
-                                                spacing: root.dp(2)
-                                                Text {
-                                                    Layout.fillWidth: true
-                                                    text: prfRow.depthText(prfRow.fromDepth) + " – " + prfRow.depthText(prfRow.toDepth) + " m"
-                                                          + (prfRow.validInterval ? "  ·  e = " + (prfRow.toDepth - prfRow.fromDepth).toFixed(2) + " m" : "")
-                                                    color: root.cMuted
-                                                    font.pixelSize: root.sp(12)
-                                                    elide: Text.ElideRight
-                                                }
-                                                Text {
-                                                    Layout.fillWidth: true
-                                                    text: (prfRow.originText.length ? prfRow.originText : "Sin origen")
-                                                          + (prfRow.typeText.length ? " · " + prfRow.typeText : "")
-                                                          + (prfRow.classText.length ? " · " + prfRow.classText : "")
-                                                    color: root.cText
-                                                    font.pixelSize: root.fsLabel
-                                                    font.weight: Font.DemiBold
-                                                    wrapMode: Text.WordWrap
-                                                    maximumLineCount: 2
-                                                    elide: Text.ElideRight
-                                                }
-                                                Text {
-                                                    Layout.fillWidth: true
-                                                    text: !prfRow.validInterval ? "Completa o corrige el intervalo"
-                                                          : prfRow.descText.length ? prfRow.descText : "Sin descripción"
-                                                    color: !prfRow.validInterval ? (root.flow ? root.flow.theme.error : "#B4232E") : root.cMuted
-                                                    font.pixelSize: root.sp(12)
-                                                    wrapMode: Text.WordWrap
-                                                    maximumLineCount: 2
-                                                    elide: Text.ElideRight
-                                                }
-                                            }
-                                            PrfRowActions { rowIdx: prfRow.rowIdx }
-                                        }
-                                        }
-
-                                        Rectangle {
-                                            anchors.left: parent.left
-                                            anchors.right: parent.right
-                                            anchors.bottom: parent.bottom
-                                            anchors.bottomMargin: -root.dp(2)
-                                            height: 1
-                                            color: root.cBorder
-                                            opacity: 0.6
-                                            visible: !prfRow.isSel && prfRow.rowIdx < cortesModel.count - 1
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // ---------------- Editor detallado del estrato ----------------
-                        PrfCard {
-                            id: prfEditorCard
-                            visible: cortesModel.count > 0
-                            readonly property int idx: root.selectedStratum
-                            readonly property var s: root.prfSel || ({})
-                            readonly property bool hasStratum: !!root.prfSel
-                            readonly property string origin: root.prfOriginLabel(s.material_origin)
-                            readonly property bool anthropicLike: origin === "Antrópico"
-                            readonly property real innerWidth: width - root.dp(32)
-                            readonly property int subColumns: innerWidth >= root.dp(860) ? 3 : innerWidth >= root.dp(560) ? 2 : 1
-                            readonly property real subWidth: (innerWidth - (subColumns - 1) * root.dp(12)) / subColumns
-                            readonly property bool sideLabels: subWidth >= root.dp(300)
-                            readonly property var projection: Rules.labProjection(s)
-                            readonly property real fromDepth: Rules.parseDecimalSafe(s.de)
-                            readonly property real toDepth: Rules.parseDecimalSafe(s.a)
-                            readonly property var features: s.features || ({})
-                            readonly property var components: Array.isArray(s.fill_components) ? s.fill_components : []
-
-                            Text {
                                 Layout.fillWidth: true
-                                visible: !prfEditorCard.hasStratum
-                                text: "Selecciona un estrato de la tabla para editar su detalle."
-                                color: root.cMuted
-                                font.pixelSize: root.fsLabel
-                                wrapMode: Text.WordWrap
-                            }
-
-                            // Cabecera: estrato activo + navegación entre estratos.
-                            RowLayout {
-                                Layout.fillWidth: true
-                                visible: prfEditorCard.hasStratum
-                                spacing: root.dp(10)
-                                Rectangle {
-                                    Layout.preferredWidth: root.dp(32)
-                                    Layout.preferredHeight: root.dp(32)
-                                    radius: root.dp(8)
-                                    color: root.stratumColorFor(prfEditorCard.s)
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: prfEditorCard.idx + 1
-                                        color: root.prfInkOn(parent.color)
-                                        font.pixelSize: root.sp(14)
-                                        font.bold: true
-                                    }
-                                }
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: "Estrato " + (prfEditorCard.idx + 1)
-                                          + (prfEditorCard.origin.length ? " – " + prfEditorCard.origin : "")
-                                          + (root.stratumTypeText(prfEditorCard.s).length
-                                             ? " (" + root.stratumTypeText(prfEditorCard.s) + ")" : "")
-                                    color: root.cText
-                                    font.pixelSize: root.sp(17)
-                                    font.weight: Font.DemiBold
-                                    wrapMode: Text.WordWrap
-                                    maximumLineCount: 2
-                                    elide: Text.ElideRight
-                                }
-                                PrfToolButton {
-                                    visible: root.reviewCorrectionActive
-                                    text: "Volver a revisión"
-                                    iconName: "action.check"
-                                    primaryTone: true
-                                    onClicked: root.finishReviewCorrection()
-                                }
-                                GenRoundIconButton {
-                                    iconName: "calgen.chevronLeft"
-                                    enabled: prfEditorCard.idx > 0
-                                    opacity: enabled ? 1 : 0.35
-                                    Accessible.name: "Estrato anterior"
-                                    onClicked: root.selectStratum(prfEditorCard.idx - 1, "field")
-                                }
-                                GenRoundIconButton {
-                                    iconName: "calgen.chevron"
-                                    enabled: prfEditorCard.idx < cortesModel.count - 1
-                                    opacity: enabled ? 1 : 0.35
-                                    Accessible.name: "Estrato siguiente"
-                                    onClicked: root.selectStratum(prfEditorCard.idx + 1, "field")
-                                }
-                            }
-
-                            // 1. Rango y geometría.
-                            GridLayout {
-                                Layout.fillWidth: true
-                                visible: prfEditorCard.hasStratum
-                                columns: prfEditorCard.innerWidth >= root.dp(760) ? 5 : prfEditorCard.innerWidth >= root.dp(460) ? 3 : 2
-                                columnSpacing: root.dp(10)
-                                rowSpacing: root.dp(10)
-                                MobileReadOnlyField {
-                                    Layout.fillWidth: true
-                                    fieldLabel: "Desde (m)"
-                                    fieldText: String(prfEditorCard.s.de || "")
-                                }
-                                PrfLabeledInput {
-                                    label: "Hasta (m)"
-                                    BoundTextField {
-                                        Layout.fillWidth: true
-                                        numericKind: Rules.DEPTH_METERS
-                                        maximumValue: root.allowedDepthM
-                                        placeholderText: "Hasta (m)"
-                                        modelText: String(prfEditorCard.s.a || "")
-                                        onCommit: function(t) { return root.commitBoundary(prfEditorCard.idx, t) }
-                                    }
-                                }
-                                MobileReadOnlyField {
-                                    Layout.fillWidth: true
-                                    fieldLabel: "Espesor (m)"
-                                    fieldText: isFinite(prfEditorCard.fromDepth) && isFinite(prfEditorCard.toDepth)
-                                               && prfEditorCard.toDepth > prfEditorCard.fromDepth
-                                               ? (prfEditorCard.toDepth - prfEditorCard.fromDepth).toFixed(2) : ""
-                                }
-                                // Patrón = proyección del laboratorio (solo lectura).
-                                PrfPickField {
-                                    visible: !prfEditorCard.anthropicLike
-                                    label: "Símbolo / patrón (Laboratorio)"
-                                    boxHeight: root.hField
-                                    patterns: root.stratumPatternFilesFor(prfEditorCard.s)
-                                    swatch: root.stratumColorFor(prfEditorCard.s)
-                                    valueText: root.stratumPatternLabel(prfEditorCard.s)
-                                    placeholder: "Pendiente de laboratorio"
-                                    onActivated: root.openLabForStratum(prfEditorCard.idx)
-                                }
-                                // Selector = Web CalicataLiveColor: colores frecuentes, HEX libre y limpiar.
-                                PrfPickField {
-                                    visible: !prfEditorCard.anthropicLike
-                                    label: "Color"
-                                    boxHeight: root.hField
-                                    swatch: root.stratumColorFor(prfEditorCard.s)
-                                    valueText: root.stratumColorText(prfEditorCard.s)
-                                    placeholder: "Sin color registrado"
-                                    onActivated: {
-                                        var presets = root.prfColorPresets
-                                        var labels = presets.map(function(c) { return c.label + " · " + c.value })
-                                        var current = Rules.stratumColorValue(prfEditorCard.s), selected = ""
-                                        for (var i = 0; i < presets.length; ++i) if (presets[i].value === current) selected = labels[i]
-                                        var idx = prfEditorCard.idx
-                                        root.prfPick("Color del estrato", labels, selected, "calgen.default",
-                                                     function(v) { root.setStratumColor(idx, v.length ? v.split(" · ")[1] : "") })
-                                    }
-                                }
-                                BoundTextField {
-                                    Layout.fillWidth: true
-                                    placeholderText: "#806F64"
-                                    modelText: Rules.stratumColorValue(prfEditorCard.s)
-                                    onCommit: function(t) { return root.setStratumColor(prfEditorCard.idx, t) }
-                                }
-                            }
-
-                            GridLayout {
-                                Layout.fillWidth: true
-                                visible: prfEditorCard.hasStratum
-                                columns: prfEditorCard.subColumns
-                                columnSpacing: root.dp(12)
-                                rowSpacing: root.dp(12)
-
-                                // 2-3. Origen del estrato y sistema global de relleno antrópico.
-                                PrfSubsection {
-                                    title: "Origen del estrato"
-                                    iconName: "map.marker"
-                                    accent: root.cGenOrange
-
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: root.dp(6)
-                                        Repeater {
-                                            model: root.prfOriginOptions
-                                            delegate: PrfSegment {
-                                                required property var modelData
-                                                implicitHeight: root.dp(40)
-                                                label: modelData === "Mixto / intervenido" ? "Mixto" : modelData
-                                                isOn: prfEditorCard.origin === modelData
-                                                accent: root.cGenOrange
-                                                accentSoft: root.cGenOrangeSoft
-                                                onPicked: root.setStratumOrigin(prfEditorCard.idx, modelData)
-                                            }
-                                        }
-                                    }
-                                    Text {
-                                        Layout.fillWidth: true
-                                        visible: !prfEditorCard.origin.length
-                                        text: "Elige el origen. Antrópico habilita sus componentes de relleno."
-                                        color: root.cMuted
-                                        font.pixelSize: root.sp(11)
-                                        wrapMode: Text.WordWrap
-                                    }
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        visible: prfEditorCard.anthropicLike
-                                        spacing: root.dp(8)
-                                        Text {
-                                            Layout.fillWidth: true
-                                            Layout.topMargin: root.dp(4)
-                                            text: "Componentes antrópicos"
-                                            color: root.cMuted
-                                            font.pixelSize: root.fsLabel
-                                        }
-                                        Flow {
-                                            Layout.fillWidth: true
-                                            spacing: root.dp(6)
-                                            Repeater {
-                                                model: root.prfFillComponents
-                                                delegate: PrfChip {
-                                                    required property var modelData
-                                                    label: modelData
-                                                    isOn: prfEditorCard.components.indexOf(modelData) >= 0
-                                                    onFlipped: root.toggleStratumListValue(prfEditorCard.idx, "fill_components", modelData)
-                                                }
-                                            }
-                                        }
-                                        BoundTextField {
-                                            Layout.fillWidth: true
-                                            visible: prfEditorCard.components.indexOf("Otros") >= 0
-                                            placeholderText: "Especifica otros componentes"
-                                            modelText: String(prfEditorCard.s.fill_components_other || "")
-                                            onCommit: function(t) { root.setStratumExtra(prfEditorCard.idx, "fill_components_other", t) }
-                                        }
-                                    }
-                                }
-
-                                // 4. Clasificación geotécnica.
-                                PrfSubsection {
-                                    title: prfEditorCard.origin === "Antrópico" ? "Descripción del relleno" : "Clasificación geotécnica"
-                                    iconName: "geotechnical.stratigraphy"
-                                    accent: root.cGenBlue
-
-                                    Text {   // solo lectura: SUCS/AASHTO se llenan en Laboratorio
-                                        Layout.fillWidth: true
-                                        visible: !(prfEditorCard.origin === "Antrópico")
-                                        text: (prfEditorCard.projection.sucs || prfEditorCard.projection.aashto)
-                                              ? [prfEditorCard.projection.sucs, prfEditorCard.projection.aashto].filter(function(x) { return !!x }).join(" · ") + " (desde Laboratorio)"
-                                              : "Pendiente de laboratorio"
-                                        color: root.cMuted
-                                        font.pixelSize: root.sp(15)
-                                        font.weight: Font.DemiBold
-                                        wrapMode: Text.WordWrap
-                                    }
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: "Descripción"
-                                        color: root.cMuted
-                                        font.pixelSize: root.fsLabel
-                                    }
-                                    PrfTextArea {
-                                        label: "Descripción"
-                                        modelText: String(prfEditorCard.s.descripcion || "")
-                                        maxLength: 0   // sin límite
-                                        placeholder: "Material, color, textura, compacidad, humedad…"
-                                        onCommit: function(t) {
-                                            cortesModel.setProperty(prfEditorCard.idx, "descripcion", t)
-                                            root._markDirtySoon()
-                                        }
-                                    }
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: "Observaciones del estrato"
-                                        color: root.cMuted
-                                        font.pixelSize: root.fsLabel
-                                    }
-                                    PrfTextArea {
-                                        label: "Observaciones del estrato"
-                                        modelText: String(prfEditorCard.s.observations || "")
-                                        maxLength: 0   // sin límite
-                                        placeholder: "Observaciones del estrato…"
-                                        onCommit: function(t) { root.setStratumExtra(prfEditorCard.idx, "observations", t) }
-                                    }
-                                    PrfPickField {
-                                        visible: !(prfEditorCard.origin === "Antrópico")
-                                        sideLabel: prfEditorCard.sideLabels
-                                        label: "Humedad"
-                                        valueText: prfEditorCard.s.humedad >= 0 && prfEditorCard.s.humedad < root.humItems.length
-                                                   ? root.humItems[prfEditorCard.s.humedad] : ""
-                                        onActivated: root.prfPickIndex("Humedad", root.humItems, prfEditorCard.s.humedad, "calgen.water",
-                                                                       function(i) {
-                                                                           cortesModel.setProperty(prfEditorCard.idx, "humedad", i)
-                                                                           root._markDirty()
-                                                                       })
-                                    }
-                                    PrfPickField {
-                                        visible: !(prfEditorCard.origin === "Antrópico")
-                                        sideLabel: prfEditorCard.sideLabels
-                                        label: "Consistencia / densidad"
-                                        valueText: String(prfEditorCard.s.consistency || "")
-                                        onActivated: root.prfPick("Consistencia / densidad",
-                                                                  root.stratumConsistencyOptions(prfEditorCard.s),
-                                                                  prfEditorCard.s.consistency, "calgen.depth",
-                                                                  function(v) { root.setStratumExtra(prfEditorCard.idx, "consistency", v) })
-                                    }
-                                    PrfPickField {
-                                        visible: !(prfEditorCard.origin === "Antrópico")
-                                        sideLabel: prfEditorCard.sideLabels
-                                        label: "Estabilidad"
-                                        valueText: prfEditorCard.s.estabilidad >= 0 && prfEditorCard.s.estabilidad < root.estItems.length
-                                                   ? root.estItems[prfEditorCard.s.estabilidad] : ""
-                                        onActivated: root.prfPickIndex("Estabilidad", root.estItems, prfEditorCard.s.estabilidad,
-                                                                       "status.warning",
-                                                                       function(i) {
-                                                                           cortesModel.setProperty(prfEditorCard.idx, "estabilidad", i)
-                                                                           root._markDirty()
-                                                                       })
-                                    }
-                                    PrfPickField {
-                                        visible: !(prfEditorCard.origin === "Antrópico")
-                                        sideLabel: prfEditorCard.sideLabels
-                                        label: "Excavabilidad"
-                                        valueText: prfEditorCard.s.excavabilidad >= 0 && prfEditorCard.s.excavabilidad < root.excItems.length
-                                                   ? root.excItems[prfEditorCard.s.excavabilidad] : ""
-                                        onActivated: root.prfPickIndex("Excavabilidad", root.excItems, prfEditorCard.s.excavabilidad,
-                                                                       "calgen.machine",
-                                                                       function(i) {
-                                                                           cortesModel.setProperty(prfEditorCard.idx, "excavabilidad", i)
-                                                                           root._markDirty()
-                                                                       })
-                                    }
-                                }
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    Layout.alignment: Qt.AlignTop
-                                    spacing: root.dp(12)
-
-                                    // 5. Muestreo (opcional). Fuente de verdad; Laboratorio la lee.
-                                    PrfSubsection {
-                                        visible: !(prfEditorCard.origin === "Antrópico")   // el relleno antrópico no tiene muestra
-                                        title: "Muestra (opcional)"
-                                        iconName: "calgen.attach"
-                                        accent: root.cGenViolet
-                                        resizable: true
-
-                                        BoundTextField {
-                                            Layout.fillWidth: true
-                                            visible: String(prfEditorCard.s.tipo_muestra || "") === "Otro"
-                                            placeholderText: "Especifica el tipo"
-                                            modelText: String(prfEditorCard.s.tipo_otro || "")
-                                            onCommit: function(t) {
-                                                cortesModel.setProperty(prfEditorCard.idx, "tipo_otro", t)
-                                                cortesModel.setProperty(prfEditorCard.idx, "tipoText", t)
-                                            }
-                                        }
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            spacing: root.dp(8)
-                                            PrfLabeledInput {
-                                                label: "Desde (m)"
-                                                BoundTextField {
-                                                    Layout.fillWidth: true
-                                                    numericKind: Rules.DEPTH_METERS
-                                                    minimumValue: isFinite(prfEditorCard.fromDepth) ? prfEditorCard.fromDepth : 0
-                                                    maximumValue: isFinite(prfEditorCard.toDepth) ? prfEditorCard.toDepth : root.depthMaxM
-                                                    placeholderText: "Desde"
-                                                    modelText: Rules.sampleIntervalValue(prfEditorCard.s, "muestra_desde")
-                                                    onCommit: function(t) { return root.commitSampleInterval(prfEditorCard.idx, "muestra_desde", t) }
-                                                }
-                                            }
-                                            PrfLabeledInput {
-                                                label: "Hasta (m)"
-                                                BoundTextField {
-                                                    Layout.fillWidth: true
-                                                    numericKind: Rules.DEPTH_METERS
-                                                    minimumValue: isFinite(prfEditorCard.fromDepth) ? prfEditorCard.fromDepth : 0
-                                                    maximumValue: isFinite(prfEditorCard.toDepth) ? prfEditorCard.toDepth : root.depthMaxM
-                                                    placeholderText: "Hasta"
-                                                    modelText: Rules.sampleIntervalValue(prfEditorCard.s, "muestra_hasta")
-                                                    onCommit: function(t) { return root.commitSampleInterval(prfEditorCard.idx, "muestra_hasta", t) }
-                                                }
-                                            }
-                                        }
-                                        PrfLabeledInput {
-                                            visible: false   // DIOS: sin ID de muestra
-                                            label: "ID de muestra"
-                                            BoundTextField {
-                                                Layout.fillWidth: true
-                                                placeholderText: (txtCodigo.text.trim().length ? txtCodigo.text.trim() : "CALICATA")
-                                                                 + "-M" + (prfEditorCard.idx + 1)
-                                                maximumLength: 40
-                                                modelText: String(prfEditorCard.s.sample_code || "")
-                                                onCommit: function(t) { root.setStratumExtra(prfEditorCard.idx, "sample_code", t) }
-                                            }
-                                        }
-                                    }
-
-                                    // 6. Características adicionales.
-                                }
+                                Layout.preferredHeight: root.dp(prfLayout.mode === 1 ? 360 : 460)
+                                model: cortesModel
+                                bandInfo: root.stratumBandInfo
+                                selectedIndex: root.selectedStratum
+                                totalDepth: Math.max(root.prfGraphDepth, root.prfBands.bottom)
+                                bands: root.prfBands.bands
+                                waterDepth: root.prfWaterDepth
+                                showWater: root.profileSetup.show_water_table !== false
+                                scaleFactor: root.uiScale
+                                ink: root.cText
+                                muted: root.cMuted
+                                gridColor: root.cBorder
+                                accent: root.cGenBlue
+                                waterColor: root.cGenBlue
+                                paper: Qt.rgba(root.cSurface.r, root.cSurface.g, root.cSurface.b, root.darkMode ? 0.18 : 0.40)   // papel del gráfico sobre el vidrio de la tarjeta
+                                onSelected: function(index) { root.openStratumEditor(index) }
                             }
                         }
                     }
@@ -12215,40 +11928,6 @@ Item {
                         Layout.fillWidth: prfLayout.mode === 1
                         Layout.alignment: Qt.AlignTop
                         spacing: root.dp(16)
-
-                        PrfCard {
-                            title: "Vista del perfil"
-                            iconName: root.iconStrataName
-                            headerTrailing: [
-                                GenRoundIconButton {
-                                    width: root.dp(36)
-                                    height: root.dp(36)
-                                    iconName: "documents.open"
-                                    enabled: cortesModel.count > 0
-                                    opacity: enabled ? 1 : 0.35
-                                    Accessible.name: "Ampliar vista del perfil"
-                                    onClicked: prfGraphPopup.open()
-                                }
-                            ]
-                            CalicataProfile {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: root.dp(prfLayout.mode === 1 ? 320 : 420)
-                                model: cortesModel
-                                bandInfo: root.stratumBandInfo
-                                selectedIndex: root.selectedStratum
-                                totalDepth: root.prfGraphDepth
-                                waterDepth: root.prfWaterDepth
-                                showWater: root.profileSetup.show_water_table !== false
-                                scaleFactor: root.uiScale
-                                ink: root.cText
-                                muted: root.cMuted
-                                gridColor: root.cBorder
-                                accent: root.cGenBlue
-                                waterColor: root.cGenBlue
-                                paper: Qt.rgba(root.cSurface.r, root.cSurface.g, root.cSurface.b, root.darkMode ? 0.18 : 0.40)   // papel del gráfico sobre el vidrio de la tarjeta
-                                onSelected: function(index) { root.selectStratum(index, "field") }
-                            }
-                        }
 
                         PrfCard {
                             title: "Resumen del perfil"
@@ -12274,63 +11953,6 @@ Item {
                                 value: root.prfStats.anthropicCount > 0
                                        ? root.prfStats.anthropicThickness.toFixed(2) + " m (" + root.prfStats.anthropicCount + ")"
                                        : "—"
-                            }
-                            PrfStatRow {
-                                iconName: "calgen.machine"
-                                label: "Excavación"
-                                value: root.profileSetupText("excavation_type").length
-                                       ? root.profileSetupText("excavation_type") : "No registrado"
-                            }
-                        }
-
-                        PrfCard {
-                            id: prfInterpretationCard
-                            title: "Interpretación geotécnica"
-                            iconName: "calgen.description"
-                            PrfTextArea {
-                                label: "Interpretación geotécnica"
-                                modelText: root.profileSetupText("interpretation")
-                                maxLength: 1000
-                                minHeight: root.dp(120)
-                                placeholder: "Escribe una interpretación o genera una propuesta con InGe AI…"
-                                onCommit: function(t) { root.updateProfileSetup({ interpretation: t }, true) }
-                            }
-                            PrfToolButton {
-                                visible: cortesModel.count > 0
-                                enabled: !root.coreReviewBusy && !root._coreReviewRetryPending
-                                text: root.profileSetupText("interpretation").length ? "Revisar interpretación con IA" : "Generar interpretación con IA"
-                                iconName: "calgen.default"
-                                onClicked: {
-                                    root._flushCortesRevision()
-                                    root.requestAssistedReview("interpretation")
-                                }
-                            }
-                        }
-
-                        PrfCard {
-                            id: prfGeneralClassCard
-                            title: "Clasificación general"
-                            iconName: "calgen.identity"
-                            readonly property string suggested: root.suggestedGeneralClass()
-                            PrfPickField {
-                                valueText: root.profileSetupText("general_classification")
-                                onActivated: root.prfPick("Clasificación general", root.prfGeneralClasses,
-                                                          root.profileSetupText("general_classification"), root.iconStrataName,
-                                                          function(v) { root.updateProfileSetup({ general_classification: v }) })
-                            }
-                            Text {
-                                Layout.fillWidth: true
-                                text: "Clasificación representativa del perfil completo."
-                                color: root.cMuted
-                                font.pixelSize: root.sp(11)
-                                wrapMode: Text.WordWrap
-                            }
-                            PrfToolButton {
-                                visible: prfGeneralClassCard.suggested.length > 0
-                                         && prfGeneralClassCard.suggested !== root.profileSetupText("general_classification")
-                                text: "Sugerida: " + prfGeneralClassCard.suggested
-                                iconName: "calgen.default"
-                                onClicked: root.updateProfileSetup({ general_classification: prfGeneralClassCard.suggested })
                             }
                         }
                     }
@@ -12821,6 +12443,18 @@ Item {
 
             Item { width: 1; height: root.dp(8) }
         }
+    }
+
+
+    // Espacio que ocupa el Dock real (visible, sin cambios) al pie de la ficha.
+    readonly property real fichaDockClearance: {
+        var dock = null
+        for (var host = root.parent; host && !dock; host = host.parent)
+            if ("dockAnchor" in host) dock = host.dockAnchor
+        if (!dock || !dock.visible) return root.dp(16)
+        var reflow = dock.y + dock.height             // reevalúa si el Dock se mueve o cambia de alto
+        var top = dock.mapToItem(root, 0, 0).y
+        return Math.max(root.dp(16), root.height - top + root.dp(12))
     }
 
 
