@@ -210,12 +210,18 @@ Item {
     property bool _labActionGuard: false
     Timer { id: labActionGuardTimer; interval: 450; repeat: false; onTriggered: root._labActionGuard = false }
     readonly property bool labDetailOpen: stratumSheet.visible && root.labSheetActive && !root.labDetailClosing
-    readonly property var labInfosAll: {
-        root._cortesRevision
+    property var labInfosAll: []
+    property bool _labInfosBuilding: false
+    function _rebuildLabInfos() {
+        if (root._labInfosBuilding) return
+        root._labInfosBuilding = true
         var list = []
         for (var i = 0; i < cortesModel.count; ++i) list.push(root.labInfo(i))
-        return list
+        root._labInfosBuilding = false
+        root.labInfosAll = list
     }
+    // labInfo puede vaciar una revisión pendiente: salir del turno del binding.
+    on_CortesRevisionChanged: Qt.callLater(root._rebuildLabInfos)
     readonly property int labPendingCount: root.labInfosAll.filter(function(x) { return x && x.pending }).length
     readonly property int labDataCount: root.labInfosAll.filter(function(x) { return x && (x.hasSample || x.hasTests) }).length
     readonly property var labStrataEntries: root.labInfosAll.map(function(x, i) {
@@ -1179,6 +1185,7 @@ Item {
     // resolveCalicataSucsPattern / formatSucsProjection). Solo lectura: se
     // cambian adoptando en Laboratorio. Una capa por código (compuesto = dos).
     function stratumPatternFilesFor(plain) {
+        if (Rules.isAnthropicFill(plain.material_origin)) return [Rules.REPORT_RA_PATTERN]
         return Rules.labProjection(plain).pattern.layers.map(function(layer) { return layer.url })
     }
     // Vista del perfil: trama, color y rótulo de una banda en una sola lectura.
@@ -1186,9 +1193,10 @@ Item {
         if (index < 0 || index >= cortesModel.count) return { files: [], color: "#E7E7E4", label: "" }
         var plain = corteToPlainObject(cortesModel.get(index))
         return { files: stratumPatternFilesFor(plain), color: stratumColorFor(plain),
-                 label: Rules.labProjection(plain).sucs }
+                 label: root.stratumPatternLabel(plain) }
     }
     function stratumPatternLabel(plain) {
+        if (Rules.isAnthropicFill(plain.material_origin)) return Rules.REPORT_RA_CODE
         return Rules.labProjection(plain).sucs
     }
     // Clasificación que muestra la tabla según el método del perfil (proyección
@@ -5020,7 +5028,7 @@ Item {
             }
             onTextChanged: {
                 if (root._loading || !activeFocus) return
-                if (text.length > prfArea.maxLength) {
+                if (prfArea.maxLength > 0 && text.length > prfArea.maxLength) {
                     var position = Math.min(cursorPosition, prfArea.maxLength)
                     text = text.substring(0, prfArea.maxLength)
                     cursorPosition = position
@@ -6365,7 +6373,8 @@ Item {
         for (var i = 0; i < cortesModel.count; ++i) {
             var extra = JSON.parse(cortesModel.get(i)._extraJson || "{}")
             if (String(extra.remote_stratum_id || "").toLowerCase() !== id) continue
-            var text = value === null ? "" : String(value).substring(0, 4000)
+            var text = value === null ? "" : String(value)
+            if (field !== "description" && field !== "observations") text = text.substring(0, 4000)
             switch (field) {
             case "to_depth_m":
                 cortesModel.setProperty(i, "a", text.length && isFinite(Number(text)) ? Number(text).toFixed(2) : text)
@@ -11817,7 +11826,7 @@ Item {
                             readonly property var s: root.prfSel || ({})
                             readonly property bool hasStratum: !!root.prfSel
                             readonly property string origin: root.prfOriginLabel(s.material_origin)
-                            readonly property bool anthropicLike: origin === "Antrópico" || origin === "Mixto / intervenido"
+                            readonly property bool anthropicLike: origin === "Antrópico"
                             readonly property real innerWidth: width - root.dp(32)
                             readonly property int subColumns: innerWidth >= root.dp(860) ? 3 : innerWidth >= root.dp(560) ? 2 : 1
                             readonly property real subWidth: (innerWidth - (subColumns - 1) * root.dp(12)) / subColumns
@@ -11923,6 +11932,7 @@ Item {
                                 }
                                 // Patrón = proyección del laboratorio (solo lectura).
                                 PrfPickField {
+                                    visible: !prfEditorCard.anthropicLike
                                     label: "Símbolo / patrón (Laboratorio)"
                                     boxHeight: root.hField
                                     patterns: root.stratumPatternFilesFor(prfEditorCard.s)
@@ -11931,16 +11941,29 @@ Item {
                                     placeholder: "Pendiente de laboratorio"
                                     onActivated: root.openLabForStratum(prfEditorCard.idx)
                                 }
+                                // Selector = Web CalicataLiveColor: colores frecuentes, HEX libre y limpiar.
                                 PrfPickField {
+                                    visible: !prfEditorCard.anthropicLike
                                     label: "Color"
                                     boxHeight: root.hField
                                     swatch: root.stratumColorFor(prfEditorCard.s)
-                                    valueText: String(prfEditorCard.s.stratum_color || "")
-                                    placeholder: "Automático"
-                                    onActivated: root.prfPick("Color del estrato",
-                                                              root.prfColors.map(function(c) { return c.name }),
-                                                              prfEditorCard.s.stratum_color, "calgen.default",
-                                                              function(v) { root.setStratumExtra(prfEditorCard.idx, "stratum_color", v) })
+                                    valueText: root.stratumColorText(prfEditorCard.s)
+                                    placeholder: "Sin color registrado"
+                                    onActivated: {
+                                        var presets = root.prfColorPresets
+                                        var labels = presets.map(function(c) { return c.label + " · " + c.value })
+                                        var current = Rules.stratumColorValue(prfEditorCard.s), selected = ""
+                                        for (var i = 0; i < presets.length; ++i) if (presets[i].value === current) selected = labels[i]
+                                        var idx = prfEditorCard.idx
+                                        root.prfPick("Color del estrato", labels, selected, "calgen.default",
+                                                     function(v) { root.setStratumColor(idx, v.length ? v.split(" · ")[1] : "") })
+                                    }
+                                }
+                                BoundTextField {
+                                    Layout.fillWidth: true
+                                    placeholderText: "#806F64"
+                                    modelText: Rules.stratumColorValue(prfEditorCard.s)
+                                    onCommit: function(t) { return root.setStratumColor(prfEditorCard.idx, t) }
                                 }
                             }
 
@@ -11969,23 +11992,14 @@ Item {
                                                 isOn: prfEditorCard.origin === modelData
                                                 accent: root.cGenOrange
                                                 accentSoft: root.cGenOrangeSoft
-                                                onPicked: root.setStratumOrigin(prfEditorCard.idx, isOn ? "" : modelData)
+                                                onPicked: root.setStratumOrigin(prfEditorCard.idx, modelData)
                                             }
                                         }
-                                    }
-                                    PrfPickField {
-                                        visible: prfEditorCard.origin === "Natural"
-                                        sideLabel: prfEditorCard.sideLabels
-                                        label: "Origen geológico"
-                                        valueText: String(prfEditorCard.s.natural_origin || "")
-                                        onActivated: root.prfPick("Origen geológico", root.prfNaturalOrigins,
-                                                                  prfEditorCard.s.natural_origin, "map.marker",
-                                                                  function(v) { root.setStratumExtra(prfEditorCard.idx, "natural_origin", v) })
                                     }
                                     Text {
                                         Layout.fillWidth: true
                                         visible: !prfEditorCard.origin.length
-                                        text: "Elige el origen. Antrópico o Mixto habilita el detalle del relleno."
+                                        text: "Elige el origen. Antrópico habilita sus componentes de relleno."
                                         color: root.cMuted
                                         font.pixelSize: root.sp(11)
                                         wrapMode: Text.WordWrap
@@ -11994,46 +12008,6 @@ Item {
                                         Layout.fillWidth: true
                                         visible: prfEditorCard.anthropicLike
                                         spacing: root.dp(8)
-                                        PrfPickField {
-                                            sideLabel: prfEditorCard.sideLabels
-                                            label: "Tipo de relleno"
-                                            valueText: String(prfEditorCard.s.fill_type || "")
-                                            onActivated: root.prfPick("Tipo de relleno", root.prfFillTypes, prfEditorCard.s.fill_type,
-                                                                      root.iconStrataName,
-                                                                      function(v) { root.setStratumExtra(prfEditorCard.idx, "fill_type", v) })
-                                        }
-                                        PrfPickField {
-                                            sideLabel: prfEditorCard.sideLabels
-                                            label: "Contexto / procedencia"
-                                            valueText: String(prfEditorCard.s.fill_context || "")
-                                            onActivated: root.prfPick("Contexto / procedencia", root.prfFillContexts, prfEditorCard.s.fill_context,
-                                                                      "map.marker",
-                                                                      function(v) { root.setStratumExtra(prfEditorCard.idx, "fill_context", v) })
-                                        }
-                                        PrfPickField {
-                                            sideLabel: prfEditorCard.sideLabels
-                                            label: "Control de colocación"
-                                            valueText: String(prfEditorCard.s.fill_control || "")
-                                            onActivated: root.prfPick("Control de colocación", root.prfFillControls, prfEditorCard.s.fill_control,
-                                                                      "action.check",
-                                                                      function(v) { root.setStratumExtra(prfEditorCard.idx, "fill_control", v) })
-                                        }
-                                        PrfPickField {
-                                            sideLabel: prfEditorCard.sideLabels
-                                            label: "Compactación"
-                                            valueText: String(prfEditorCard.s.fill_compaction || "")
-                                            onActivated: root.prfPick("Compactación", root.prfCompactions, prfEditorCard.s.fill_compaction,
-                                                                      "calgen.depth",
-                                                                      function(v) { root.setStratumExtra(prfEditorCard.idx, "fill_compaction", v) })
-                                        }
-                                        PrfPickField {
-                                            sideLabel: prfEditorCard.sideLabels
-                                            label: "Material matriz"
-                                            valueText: String(prfEditorCard.s.fill_matrix || "")
-                                            onActivated: root.prfPick("Material matriz", root.prfFillMatrix, prfEditorCard.s.fill_matrix,
-                                                                      root.iconStrataName,
-                                                                      function(v) { root.setStratumExtra(prfEditorCard.idx, "fill_matrix", v) })
-                                        }
                                         Text {
                                             Layout.fillWidth: true
                                             Layout.topMargin: root.dp(4)
@@ -12066,36 +12040,19 @@ Item {
 
                                 // 4. Clasificación geotécnica.
                                 PrfSubsection {
-                                    title: "Clasificación geotécnica"
+                                    title: prfEditorCard.origin === "Antrópico" ? "Descripción del relleno" : "Clasificación geotécnica"
                                     iconName: "geotechnical.stratigraphy"
                                     accent: root.cGenBlue
 
-                                    RowLayout {
+                                    Text {   // solo lectura: SUCS/AASHTO se llenan en Laboratorio
                                         Layout.fillWidth: true
-                                        spacing: root.dp(8)
-                                        // Carretera prioriza AASHTO (orden visual; los datos no cambian).
-                                        layoutDirection: root.prfActiveTemplate && root.prfActiveTemplate.aashtoFirst
-                                                         ? Qt.RightToLeft : Qt.LeftToRight
-                                        // SUCS / AASHTO = proyección del laboratorio (Web
-                                        // LaboratoryProjection). Se adoptan en Laboratorio.
-                                        PrfPickField {
-                                            label: "SUCS"
-                                            valueText: prfEditorCard.projection.sucs
-                                            placeholder: "Pendiente de laboratorio"
-                                            onActivated: root.openLabForStratum(prfEditorCard.idx)
-                                        }
-                                        PrfPickField {
-                                            label: "AASHTO"
-                                            valueText: prfEditorCard.projection.aashto
-                                            placeholder: "Pendiente de laboratorio"
-                                            onActivated: root.openLabForStratum(prfEditorCard.idx)
-                                        }
-                                    }
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: "SUCS, AASHTO y patrón vienen del Laboratorio: se cambian adoptando la clasificación allí."
+                                        visible: !(prfEditorCard.origin === "Antrópico")
+                                        text: (prfEditorCard.projection.sucs || prfEditorCard.projection.aashto)
+                                              ? [prfEditorCard.projection.sucs, prfEditorCard.projection.aashto].filter(function(x) { return !!x }).join(" · ") + " (desde Laboratorio)"
+                                              : "Pendiente de laboratorio"
                                         color: root.cMuted
-                                        font.pixelSize: root.sp(11)
+                                        font.pixelSize: root.sp(15)
+                                        font.weight: Font.DemiBold
                                         wrapMode: Text.WordWrap
                                     }
                                     Text {
@@ -12107,22 +12064,28 @@ Item {
                                     PrfTextArea {
                                         label: "Descripción"
                                         modelText: String(prfEditorCard.s.descripcion || "")
-                                        maxLength: 500
+                                        maxLength: 0   // sin límite
                                         placeholder: "Material, color, textura, compacidad, humedad…"
                                         onCommit: function(t) {
                                             cortesModel.setProperty(prfEditorCard.idx, "descripcion", t)
                                             root._markDirtySoon()
                                         }
                                     }
-                                    PrfPickField {
-                                        sideLabel: prfEditorCard.sideLabels
-                                        label: "Estructura"
-                                        valueText: String(prfEditorCard.s.structure || "")
-                                        onActivated: root.prfPick("Estructura", root.prfStructures, prfEditorCard.s.structure,
-                                                                  root.iconStrataName,
-                                                                  function(v) { root.setStratumExtra(prfEditorCard.idx, "structure", v) })
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "Observaciones del estrato"
+                                        color: root.cMuted
+                                        font.pixelSize: root.fsLabel
+                                    }
+                                    PrfTextArea {
+                                        label: "Observaciones del estrato"
+                                        modelText: String(prfEditorCard.s.observations || "")
+                                        maxLength: 0   // sin límite
+                                        placeholder: "Observaciones del estrato…"
+                                        onCommit: function(t) { root.setStratumExtra(prfEditorCard.idx, "observations", t) }
                                     }
                                     PrfPickField {
+                                        visible: !(prfEditorCard.origin === "Antrópico")
                                         sideLabel: prfEditorCard.sideLabels
                                         label: "Humedad"
                                         valueText: prfEditorCard.s.humedad >= 0 && prfEditorCard.s.humedad < root.humItems.length
@@ -12134,6 +12097,7 @@ Item {
                                                                        })
                                     }
                                     PrfPickField {
+                                        visible: !(prfEditorCard.origin === "Antrópico")
                                         sideLabel: prfEditorCard.sideLabels
                                         label: "Consistencia / densidad"
                                         valueText: String(prfEditorCard.s.consistency || "")
@@ -12143,6 +12107,7 @@ Item {
                                                                   function(v) { root.setStratumExtra(prfEditorCard.idx, "consistency", v) })
                                     }
                                     PrfPickField {
+                                        visible: !(prfEditorCard.origin === "Antrópico")
                                         sideLabel: prfEditorCard.sideLabels
                                         label: "Estabilidad"
                                         valueText: prfEditorCard.s.estabilidad >= 0 && prfEditorCard.s.estabilidad < root.estItems.length
@@ -12155,6 +12120,7 @@ Item {
                                                                        })
                                     }
                                     PrfPickField {
+                                        visible: !(prfEditorCard.origin === "Antrópico")
                                         sideLabel: prfEditorCard.sideLabels
                                         label: "Excavabilidad"
                                         valueText: prfEditorCard.s.excavabilidad >= 0 && prfEditorCard.s.excavabilidad < root.excItems.length
@@ -12175,27 +12141,12 @@ Item {
 
                                     // 5. Muestreo (opcional). Fuente de verdad; Laboratorio la lee.
                                     PrfSubsection {
+                                        visible: !(prfEditorCard.origin === "Antrópico")   // el relleno antrópico no tiene muestra
                                         title: "Muestra (opcional)"
                                         iconName: "calgen.attach"
                                         accent: root.cGenViolet
                                         resizable: true
 
-                                        PrfPickField {
-                                            label: "Tipo de muestra"
-                                            valueText: String(prfEditorCard.s.tipo_muestra || "") === "Otro"
-                                                       ? "Otro · " + String(prfEditorCard.s.tipo_otro || "")
-                                                       : String(prfEditorCard.s.tipo_muestra || "")
-                                            onActivated: root.prfPick("Tipo de muestra", root.sampleTypeItems.slice(1),
-                                                                      prfEditorCard.s.tipo_muestra, "calgen.attach",
-                                                                      function(v) {
-                                                                          var index = prfEditorCard.idx
-                                                                          cortesModel.setProperty(index, "tipo_muestra", v)
-                                                                          if (v !== "Otro") cortesModel.setProperty(index, "tipo_otro", "")
-                                                                          cortesModel.setProperty(index, "tipoText",
-                                                                                                  v === "Otro" ? String(cortesModel.get(index).tipo_otro || "") : v)
-                                                                          root._markDirty()
-                                                                      })
-                                        }
                                         BoundTextField {
                                             Layout.fillWidth: true
                                             visible: String(prfEditorCard.s.tipo_muestra || "") === "Otro"
@@ -12235,6 +12186,7 @@ Item {
                                             }
                                         }
                                         PrfLabeledInput {
+                                            visible: false   // DIOS: sin ID de muestra
                                             label: "ID de muestra"
                                             BoundTextField {
                                                 Layout.fillWidth: true
@@ -12248,50 +12200,6 @@ Item {
                                     }
 
                                     // 6. Características adicionales.
-                                    PrfSubsection {
-                                        title: "Características adicionales"
-                                        iconName: "action.check"
-                                        accent: root.cGenGreen
-
-                                        Text {
-                                            Layout.fillWidth: true
-                                            visible: !!root.prfActiveTemplate && root.prfActiveTemplate.featuresHint === true
-                                            text: "Plantilla Ambiental: registra olor, manchas o contaminación solo si se observan."
-                                            color: root.cMuted
-                                            font.pixelSize: root.sp(11)
-                                            wrapMode: Text.WordWrap
-                                        }
-                                        PrfCheck {
-                                            label: "Registrar características adicionales"
-                                            strong: true
-                                            isOn: prfEditorCard.s.features_enabled === true
-                                            onFlipped: root.setStratumExtra(prfEditorCard.idx, "features_enabled", !isOn)
-                                        }
-                                        GridLayout {
-                                            Layout.fillWidth: true
-                                            columns: prfEditorCard.subWidth >= root.dp(260) ? 2 : 1
-                                            columnSpacing: root.dp(10)
-                                            rowSpacing: root.dp(8)
-                                            enabled: prfEditorCard.s.features_enabled === true
-                                            opacity: enabled ? 1 : 0.45
-                                            Repeater {
-                                                model: root.prfFeatures
-                                                delegate: PrfCheck {
-                                                    required property var modelData
-                                                    label: modelData.label
-                                                    isOn: prfEditorCard.features[modelData.key] === true
-                                                    onFlipped: root.toggleStratumFeature(prfEditorCard.idx, modelData.key)
-                                                }
-                                            }
-                                        }
-                                        BoundTextField {
-                                            Layout.fillWidth: true
-                                            visible: prfEditorCard.s.features_enabled === true && prfEditorCard.features.other === true
-                                            placeholderText: "Detalle de otras características"
-                                            modelText: String(prfEditorCard.s.features_other || "")
-                                            onCommit: function(t) { root.setStratumExtra(prfEditorCard.idx, "features_other", t) }
-                                        }
-                                    }
                                 }
                             }
                         }

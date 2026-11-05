@@ -266,6 +266,8 @@ function validateDocument(state) {
             add(4, i, label + "Hasta supera la profundidad total de " + limit.toFixed(2) + " m.")
         previous = to
         if (isFinite(to)) finalDepth = Math.max(finalDepth, to)
+        // Conserva datos ocultos al cambiar de origen; no bloquean el relleno antrópico.
+        if (isAnthropicFill(row.material_origin)) continue
         if (text(row.muestra_desde) || text(row.muestra_hasta)) {
             var sf = parseDecimalSafe(row.muestra_desde), st = parseDecimalSafe(row.muestra_hasta)
             if (!isFinite(sf) || !isFinite(st) || sf >= st || sf < from - 0.001 || st > to + 0.001)
@@ -1271,7 +1273,7 @@ function stepLabInteger(current, direction, maximum) {
 var REPORT_RA_CODE = "RA"
 var REPORT_RA_PATTERN = "qrc:/SUCS/mtc/RE_Relleno_Antropico.svg"
 function isAnthropicFill(origin) {
-    return /^relleno(?:\s|$)/i.test(String(origin || "").trim())
+    return /^(?:relleno(?:\s|$)|antr[oó]pico$)/i.test(String(origin || "").trim())
 }
 function exportClassification(row) {
     row = row || {}
