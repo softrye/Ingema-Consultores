@@ -312,6 +312,9 @@ dependencies {
 
     implementation 'androidx.core:core:1.16.0'
     implementation 'com.google.android.gms:play-services-auth:22.0.0'
+    implementation 'androidx.credentials:credentials:1.6.0'
+    implementation 'androidx.credentials:credentials-play-services-auth:1.6.0'
+    implementation 'com.google.android.libraries.identity.googleid:googleid:1.2.1'
     // Same bundled on-device recognizer as flutter_receipt_scanner donor.
     implementation 'com.google.mlkit:text-recognition-korean:16.0.1'
 

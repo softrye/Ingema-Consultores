@@ -127,6 +127,7 @@ public final class InGeQtActivity extends QtActivity {
     };
     private boolean betaCrashHandlerInstalled;
 
+    @androidx.annotation.Keep
     public static InGeQtActivity currentActivity() {
         return current.get();
     }

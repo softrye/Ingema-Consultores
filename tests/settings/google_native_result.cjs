@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
-const path = 'android/pending-google-signin/com/ingema/ingeplus/GoogleNativeSignIn.java';
+const path = 'android/src/com/ingema/ingeplus/GoogleNativeSignIn.java';
 assert.ok(fs.existsSync(path), 'Native account selector result bridge is missing');
 const source = fs.readFileSync(path, 'utf8');
 function method(name) {

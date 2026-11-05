@@ -21,7 +21,7 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
 public final class GoogleNativeSignIn {
     // Public web client ID (audience verified by Supabase), not a secret or Android client ID.
     private static final String SERVER_CLIENT_ID =
-        "1012914960220-5jvgaqbths1kbnmkq4cqnm7l9gnhuv01.apps.googleusercontent.com";
+        "503316492000-gu98earl4g0d2n0km3u7sh7m45fe951d.apps.googleusercontent.com";
     private static long pendingRequest;
     private static CancellationSignal cancellation;
 

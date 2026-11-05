@@ -1,5 +1,7 @@
 # Google nativo y cuentas registradas — 05/11/2026
 
+**Actualización posterior:** el usuario completó la verificación en dos pasos; se resolvió la configuración y se activó el selector en el código. El cierre de esta activación está en `GOOGLE_NATIVE_ACTIVATION_20261105.md`. Las secciones de bloqueo y estado parcial de abajo documentan la etapa anterior.
+
 ## Causa comprobada
 
 El botón `AuthSession::signInWithGoogle()` delegaba a `/auth/v1/authorize` y abría una Custom Tab mediante `InGeQtActivity.openOAuthUrl()`. Por eso aparecía una página web.
