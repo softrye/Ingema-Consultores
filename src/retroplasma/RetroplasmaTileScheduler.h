@@ -10,6 +10,8 @@ public:
     static Schedule select(const Scene &,const Mat4 &,Vec3 eye,double height,
         const QHash<QString,std::shared_ptr<const LoadedTile>> &resident,const QString &revision);
     static Schedule selectPlanet(const Scene &,const Mat4 &,Vec3 eye,double height,
-        const QHash<QString,std::shared_ptr<const LoadedTile>> &resident,const QString &revision);
+        const QHash<QString,std::shared_ptr<const LoadedTile>> &resident,const QString &revision,const EarthBudget &budget=EarthBudget{});
+    static Schedule selectRocktree(const Scene &,const Mat4 &,Vec3 eye,double height,
+        const QHash<QString,std::shared_ptr<const LoadedTile>> &resident,const QString &revision,const EarthBudget &);
 };
 }

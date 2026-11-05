@@ -14,6 +14,8 @@ qt_add_qml_module(InGeRetroplasma STATIC
         RetroplasmaCamera.h RetroplasmaCamera.cpp
         RetroplasmaGeometryDecoder.h RetroplasmaGeometryDecoder.cpp
         RetroplasmaTextureDecoder.h RetroplasmaTextureDecoder.cpp
+        RetroplasmaRocktree.h RetroplasmaRocktree.cpp RetroplasmaCrnDecoder.cpp
+        RetroplasmaRocktreeProvider.h RetroplasmaRocktreeProvider.cpp RetroplasmaRocktreeScheduler.cpp
         RetroplasmaScene.h
         RetroplasmaDataProvider.h RetroplasmaDataProvider.cpp
         RetroplasmaTileScheduler.h RetroplasmaTileScheduler.cpp

@@ -2,10 +2,11 @@
 #include <algorithm>
 #include <functional>
 namespace inge::rp {
-Schedule RetroplasmaTileScheduler::selectPlanet(const Scene &scene,const Mat4 &view,Vec3 eye,double height,const QHash<QString,std::shared_ptr<const LoadedTile>> &resident,const QString &revision){
+Schedule RetroplasmaTileScheduler::selectPlanet(const Scene &scene,const Mat4 &view,Vec3 eye,double height,const QHash<QString,std::shared_ptr<const LoadedTile>> &resident,const QString &revision,const EarthBudget &budget){
     Schedule out;QSet<QString> drawn;int leaves=0,remoteRequests=0;
+    const double refinePixels=360*std::clamp(budget.pixelError/6.0,.5,3.0);
     auto draw=[&](const QString &key){if(resident.contains(key)&&!drawn.contains(key)){drawn.insert(key);out.wanted.insert(key);out.draw.push_back({key,resident.value(key)});}};
-    auto request=[&](const QString &key,const Lod &asset,double priority){if(out.wanted.contains(key))return;if(asset.layer!=QLatin1String("overview")&&remoteRequests++>=96)return;out.wanted.insert(key);if(!resident.contains(key))out.requests.push_back({key,0,0,priority,true,asset,planetBounds(asset.sector)});};
+    auto request=[&](const QString &key,const Lod &asset,double priority){if(out.wanted.contains(key))return;if(asset.layer!=QLatin1String("overview")&&remoteRequests++>=budget.nodes)return;out.wanted.insert(key);if(!resident.contains(key))out.requests.push_back({key,0,0,priority,true,asset,planetBounds(asset.sector)});};
     const bool detail=scene.imagery==QLatin1String("landsat");const int maxLevel=scene.imagery==QLatin1String("sentinel")?11:detail?9:5;
     std::function<void(GeoSector,int,int,int,QString)> visit=[&](GeoSector box,int level,int x,int y,QString ancestor){
         if(!planetSectorVisible(box,view,eye))return;
@@ -14,11 +15,11 @@ Schedule RetroplasmaTileScheduler::selectPlanet(const Scene &scene,const Mat4 &v
         double pixels=(box.east-box.west)*Radians*height/(2*std::tan(22.5*Radians)*distance);
         QString key=revision+QStringLiteral(":gibs:%1:%2:%3:%4").arg(scene.imagery).arg(level).arg(y).arg(x);
         if(resident.contains(key)){ancestor=key;out.wanted.insert(key);}
-        if(level>=3&&pixels>360&&level<maxLevel){
+        if(level>=3&&pixels>refinePixels&&level<maxLevel){
             Lod parent;parent.planetary=true;parent.sector=box;parent.layer=scene.imagery;parent.date=scene.date;parent.level=level;
             request(key,parent,distance-1.0/double(level+1));
         }
-        if(pixels>360&&level<maxLevel&&leaves<80){
+        if(pixels>refinePixels&&level<maxLevel&&leaves<budget.nodes){
             double lon=(box.west+box.east)*.5,lat=(box.south+box.north)*.5;
             struct Cell{GeoSector box;int x,y;};
             std::array<Cell,4> cells{{{{box.west,box.south,lon,lat},x*2,y*2},{{lon,box.south,box.east,lat},x*2+1,y*2},{{box.west,lat,lon,box.north},x*2,y*2+1},{{lon,lat,box.east,box.north},x*2+1,y*2+1}}};
@@ -26,7 +27,7 @@ Schedule RetroplasmaTileScheduler::selectPlanet(const Scene &scene,const Mat4 &v
             std::stable_sort(cells.begin(),cells.end(),[&](auto a,auto b){return proximity(a.box)<proximity(b.box);});
             for(auto cell:cells)visit(cell.box,level+1,cell.x,cell.y,ancestor);return;
         }
-        if(++leaves>96)return;
+        if(++leaves>budget.nodes)return;
         // Leaf textures never become a flat map: each is uploaded on an ECEF ellipsoid segment.
         Lod asset;asset.planetary=true;asset.sector=box;asset.layer=scene.imagery;asset.date=scene.date;asset.level=level;
         if(detail){
