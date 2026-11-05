@@ -6503,9 +6503,9 @@ Item {
             }
             RowLayout {
                 Layout.fillWidth: true
-                PrfToolButton { text: "Limpiar"; iconName: "action.delete"; onClicked: prfColorPopup.chooseHex("",true) }
-                Item { Layout.fillWidth: true }
-                PrfToolButton { text: "Listo"; iconName: "action.check"; primaryTone: true; onClicked: prfColorPopup.finish() }
+                spacing: root.dp(8)
+                PrfFooterButton { text: "Limpiar"; onClicked: prfColorPopup.chooseHex("",true) }
+                PrfFooterButton { text: "Listo"; primary: true; onClicked: prfColorPopup.finish() }
             }
         }
     }
