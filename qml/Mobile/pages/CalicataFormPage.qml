@@ -4582,6 +4582,32 @@ Item {
         }
     }
 
+    // Compact text-only actions for the stratum footer.
+    component PrfFooterButton: GenDialogButton {
+        id: footerButton
+        implicitHeight: root.dp(44)
+        Layout.preferredWidth: 1
+        padding: root.dp(8)
+        font.pixelSize: root.sp(13)
+        scale: 1
+        background: Rectangle {
+            radius: root.dp(8)
+            color: footerButton.primary ? root.cGenBlue : footerButton.soft
+                   ? (root.darkMode ? "#38252A" : "#FFF1F0")
+                   : (root.darkMode ? "#28313E" : "#EEF1F5")
+            opacity: !footerButton.enabled ? 0.4 : footerButton.down ? 0.75 : 1
+        }
+        contentItem: Text {
+            text: footerButton.text
+            font: footerButton.font
+            color: footerButton.primary ? "#FFFFFF" : footerButton.soft ? footerButton.accent : root.cText
+            opacity: footerButton.enabled ? 1 : 0.4
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+    }
+
     component GenSearchField: TextField {
         id: genSearch
         Layout.fillWidth: true
@@ -6898,17 +6924,15 @@ Item {
             }
             RowLayout {
                 Layout.fillWidth: true
-                spacing: root.dp(10)
-                GenDialogButton {
+                spacing: root.dp(8)
+                PrfFooterButton {
                     text: "Duplicar"
-                    iconName: "action.copy"
-                    soft: true
                     enabled: root.selectedStratum >= 0
                     onClicked: root.duplicateStratum(root.selectedStratum)
                 }
-                GenDialogButton {
-                    text: "Eliminar estrato"
-                    iconName: "action.delete"
+                PrfFooterButton {
+                    text: "Eliminar"
+                    accent: root.flow ? root.flow.theme.error : "#B4232E"
                     soft: true
                     enabled: root.selectedStratum >= 0 && cortesModel.count > 1
                     onClicked: {
@@ -6917,9 +6941,8 @@ Item {
                         root.requestDeleteStratum(idx)
                     }
                 }
-                GenDialogButton {
+                PrfFooterButton {
                     text: "Listo"
-                    iconName: "action.check"
                     primary: true
                     onClicked: prfStratumPopup.close()
                 }
