@@ -11,7 +11,7 @@ void hide();
 void command(const QJsonObject &);
 void viewport(int x,int y,int width,int height);
 }
-class CesiumNativeView final : public QQuickItem {
+class CesiumNativeView : public QQuickItem {
     Q_OBJECT
     QML_ELEMENT
     Q_PROPERTY(RetroplasmaController *controller READ controller WRITE setController NOTIFY controllerChanged)
