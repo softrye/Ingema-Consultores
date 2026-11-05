@@ -25,7 +25,25 @@ Reversión: deshabilitar primero el hook en Auth Hooks y después ejecutar `docs
 
 ## Fase 2 — selector nativo
 
-Implementación en curso en esta fase: Credential Manager con GetSignInWithGoogleOption; ID token hacia AuthSession; nonce SHA-256 a Google y nonce original a Supabase; finalización común con perfil y MFA. El cliente Android restringido por paquete y certificado requiere creación en Google Cloud. No se ha compilado ni probado el selector en el teléfono.
+Fuentes preparadas: Credential Manager con GetSignInWithGoogleOption; ID token hacia AuthSession; nonce SHA-256 a Google y nonce original a Supabase; finalización común con perfil y MFA. Las rutas genéricas Google en Android también pasan por el selector nativo; no existe una recuperación automática hacia el navegador. Cancelación, tiempo límite y resultados atrasados se separan por generación de autenticación. El callback JNI se entrega en el hilo de Qt.
+
+El puente Java está en `android/pending-google-signin`, fuera de las raíces Java activas. Las nuevas dependencias credentials 1.6.0, credentials-play-services-auth 1.6.0 y googleid 1.2.1 se documentaron para la futura activación, pero **no se añadieron al Gradle activo**. Se retiraron las llamadas nuevas a ese puente de InGeQtActivity. La lógica Google Drive conserva AuthorizationClient y sus permisos propios.
+
+Pruebas interpretadas: `node tests/settings/google_native_result.cjs` ejecuta el control real de callbacks/cancelación Java; `node tests/settings/google_native_session.cjs` comprueba la finalización C++ preparada, con adaptación de sintaxis Qt/Java. Pasan descarte de respuestas antiguas y duplicadas, cancelación, respuestas de sesión incompletas, recuerdo de sesión y bloqueo MFA. También pasan `google-authorization-result.cjs` y `google-drive-export.cjs`. No equivalen a compilar Java/C++ ni ejecutar Credential Manager en Android.
+
+### Bloqueo de configuración: identidad Android ya registrada
+
+Se calculó la huella pública de `.android/debug.keystore` mediante keytool: `DA:46:3A:DC:67:14:48:4B:2F:26:D1:6E:F7:79:57:F9:3F:49:E5:62`. Con confirmación expresa del usuario se intentó crear el cliente Android para `com.ingema.ingeplus` en `helical-autumn-513714-h2`. Google rechazó la operación: «el nombre del paquete de Android y la huella digital ya están en uso». No se creó el cliente ni se borró el existente.
+
+El diagnóstico anterior `docs/google-drive-oauth-export-diagnosis.md` registra esos clientes en `ingeplus-drive` y también la huella release suministrada anteriormente por el usuario: `ED:AD:F4:9C:76:7A:5F:DD:0B:E0:C5:3D:CB:16:F2:1F:B0:BA:4F:F4`. No asumir que debug sea la firma del APK instalado.
+
+Se abrió después el perfil Proyecto Lechemayo, pero Google Cloud lo bloqueó por verificación en dos pasos. El usuario indicó que los dispositivos de verificación no son suyos y pidió dejar esta implementación parcial para poder compilar.
+
+**Estado parcial autorizado:** `src/cpp/googleauthconfiguration.h` fija `INGE_GOOGLE_NATIVE_SIGN_IN_CONFIGURED = 0`. Android sigue utilizando el flujo web PKCE que el usuario ya comprobó. Ambas entradas Google respetan la misma selección, evitando recursión. No se intenta abrir el navegador como reacción a un error nativo: el modo web es la selección explícita de esta versión parcial. El bloqueo servidor de altas Google permanece activo.
+
+La configuración externa pendiente no impide compilar esta selección web. No se ha ejecutado una compilación para confirmarlo, por instrucción del usuario. La parte nativa permanece preparada y desactivada hasta reutilizar una configuración compatible del mismo proyecto para el cliente Android y la audiencia web, conservando Google Drive. La audiencia web que figura temporalmente en GoogleNativeSignIn corresponde al proyecto nuevo y debe revisarse antes de activar la parte nativa.
+
+No se ha compilado, instalado, cerrado sesión en la app ni probado el selector en el teléfono. Los cambios C++/cabecera preparados de esta fase permanecen sin commit: parten de cambios anteriores sin commit y `git apply --cached --3way --check` mostró solapamientos. Ese comando fue solo comprobación; no se reemplazaron archivos ni se dejaron conflictos en el índice. El commit de servidor es independiente. El checkpoint parcial conserva el puente Java desactivado, su configuración y documentación sin incorporar cambios ajenos de AuthSession. Resolver la integración del commit al completar la configuración.
 
 ## Fuentes
 
