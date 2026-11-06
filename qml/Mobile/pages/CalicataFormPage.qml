@@ -10910,65 +10910,37 @@ Item {
                                     }
                                 }
 
-                                // Clasificación sugerida (Web SuggestedClassification): chips
-                                // derivados de los ensayos. Solo escriben al tocarlos.
-                                Rectangle {
+                                ColumnLayout {
                                     id: labReviewPanel
-                                    readonly property var info: mobileSampleCard.info
-                                    readonly property var suggestion: info ? info.suggestion : null
+                                    readonly property var suggestion: mobileSampleCard.info ? mobileSampleCard.info.suggestion : null
                                     Layout.fillWidth: true
-                                    implicitHeight: labReviewColumn.implicitHeight + root.dp(20)
-                                    radius: root.dp(12)
-                                    color: "transparent"
-                                    CalicataSurface {
-                                        dark: root.darkMode
-                                        accent: labReviewPanel.info && labReviewPanel.info.reviewStatus === "revisar" ? root.cGenOrange : root.cGenBlue
-                                        anchors.fill: parent
-                                        radius: parent.radius
-                                        tone: "tinted"
-                                        selected: true
-                                    }
-                                    ColumnLayout {
-                                        id: labReviewColumn
-                                        anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-                                        anchors.margins: root.dp(10)
+                                    spacing: root.dp(6)
+                                    Text { text: "Clasificación sugerida"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
+                                    RowLayout {
+                                        Layout.fillWidth: true
                                         spacing: root.dp(6)
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            Text { Layout.fillWidth: true; text: "Clasificación sugerida"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
-                                            Text {
-                                                text: labReviewPanel.info ? Rules.LAB_REVIEW_LABELS[labReviewPanel.info.reviewStatus] : "Sin datos"
-                                                color: labReviewPanel.info && labReviewPanel.info.reviewStatus === "conforme" ? root.cGenGreen
-                                                       : labReviewPanel.info && labReviewPanel.info.reviewStatus === "revisar" ? root.cGenOrange : root.cMuted
-                                                font.bold: true; font.pixelSize: root.fsLabel
-                                            }
+                                        Text { Layout.preferredWidth: root.dp(64); text: "AASHTO"; color: root.cMuted; font.bold: true; font.pixelSize: root.sp(11) }
+                                        LabSuggestionChip {
+                                            visible: !!(labReviewPanel.suggestion && labReviewPanel.suggestion.aashto)
+                                            code: visible ? labReviewPanel.suggestion.aashto.code : ""
+                                            current: visible && labReviewPanel.suggestion.aashto.current
+                                            onAdopt: root.adoptLabAashto(mobileSampleCard.corteIdx, code)
                                         }
-                                        RowLayout {
+                                        Text { visible: !(labReviewPanel.suggestion && labReviewPanel.suggestion.aashto); text: "Pendiente"; color: root.cMuted; font.pixelSize: root.sp(11) }
+                                        Item { Layout.fillWidth: true }
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: root.dp(6)
+                                        Text { Layout.preferredWidth: root.dp(64); text: "SUCS"; color: root.cMuted; font.bold: true; font.pixelSize: root.sp(11) }
+                                        Flow {
                                             Layout.fillWidth: true
                                             spacing: root.dp(6)
-                                            Text { Layout.preferredWidth: root.dp(56); text: "AASHTO"; color: root.cMuted; font.pixelSize: root.sp(11); font.bold: true }
-                                            LabSuggestionChip {
-                                                visible: !!(labReviewPanel.suggestion && labReviewPanel.suggestion.aashto)
-                                                code: labReviewPanel.suggestion && labReviewPanel.suggestion.aashto ? labReviewPanel.suggestion.aashto.code : ""
-                                                current: !!(labReviewPanel.suggestion && labReviewPanel.suggestion.aashto && labReviewPanel.suggestion.aashto.current)
-                                                onAdopt: root.adoptLabAashto(mobileSampleCard.corteIdx, code)
-                                            }
-                                            Text {
-                                                visible: !(labReviewPanel.suggestion && labReviewPanel.suggestion.aashto)
-                                                text: "Datos insuficientes"; color: root.cMuted; font.pixelSize: root.sp(11)
-                                            }
-                                            Item { Layout.fillWidth: true }
-                                        }
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            spacing: root.dp(6)
-                                            Text { Layout.preferredWidth: root.dp(56); text: "SUCS"; color: root.cMuted; font.pixelSize: root.sp(11); font.bold: true }
                                             Repeater {
                                                 model: labReviewPanel.suggestion ? labReviewPanel.suggestion.sucs : []
                                                 delegate: LabSuggestionChip {
                                                     required property var modelData
-                                                    code: modelData.code
-                                                    current: modelData.current
+                                                    code: modelData.code; current: modelData.current
                                                     onAdopt: root.adoptLabSucs(mobileSampleCard.corteIdx, code)
                                                 }
                                             }
@@ -10977,39 +10949,10 @@ Item {
                                                 text: labReviewPanel.suggestion ? "+" + labReviewPanel.suggestion.hidden : ""
                                                 color: root.cMuted; font.pixelSize: root.sp(11)
                                             }
-                                            Text {
-                                                visible: !!labReviewPanel.suggestion && labReviewPanel.suggestion.sucs.length === 0
-                                                text: "Datos insuficientes"; color: root.cMuted; font.pixelSize: root.sp(11)
-                                            }
-                                            Item { Layout.fillWidth: true }
-                                        }
-                                        Text {
-                                            Layout.fillWidth: true
-                                            visible: text.length > 0
-                                            text: labReviewPanel.suggestion ? labReviewPanel.suggestion.note : ""
-                                            color: root.cMuted; font.pixelSize: root.sp(11)
-                                        }
-                                        Text {
-                                            Layout.fillWidth: true
-                                            visible: text.length > 0
-                                            text: labReviewPanel.suggestion ? labReviewPanel.suggestion.reason : ""
-                                            wrapMode: Text.WordWrap; color: root.cMuted; font.pixelSize: root.sp(11)
-                                        }
-                                        Repeater {
-                                            model: labReviewPanel.info ? labReviewPanel.info.review.observations : []
-                                            delegate: Text {
-                                                required property var modelData
-                                                Layout.fillWidth: true
-                                                wrapMode: Text.WordWrap
-                                                font.pixelSize: root.fsLabel
-                                                color: modelData.severity === "conflict" ? root.cGenOrange : root.cMuted
-                                                text: (modelData.severity === "conflict" ? "⚠ " : "• ") + modelData.message
-                                            }
+                                            Text { visible: !labReviewPanel.suggestion || labReviewPanel.suggestion.sucs.length === 0; text: "Pendiente"; color: root.cMuted; font.pixelSize: root.sp(11) }
                                         }
                                     }
                                 }
-
-
 
                             }
                         }
