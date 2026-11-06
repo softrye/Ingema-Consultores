@@ -10480,53 +10480,6 @@ Item {
                 elide: Text.ElideRight
             }
             StratumEditorTabs { visible: root.labSheetActive; laboratory: true }
-            // Tabs (sticky, fuera del scroll): indicador azul que se desplaza entre pestañas.
-            Item {
-                id: labTabBar
-                Layout.fillWidth: true
-                visible: root.labSheetActive
-                implicitHeight: root.dp(40)
-                readonly property var tabs: [{ key: "lab", label: "Laboratorio" }, { key: "context", label: "Contexto" }, { key: "history", label: "Historial" }]
-                readonly property int current: Math.max(0, ["lab", "context", "history"].indexOf(root.labTab))
-                readonly property real slotWidth: (width - root.dp(6)) / 3
-                CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: height / 2 }
-                Rectangle {
-                    y: root.dp(3)
-                    height: parent.height - root.dp(6)
-                    width: labTabBar.slotWidth
-                    x: root.dp(3) + labTabBar.current * labTabBar.slotWidth
-                    radius: height / 2
-                    color: root.cGenBlue
-                    Behavior on x { NumberAnimation { duration: root.flow ? root.flow.duration(220) : 220; easing.type: Easing.OutCubic } }
-                }
-                Row {
-                    x: root.dp(3)
-                    y: root.dp(3)
-                    Repeater {
-                        model: labTabBar.tabs
-                        delegate: Item {
-                            id: labTabSlot
-                            required property var modelData
-                            required property int index
-                            width: labTabBar.slotWidth
-                            height: labTabBar.height - root.dp(6)
-                            scale: labTabTap.pressed ? 0.97 : 1
-                            Behavior on scale { NumberAnimation { duration: root.flow ? root.flow.instantDuration : 70 } }
-                            Text {
-                                anchors.centerIn: parent
-                                text: labTabSlot.modelData.label
-                                color: labTabBar.current === labTabSlot.index ? "#FFFFFF" : root.cText
-                                font.pixelSize: root.fsLabel
-                                font.bold: labTabBar.current === labTabSlot.index
-                                Behavior on color { ColorAnimation { duration: root.flow ? root.flow.duration(160) : 160 } }
-                            }
-                            TapHandler { id: labTabTap; onTapped: root.setLabTab(labTabSlot.modelData.key) }
-                            Accessible.role: Accessible.PageTab
-                            Accessible.name: labTabSlot.modelData.label
-                        }
-                    }
-                }
-            }
             RowLayout {
                 visible: false
                 GenDialogButton { Layout.fillWidth: false; soft: root.profileMode === "field"; text: "Campo"; onClicked: { if (root.commitPendingField()) root.profileMode = "field" } }
@@ -10805,65 +10758,6 @@ Item {
                                     color: root.cMuted
                                     font.pixelSize: root.sp(11)
                                     wrapMode: Text.WordWrap
-                                }
-                            }
-
-                            // MUESTRA (Campo/Perfil, solo lectura). Contrato Web: "M-XX, intervalo y
-                            // tipo proceden de Campo". Registrar/editar abre el MISMO editor de Perfil.
-                            Rectangle {
-                                id: sampleSummaryCard
-                                readonly property var s: mobileSampleCard.info ? mobileSampleCard.info.sample : null
-                                Layout.fillWidth: true
-                                visible: root.labTab === "lab"
-                                implicitHeight: sampleSummaryRow.implicitHeight + root.dp(24)
-                                Behavior on implicitHeight { enabled: !root._stageSettling; NumberAnimation { duration: root.flow ? root.flow.duration(180) : 180; easing.type: Easing.OutCubic } }
-                                radius: root.dp(14)
-                                color: "transparent"
-                                CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; level: "card" }
-                                RowLayout {
-                                    id: sampleSummaryRow
-                                    anchors.left: parent.left; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                                    anchors.leftMargin: root.dp(12); anchors.rightMargin: root.dp(12)
-                                    spacing: root.dp(12)
-                                    Components.FlowIcon {
-                                        Layout.preferredWidth: root.dp(22)
-                                        Layout.preferredHeight: root.dp(22)
-                                        name: "calgen.attach"
-                                        flow: root.flow
-                                        tintColor: root.cGenViolet
-                                        activeTintColor: root.cGenViolet
-                                        inactiveOpacity: 1
-                                    }
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        spacing: root.dp(2)
-                                        Text { text: "Muestra"; color: root.cMuted; font.pixelSize: root.sp(11); font.bold: true }
-                                        Text {
-                                            Layout.fillWidth: true
-                                            elide: Text.ElideRight
-                                            color: root.cText
-                                            font.pixelSize: root.fsField
-                                            font.bold: true
-                                            text: !sampleSummaryCard.s ? "" : sampleSummaryCard.s.hasSample
-                                                  ? (sampleSummaryCard.s.type || "Muestra") + " · " + sampleSummaryCard.s.reference
-                                                  : "Sin muestra registrada"
-                                        }
-                                        Text {
-                                            Layout.fillWidth: true
-                                            wrapMode: Text.WordWrap
-                                            color: root.cMuted
-                                            font.pixelSize: root.sp(11)
-                                            text: !sampleSummaryCard.s ? ""
-                                                  : (sampleSummaryCard.s.interval.length ? sampleSummaryCard.s.interval
-                                                                                         : "Intervalo del estrato: " + sampleSummaryCard.s.stratumInterval)
-                                                    + (!sampleSummaryCard.s.hasSample ? ""
-                                                       : mobileSampleCard.info.hasTests ? " · ✓ Registrada y ensayada" : " · ✓ Registrada")
-                                        }
-                                    }
-                                    LabActionPill {
-                                        text: sampleSummaryCard.s && sampleSummaryCard.s.hasSample ? "Editar" : "Registrar muestra"
-                                        onClicked: root.labEditSampleInProfile(mobileSampleCard.corteIdx)
-                                    }
                                 }
                             }
 
