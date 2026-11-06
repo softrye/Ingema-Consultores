@@ -25,7 +25,12 @@ Item {
     property color waterColor: "#1F5BD6"
     property color paper: "#FFFFFF"
     property string emptyText: "Sin estratos registrados"
+    // Rules.profileBands(...).bands: intervalo dibujado de cada estrato (un estrato
+    // sin Hasta se ve con espesor visual y borde discontinuo). Vacío = intervalo real.
+    property var bands: []
     signal selected(int index)
+    signal held(int index)
+    property bool reducedMotion: false
 
     readonly property real topPad: 10 * scaleFactor
     readonly property real bottomPad: 22 * scaleFactor
@@ -100,11 +105,14 @@ Item {
             required property string sucs
             required property string material_origin
             required property string _extraJson
-            readonly property real fromDepth: Rules.parseDecimalSafe(de)
-            readonly property real toDepth: Rules.parseDecimalSafe(a)
+            readonly property var band: profile.bands && index < profile.bands.length ? profile.bands[index] : null
+            readonly property bool placeholder: !!band && band.placeholder === true
+            readonly property real fromDepth: band ? band.from : Rules.parseDecimalSafe(de)
+            readonly property real toDepth: band ? band.to : Rules.parseDecimalSafe(a)
             readonly property bool validInterval: isFinite(fromDepth) && isFinite(toDepth)
                 && fromDepth >= 0 && toDepth > fromDepth
             readonly property bool isSelected: index === profile.selectedIndex
+            scale: layerTap.pressed && !layerTap.dragged && !profile.reducedMotion ? 0.985 : 1
             // Solo se recalcula cuando cambian los datos de ESTE estrato.
             readonly property var info: {
                 var evidence = layer._extraJson + layer.sucs + layer.material_origin + layer.index
@@ -147,6 +155,16 @@ Item {
                 border.width: layer.isSelected ? 2 : 0
                 border.color: profile.accent
             }
+            // Sin Hasta: borde discontinuo para que se vea que falta el límite.
+            Row {
+                visible: layer.placeholder
+                anchors.bottom: parent.bottom
+                spacing: 4 * profile.scaleFactor
+                Repeater {
+                    model: Math.max(0, Math.floor(layer.width / (10 * profile.scaleFactor)))
+                    delegate: Rectangle { width: 6 * profile.scaleFactor; height: 2; color: profile.accent }
+                }
+            }
             // Rótulo: "E1 / RA" si cabe; solo "E1" en bandas bajas.
             Rectangle {
                 anchors.centerIn: parent
@@ -158,7 +176,8 @@ Item {
                 Text {
                     id: bandLabel
                     anchors.centerIn: parent
-                    text: layer.height >= layer.labelRoom && layer.info.label.length
+                    text: layer.placeholder ? layer.tag + (layer.height >= layer.labelRoom ? String.fromCharCode(10) + "sin Hasta" : "")
+                          : layer.height >= layer.labelRoom && layer.info.label.length
                           ? layer.tag + String.fromCharCode(10) + layer.info.label : layer.tag
                     horizontalAlignment: Text.AlignHCenter
                     lineHeight: 0.9
@@ -168,8 +187,23 @@ Item {
                 }
             }
             MouseArea {
+                id: layerTap
                 anchors.fill: parent
-                onClicked: profile.selected(layer.index)
+                property bool held: false
+                property bool dragged: false
+                property real startX: 0
+                property real startY: 0
+                pressAndHoldInterval: 380 // same threshold as the global Dock
+                preventStealing: held
+                onPressed: function(mouse) { held=false; dragged=false; startX=mouse.x; startY=mouse.y }
+                onPositionChanged: function(mouse) {
+                    if (!held && Math.abs(mouse.x-startX)+Math.abs(mouse.y-startY)>14*profile.scaleFactor) dragged=true
+                }
+                onPressAndHold: {
+                    if (!dragged) { held=true; profile.held(layer.index) }
+                }
+                onClicked: if (!held && !dragged) profile.selected(layer.index)
+                onCanceled: dragged=true
             }
         }
     }

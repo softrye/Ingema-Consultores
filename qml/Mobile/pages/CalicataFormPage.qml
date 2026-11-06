@@ -820,6 +820,9 @@ Item {
     property url logoProyectoSource: ""
 
     property int _pendingDeleteIdx: -1
+    property string _pendingDeleteLocalKey: ""
+    property string _pendingDeleteRemoteKey: ""
+    property string _pendingDeleteFingerprint: ""
 
     // === Paleta: identidad corporativa INGEMA (FlowColors) ===
     // Valores derivados documentados en docs/INGEMA_DESIGN_SYSTEM_APP_20261006.md.
@@ -1279,6 +1282,14 @@ Item {
                 ? corteToPlainObject(cortesModel.get(selectedStratum)) : null
     }
 
+    function stratumIndexForKeys(localKey,remoteKey) {
+        for (var i=0;i<cortesModel.count;++i) {
+            var row=root.corteToPlainObject(cortesModel.get(i))
+            if ((localKey.length && String(row.local_stratum_id || "")===localKey)
+                || (remoteKey.length && String(row.remote_stratum_id || "")===remoteKey)) return i
+        }
+        return -1
+    }
     function requestDeleteStratum(index) {
         if (index < 0 || index >= cortesModel.count) return
         vFlick.forceActiveFocus()
@@ -1288,7 +1299,11 @@ Item {
             root.removeCorte(index)              // solo avisa: la ficha conserva un estrato
             return
         }
+        var pending=root.corteToPlainObject(cortesModel.get(index))
         root._pendingDeleteIdx = index
+        root._pendingDeleteLocalKey=String(pending.local_stratum_id || "")
+        root._pendingDeleteRemoteKey=String(pending.remote_stratum_id || "")
+        root._pendingDeleteFingerprint=JSON.stringify(pending)
         deleteConfirm.open()
     }
 
@@ -1567,6 +1582,7 @@ Item {
     }
 
     function handleBack() {
+        if (profileActionsPopup.visible) { profileActionsPopup.close(); return true }
         if (prfColorPopup.visible) { prfColorPopup.finish(); return true }
         // Back Android solo cierra superficies/modales temporales. No recorre
         // General/Ubicación/Perfil/Laboratorio/Fotos/Revisión.
@@ -6169,6 +6185,95 @@ Item {
         }
     }
 
+    // Preview Deep Press: the same 380 ms gesture as the global Dock.
+    GenPopup {
+        id: profileActionsPopup
+        preferredWidth: root.dp(340)
+        preferredHeight: root.dp(mode==="confirm" ? 300 : 230)
+        property string mode: "actions"
+        property string localKey: ""
+        property string remoteKey: ""
+        property int direction: 0
+        property string pairSnapshot: ""
+        property string moveDescription: ""
+        readonly property int rowIndex: { var revision=root._cortesRevision; return root.stratumIndexForKeys(localKey,remoteKey) }
+        function openFor(index) {
+            if (index<0 || index>=cortesModel.count || !root.commitPendingField()) return
+            var row=root.corteToPlainObject(cortesModel.get(index))
+            localKey=String(row.local_stratum_id || ""); remoteKey=String(row.remote_stratum_id || "")
+            if (!localKey.length && !remoteKey.length) return
+            mode="actions"; pairSnapshot=""; direction=0
+            root.selectedStratum=index
+            Qt.inputMethod.hide()
+            if (typeof FlowHaptics!=="undefined" && FlowHaptics) FlowHaptics.trigger("medium")
+            open()
+        }
+        function proposeMove(delta) {
+            if (!root.commitPendingField()) return
+            var i=rowIndex, j=i+delta, rows=[]
+            if (i<0 || j<0 || j>=cortesModel.count) return
+            for (var n=0;n<cortesModel.count;++n) rows.push(root.corteToPlainObject(cortesModel.get(n)))
+            var moved=Rules.swapStratumSlotsLikeWeb(rows,i,j)
+            if (!moved) { close(); root.showInfo("Mover estrato", "Completa Hasta en ambos estratos y revisa sus intervalos de muestra antes de intercambiarlos."); return }
+            direction=delta; pairSnapshot=JSON.stringify([rows[i],rows[j]])
+            moveDescription="Intercambiar E"+(i+1)+" con E"+(j+1)+". El límite entre ambos quedará en "+moved[Math.min(i,j)].a+" m. Cada material, espesor y laboratorio viaja con su estrato."
+            mode="confirm"
+        }
+        function confirmMove() {
+            var i=rowIndex, j=i+direction
+            if (i<0 || j<0 || j>=cortesModel.count || !root.commitPendingField()) return
+            var pair=[root.corteToPlainObject(cortesModel.get(i)),root.corteToPlainObject(cortesModel.get(j))]
+            if (JSON.stringify(pair)!==pairSnapshot) { close(); root.showInfo("Mover estrato", "El perfil cambió mientras confirmabas. Vuelve a seleccionar el movimiento."); return }
+            close()
+            if (root._swapCorteContent(i,j)) root.selectedStratum=j
+        }
+        contentItem: ColumnLayout {
+            spacing: root.dp(8)
+            GenDialogHeader {
+                title: profileActionsPopup.mode==="actions" ? "Estrato "+(profileActionsPopup.rowIndex+1) : "Mover estrato"
+                onCloseRequested: profileActionsPopup.close()
+            }
+            GenChoiceRow {
+                Layout.fillWidth: true; visible: profileActionsPopup.mode==="actions"
+                title: "Borrar"; iconName: "action.delete"
+                accent: root.flow ? root.flow.theme.error : "#B4232E"
+                onPicked: { var index=profileActionsPopup.rowIndex; profileActionsPopup.close(); root.requestDeleteStratum(index) }
+            }
+            GenChoiceRow {
+                Layout.fillWidth: true; visible: profileActionsPopup.mode==="actions"
+                title: "Mover"; iconName: "calgen.chevron"
+                enabled: cortesModel.count>1
+                opacity: enabled ? 1 : 0.4
+                onPicked: profileActionsPopup.mode="direction"
+            }
+            GenChoiceRow {
+                Layout.fillWidth: true; visible: profileActionsPopup.mode==="direction"
+                title: "Subir una posición"; iconName: "calgen.chevron"
+                enabled: profileActionsPopup.rowIndex>0
+                opacity: enabled ? 1 : 0.4
+                onPicked: profileActionsPopup.proposeMove(-1)
+            }
+            GenChoiceRow {
+                Layout.fillWidth: true; visible: profileActionsPopup.mode==="direction"
+                title: "Bajar una posición"; iconName: "calgen.chevron"
+                enabled: profileActionsPopup.rowIndex>=0 && profileActionsPopup.rowIndex<cortesModel.count-1
+                opacity: enabled ? 1 : 0.4
+                onPicked: profileActionsPopup.proposeMove(1)
+            }
+            Text {
+                Layout.fillWidth: true; visible: profileActionsPopup.mode==="confirm"
+                text: profileActionsPopup.moveDescription
+                wrapMode: Text.WordWrap; color: root.cText; font.pixelSize: root.fsField
+            }
+            Item { Layout.fillHeight: true }
+            RowLayout {
+                Layout.fillWidth: true; spacing: root.dp(8); visible: profileActionsPopup.mode==="confirm"
+                PrfFooterButton { text: "Cancelar"; onClicked: profileActionsPopup.close() }
+                PrfFooterButton { text: "Mover"; primary: true; onClicked: profileActionsPopup.confirmMove() }
+            }
+        }
+    }
+
     // ===== Perfil: emergentes (mismo GenPopup de General/Ubicación) =====
     GenPopup {
         id: stratumActionsPopup
@@ -6320,6 +6425,8 @@ Item {
                 accent: root.cGenBlue
                 waterColor: root.cGenBlue
                 paper: Qt.rgba(root.cSurface.r, root.cSurface.g, root.cSurface.b, root.darkMode ? 0.18 : 0.40)   // papel del gráfico sobre el vidrio de la tarjeta
+                reducedMotion: root.flowReduceMotion
+                onHeld: function(index) { profileActionsPopup.openFor(index) }
                 onSelected: function(index) {
                     prfGraphPopup.close()
                     root.openStratumEditor(index)
@@ -7689,14 +7796,14 @@ Item {
         "wl","lp","hum2"
     ]
 
-    // Move complete local entities. Cloud synchronization refuses unsupported order changes.
+    // Same as Web: material/laboratory and thickness travel; server UUID slots stay in order.
     function _swapCorteContent(i, j) {
         var rows = []
         for (var n = 0; n < cortesModel.count; ++n) rows.push(corteToPlainObject(cortesModel.get(n)))
-        var moved = Rules.moveStratumEntities(rows, i, j)
-        if (!moved) { showInfo("Mover estrato", "Completa todos los intervalos antes de mover."); return false }
-        cortesModel.clear()
-        for (n = 0; n < moved.length; ++n) cortesModel.append(_normalizeCorte(moved[n]))
+        var moved = Rules.swapStratumSlotsLikeWeb(rows, i, j)
+        if (!moved) { showInfo("Mover estrato", "Completa Hasta en ambos estratos y revisa sus intervalos de muestra antes de intercambiarlos."); return false }
+        cortesModel.set(i, _normalizeCorte(moved[i]))
+        cortesModel.set(j, _normalizeCorte(moved[j]))
         renumerarCortesYIntervalos(true)
         return true
     }
@@ -9286,19 +9393,22 @@ Item {
                     primary: true
                     accent: root.flow ? root.flow.theme.error : "#B4232E"
                     onClicked: {
-                        var idx = root._pendingDeleteIdx
+                        var idx = root.stratumIndexForKeys(root._pendingDeleteLocalKey,root._pendingDeleteRemoteKey)
+                        var unchanged=idx>=0 && JSON.stringify(root.corteToPlainObject(cortesModel.get(idx)))===root._pendingDeleteFingerprint
                         root._pendingDeleteIdx = -1
                         deleteConfirm.close()
-                        if (idx >= 0)
-                            root.removeCorte(idx)
+                        if (unchanged) root.removeCorte(idx)
+                        else root.showInfo("Eliminar estrato", "El estrato cambió o ya no está disponible. Revísalo antes de eliminarlo.")
                     }
                 }
             }
         }
 
         onClosed: {
-            if (root._pendingDeleteIdx >= 0)
-                root._pendingDeleteIdx = -1
+            root._pendingDeleteIdx = -1
+            root._pendingDeleteLocalKey = ""
+            root._pendingDeleteRemoteKey = ""
+            root._pendingDeleteFingerprint = ""
         }
     }
 
@@ -12192,6 +12302,8 @@ Item {
                                 accent: root.cGenBlue
                                 waterColor: root.cGenBlue
                                 paper: Qt.rgba(root.cSurface.r, root.cSurface.g, root.cSurface.b, root.darkMode ? 0.18 : 0.40)   // papel del gráfico sobre el vidrio de la tarjeta
+                                reducedMotion: root.flowReduceMotion
+                                onHeld: function(index) { profileActionsPopup.openFor(index) }
                                 onSelected: function(index) { root.openStratumEditor(index) }
                             }
                         }

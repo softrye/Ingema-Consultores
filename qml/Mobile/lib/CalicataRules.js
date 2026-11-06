@@ -113,6 +113,41 @@ function strataDerived(rows) {
     return {from:from, thickness:thickness, depth:depth, groundwaterDepth:water}
 }
 
+// Web CalicataDetailPanel.applyStratumMove: adjacent material swap, stable server slots.
+function swapStratumSlotsLikeWeb(rows, source, target) {
+    if (!Array.isArray(rows) || Math.floor(source)!==source || Math.floor(target)!==target) return null
+    if (source<0 || target<0 || source>=rows.length || target>=rows.length || Math.abs(source-target)!==1) return null
+    var upper=Math.min(source,target), lower=Math.max(source,target)
+    var from=parseCalicataDepthInput(rows[upper].de), contact=parseCalicataDepthInput(rows[upper].a), bottom=parseCalicataDepthInput(rows[lower].a)
+    if (!from.valid || !contact.valid || !bottom.valid || from.value===null || contact.value===null || bottom.value===null
+        || contact.value<=from.value || bottom.value<=contact.value) return null
+    var lowerFrom=parseCalicataDepthInput(rows[lower].de)
+    if (!lowerFrom.valid || lowerFrom.value!==contact.value) return null
+    var start=Math.round(from.value*100), oldContact=Math.round(contact.value*100), end=Math.round(bottom.value*100)
+    var boundary=start+end-oldContact, copies=JSON.parse(JSON.stringify(rows))
+    function slotKey(key) { return key==="id" || key==="sequence_number" || /^(remote_|local_|_live|lab_cloud_)/.test(key) }
+    function placed(material,slot,oldFrom,newFrom,newTo) {
+        var out=JSON.parse(JSON.stringify(material)), keys=Object.keys(material).concat(Object.keys(slot))
+        keys.forEach(function(key) {
+            if (slotKey(key)) { if (slot[key]===undefined) delete out[key]; else out[key]=JSON.parse(JSON.stringify(slot[key])) }
+        })
+        out.de=(newFrom/100).toFixed(2); out.a=(newTo/100).toFixed(2)
+        for (var i=0;i<2;++i) {
+            var key=i?"muestra_hasta":"muestra_desde", raw=material[key]
+            if (raw===undefined || raw===null || String(raw).trim()==="") continue
+            var sample=parseDecimalSafe(raw)
+            if (!isFinite(sample)) return null
+            var shifted=Math.round(sample*100)-oldFrom+newFrom
+            if (shifted<newFrom || shifted>newTo) return null
+            out[key]=(shifted/100).toFixed(2)
+        }
+        return out
+    }
+    copies[upper]=placed(rows[lower],rows[upper],oldContact,start,boundary)
+    copies[lower]=placed(rows[upper],rows[lower],start,boundary,end)
+    return copies[upper] && copies[lower] ? copies : null
+}
+
 function moveStratumEntities(rows, source, target) {
     if (source < 0 || target < 0 || source >= rows.length || target >= rows.length) return null
     var derived = strataDerived(rows), copies = [], sizes = []
