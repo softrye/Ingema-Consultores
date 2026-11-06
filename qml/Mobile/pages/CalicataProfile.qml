@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import "../lib/CalicataRules.js" as Rules
+import "../kawaii" as Kawaii
 
 // Columna estratigráfica de ingeniería (Perfil > Vista del perfil).
 // Un único eje lineal de profundidad; cada estrato se dibuja en su intervalo
@@ -31,6 +32,8 @@ Item {
     signal selected(int index)
     signal held(int index)
     property bool reducedMotion: false
+    property bool kawaiiCrashAllowed: false
+    property double kawaiiLastInputMs: Date.now()
 
     readonly property real topPad: 10 * scaleFactor
     readonly property real bottomPad: 22 * scaleFactor
@@ -254,5 +257,15 @@ Item {
         font.pixelSize: 13 * profile.scaleFactor
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.WordWrap
+    }
+
+    // Optional AFK cartoon. Draws ABOVE the read-only chart; never edits model rows.
+    Kawaii.KawaiiProfileCrash {
+        allowed: profile.kawaiiCrashAllowed && profile.visible && profile.model.count > 0
+        lastInputMs: profile.kawaiiLastInputMs
+        columnX: profile.columnX
+        columnWidth: profile.columnWidth
+        topPad: profile.topPad
+        plotHeight: profile.plotHeight
     }
 }

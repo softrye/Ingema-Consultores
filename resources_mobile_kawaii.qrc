@@ -7,6 +7,7 @@
         <file alias="pompompurin-dock-sit.png">images/kawaii/pompompurin-dock-sit.png</file>
         <file alias="pompompurin-dock-play.png">images/kawaii/pompompurin-dock-play.png</file>
         <file alias="pompompurin-dock-walk-wave.gif">images/kawaii/pompompurin-dock-walk-wave.gif</file>
+        <file alias="pompompurin-calicata-crash-10s.gif">images/kawaii/pompompurin-calicata-crash-10s.gif</file>
         <file alias="helmet.svg">images/kawaii/helmet.svg</file>
         <file alias="sparkle.svg">images/kawaii/sparkle.svg</file>
     </qresource>

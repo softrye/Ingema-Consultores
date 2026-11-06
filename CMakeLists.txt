@@ -661,6 +661,11 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/renditions/FilesBrowser.qml"
             "${MOBILE_QML_DIR}/renditions/RConfetti.qml"
             "${MOBILE_QML_DIR}/renditions/RenditionsDiagnostics.qml"
+            "${MOBILE_QML_DIR}/kawaii/KawaiiLogic.js"
+            "${MOBILE_QML_DIR}/kawaii/KawaiiMascot.qml"
+            "${MOBILE_QML_DIR}/kawaii/KawaiiLayer.qml"
+            "${MOBILE_QML_DIR}/kawaii/KawaiiDockDecoration.qml"
+            "${MOBILE_QML_DIR}/kawaii/KawaiiProfileCrash.qml"
             "${MOBILE_QML_DIR}/assistant/InGeAssistantSheet.qml"
             "${MOBILE_QML_DIR}/assistant/InGeAssistantController.qml"
         )

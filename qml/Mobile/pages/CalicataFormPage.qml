@@ -35,6 +35,15 @@ Item {
     property bool _coreReviewRetryPending: false
     property bool _derivingLab: false
 
+    // Passive AFK activity tracking for the optional visual-only Kawaii profile gag.
+    property double kawaiiLastInteractionAt: Date.now()
+    onVisibleChanged: kawaiiLastInteractionAt = Date.now()
+    PointHandler {
+        enabled: root.flow && root.flow.appSkin === "ingenieros" && root.flow.extremeMotion
+        target: null
+        onActiveChanged: if (active) root.kawaiiLastInteractionAt = Date.now()
+    }
+
     function setLabEvidence(index, key, value) {
         if(index<0 || index>=cortesModel.count) return
         var extra=JSON.parse(cortesModel.get(index)._extraJson || "{}")
@@ -12303,6 +12312,15 @@ Item {
                                 waterColor: root.cGenBlue
                                 paper: Qt.rgba(root.cSurface.r, root.cSurface.g, root.cSurface.b, root.darkMode ? 0.18 : 0.40)   // papel del gráfico sobre el vidrio de la tarjeta
                                 reducedMotion: root.flowReduceMotion
+                                kawaiiLastInputMs: root.kawaiiLastInteractionAt
+                                kawaiiCrashAllowed: root.visible && !!root.flow
+                                    && root.flow.appSkin === "ingenieros"
+                                    && root.flow.extremeMotion && root.flow.motionAllowed
+                                    && !root.flow.powerSaveMode && !root.flow.bareUi
+                                    && !root.flowReduceMotion && !root._loading
+                                    && !root.labDetailOpen && !root.ubicacionMapOpen
+                                    && !root._stageSettling && !Qt.inputMethod.visible
+                                    && Qt.application.state === Qt.ApplicationActive
                                 onHeld: function(index) { profileActionsPopup.openFor(index) }
                                 onSelected: function(index) { root.openStratumEditor(index) }
                             }
