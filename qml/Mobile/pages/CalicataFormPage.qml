@@ -180,6 +180,7 @@ Item {
     // transiciones de etapa (scrollToSection), lo que dejaba la cabecera genérica "Listo".
     property bool labSheetActive: false
     property string stratumEditorPendingTab: ""
+    property bool stratumEditorSwitching: false
     // Cierre en curso: la ventana anima su salida (Popup.exit) y solo al terminar
     // (onClosed) se limpia el estado. Nunca visible=false directo.
     property bool labDetailClosing: false
@@ -199,7 +200,7 @@ Item {
             stratumSheet.scale = 1
             if (root.stratumEditorPendingTab === "stratum") {
                 root.stratumEditorPendingTab = ""
-                Qt.callLater(function() { root.openStratumEditor(root.selectedStratum) })
+                Qt.callLater(function() { root.openStratumEditor(root.selectedStratum); root.stratumEditorSwitching = false })
             }
         }
     }
@@ -4794,6 +4795,7 @@ Item {
     // (liveCapture=false) sobre el rect final, sin blur animado.
     component GenPopup: Popup {
         id: genPopup
+        property bool suppressTransitions: false
         property real preferredWidth: root.dp(480)
         property real preferredHeight: root.dp(620)
         property real slideY: 0
@@ -4815,6 +4817,7 @@ Item {
         Overlay.modal: GenScrim { popupItem: genPopup }
 
         enter: Transition {
+            enabled: !genPopup.suppressTransitions
             ParallelAnimation {
                 NumberAnimation { target: genPopup; property: "opacity"; from: 0; to: 1; duration: genPopup.openMs; easing.type: Easing.OutCubic }
                 NumberAnimation { target: genPopup; property: "scale"; from: 0.975; to: 1; duration: genPopup.openMs; easing.type: Easing.OutCubic }
@@ -4822,6 +4825,7 @@ Item {
             }
         }
         exit: Transition {
+            enabled: !genPopup.suppressTransitions
             ParallelAnimation {
                 NumberAnimation { target: genPopup; property: "opacity"; to: 0; duration: genPopup.closeMs; easing.type: Easing.InCubic }
                 NumberAnimation { target: genPopup; property: "scale"; to: 0.98; duration: genPopup.closeMs; easing.type: Easing.InCubic }
@@ -6686,11 +6690,13 @@ Item {
                     onTapped: {
                         if (parent.active || !root.commitPendingField()) return
                         if (index === 1) {
+                            root.stratumEditorSwitching = true
                             root.stratumEditorPendingTab = "laboratory"
                             prfStratumPopup.close()
                         } else {
+                            root.stratumEditorSwitching = true
                             root.stratumEditorPendingTab = "stratum"
-                            if (!root.closeLabDetail()) root.stratumEditorPendingTab = ""
+                            if (!root.closeLabDetail()) { root.stratumEditorPendingTab = ""; root.stratumEditorSwitching = false }
                         }
                     }
                 }
@@ -6699,6 +6705,7 @@ Item {
     }
     GenPopup {
         id: prfStratumPopup
+        suppressTransitions: root.stratumEditorSwitching
         preferredWidth: root.dp(560)
         preferredHeight: Math.min(root.dp(760), Math.max(root.dp(180), prfStratumPopup.freeHeight * 0.82))
         onClosed: {
@@ -6706,7 +6713,7 @@ Item {
             root.flushRequested()
             if (root.stratumEditorPendingTab === "laboratory") {
                 root.stratumEditorPendingTab = ""
-                Qt.callLater(function() { root.openLabForStratum(root.selectedStratum) })
+                Qt.callLater(function() { root.openLabForStratum(root.selectedStratum); root.stratumEditorSwitching = false })
             }
         }
         contentItem: ColumnLayout {
@@ -10402,7 +10409,7 @@ Item {
         closePolicy: Popup.NoAutoClose
         transformOrigin: Popup.Center
         enter: Transition {
-            enabled: stratumSheet.floating && !!root.flow && root.flow.motionAllowed
+            enabled: stratumSheet.floating && !root.stratumEditorSwitching && !!root.flow && root.flow.motionAllowed
             ParallelAnimation {
                 NumberAnimation { property: "opacity"; from: 0; to: 1; duration: root.flow ? root.flow.duration(260) : 260; easing.type: Easing.OutCubic }
                 NumberAnimation { property: "scale"; from: stratumSheet.originScale; to: 1; duration: root.flow ? root.flow.duration(420) : 420; easing.type: Easing.OutQuint }
@@ -10411,7 +10418,7 @@ Item {
             }
         }
         exit: Transition {
-            enabled: stratumSheet.floating && !!root.flow && root.flow.motionAllowed
+            enabled: stratumSheet.floating && !root.stratumEditorSwitching && !!root.flow && root.flow.motionAllowed
             ParallelAnimation {
                 NumberAnimation { property: "opacity"; from: 1; to: 0; duration: root.flow ? root.flow.duration(280) : 280; easing.type: Easing.InCubic }
                 NumberAnimation { property: "scale"; from: 1; to: root.labOriginValid ? 0.9 : 0.96; duration: root.flow ? root.flow.duration(300) : 300; easing.type: Easing.InCubic }
