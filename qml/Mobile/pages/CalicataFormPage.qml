@@ -1845,8 +1845,8 @@ Item {
         labOriginY = labOriginValid ? origin.y : 0
         flushRequested()
         selectedStratum = index
-        stageIndex = 3
-        sectionNavCurrent = 5
+        stageIndex = 2
+        sectionNavCurrent = 4
         labTab = "lab"
         dismissInputForNavigation()
         profileMode = "samples"

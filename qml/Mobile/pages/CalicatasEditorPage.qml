@@ -643,6 +643,18 @@ Page {
         actions.push(tool)
         if (information)
             actions.push(information)
+        if (stage === 2) {
+            var labOpen = root.formValue(formLoader.item, "labDetailOpen") === true
+            var hasStrata = (root.formValue(formLoader.item, "visibleStrataCount") || 0) > 0
+            actions.push({id: "profile.laboratory", label: "Laboratorio del estrato", icon: "lab.flask",
+                          command: "calicatas.stratumLab", enabled: hasStrata, priority: 40,
+                          children: [
+                              {id: "profile.lab.tests", label: "Ensayos y clasificación", icon: "lab.flask", command: "calicatas.stratumLab", enabled: hasStrata},
+                              {id: "profile.lab.context", label: "Contexto del estrato", icon: "module.stratigraphy", command: "calicatas.lab.tab:context", visible: labOpen},
+                              {id: "profile.lab.history", label: "Historial", icon: "status.sync", command: "calicatas.lab.history", enabled: hasStrata},
+                              {id: "profile.lab.close", label: "Cerrar laboratorio", icon: "system.back", command: "calicatas.lab.close", visible: labOpen}
+                          ]})
+        }
         if (correctingReview) {
             actions.push({id: "returnReview", label: "Listo, volver a Revisión", icon: "action.check",
                           command: "calicatas.returnReview", priority: 3})
@@ -651,7 +663,7 @@ Page {
         if (stage > 0)
             actions.push({id: "previous", label: "Sección anterior", icon: "system.back",
                           command: "calicatas.previous", priority: 2})
-        if (stage < 5)
+        if (stage < 4)
             actions.push({id: "next", label: "Sección siguiente", icon: "system.forward",
                           command: "calicatas.next", priority: 3})
         else
@@ -768,8 +780,11 @@ Page {
         else if (commandId === "calicatas.earth")
             form._openCurrentCoordinateInEarth()
         else if (commandId === "calicatas.stratumLab") {
-            if (form.selectedStratum >= 0)
-                form.openLabForStratum(form.selectedStratum)
+            var selected = form.selectedStratum >= 0 ? form.selectedStratum : 0
+            if (form.labDetailOpen && form.selectedStratum === selected)
+                form.setLabTab("lab")
+            else
+                form.openLabForStratum(selected)
         }
         // Fotos: tap del Dock = misma fuente única de acciones que tarjeta, hoja y menú.
         else if (commandId === "calicatas.photoCapture")
