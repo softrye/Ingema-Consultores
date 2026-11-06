@@ -11,6 +11,7 @@ Item {
     property real columnWidth: 100
     property real topPad: 0
     property real plotHeight: 100
+    property real uiScale: 1
 
     property bool eventActive: false
     property bool playedThisIdle: false
@@ -111,11 +112,16 @@ Item {
     // The actual profile/level labels remain live underneath this image.
     AnimatedImage {
         id: animation
-        readonly property real targetWidth: Math.min(crash.width * 0.96, 450)
-        x: Math.max(0, crash.columnX - 20)
-        y: Math.max(0, Math.min(crash.height - height, crash.topPad + crash.plotHeight * 0.05))
+        // Keep the entire 10s cartoon near the first stratum, rather than
+        // covering most of the stratigraphic preview, depth ticks and labels.
+        readonly property real targetWidth: Math.min(240 * crash.uiScale,
+            Math.max(140 * crash.uiScale, crash.width * 0.44))
         width: targetWidth
         height: width * 9 / 16
+        x: Math.max(0, Math.min(crash.width - width,
+            crash.columnX + crash.columnWidth * 0.15))
+        y: Math.max(0, Math.min(crash.height - height,
+            crash.topPad + crash.plotHeight * 0.04))
         source: crash.allowed ? "qrc:/images/kawaii/pompompurin-calicata-crash-10s.gif" : ""
         visible: crash.eventActive
         playing: crash.eventActive

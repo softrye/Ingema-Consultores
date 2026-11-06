@@ -267,5 +267,6 @@ Item {
         columnWidth: profile.columnWidth
         topPad: profile.topPad
         plotHeight: profile.plotHeight
+        uiScale: profile.scaleFactor
     }
 }
