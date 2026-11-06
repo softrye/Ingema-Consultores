@@ -9,7 +9,8 @@ Item {
     required property bool allowed
     required property double lastInteractionAt
     property int idleDelayMs: 10000
-    property int repeatDelayMs: 10000
+    // The video lasts 10s: replay immediately while AFK, so starts recur ~every 10s.
+    property int repeatDelayMs: 0
     property bool showing: false
     property bool playbackFailed: false
     property double nextEligibleMs: Date.now() + idleDelayMs

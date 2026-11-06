@@ -29,7 +29,7 @@ assert.ok(visitor.includes('AudioOutput {'));
 assert.ok(visitor.includes('volume: 1.0'));
 assert.ok(visitor.includes('muted: false'));
 assert.ok(visitor.includes('idleDelayMs: 10000'));
-assert.ok(visitor.includes('repeatDelayMs: 10000'));
+assert.ok(visitor.includes('repeatDelayMs: 0'));
 assert.ok(visitor.includes('onLastInteractionAtChanged: cancelVisit()'));
 assert.ok(visitor.includes('playing:') === false, 'one-shot media not an always-playing GIF');
 assert.ok(visitor.includes('mediaStatus === MediaPlayer.EndOfMedia'));
