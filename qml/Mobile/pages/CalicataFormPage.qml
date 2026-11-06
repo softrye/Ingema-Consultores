@@ -4666,10 +4666,11 @@ Item {
         property string detail: ""
         property string iconName: ""
         property bool selected: false
+        property bool compact: false
         property color accent: root.cGenBlue
         property color accentSoft: root.cGenBlueSoft
         signal picked()
-        implicitHeight: Math.max(root.dp(54), genChoiceText.implicitHeight + root.dp(18))
+        implicitHeight: Math.max(root.dp(compact ? 48 : 54), genChoiceText.implicitHeight + root.dp(compact ? 12 : 18))
         radius: root.dp(12)
         color: "transparent"
         Accessible.role: Accessible.RadioButton
@@ -6120,50 +6121,49 @@ Item {
         property string optionIcon: "calgen.code"
         property color accentColor: root.cGenBlue
         property color accentSoftColor: root.cGenBlueSoft
-        preferredHeight: root.dp(56) * options.length + root.dp(150)
-
+        preferredWidth: root.dp(360)
+        preferredHeight: Math.min(root.dp(400), root.dp(50) * Math.min(options.length, 6)
+                                 + optionPickerHeader.implicitHeight + topPadding + bottomPadding + root.dp(8))
+        padding: root.dp(12)
+        function chooseOption(index) {
+            if (!optionPickerPopup.visible || index < 0 || index >= optionPickerPopup.options.length || !root._optionCommit) return false
+            var commit = root._optionCommit
+            root._optionCommit = null // Consume before closing: a second tap cannot write again.
+            root._pendingOptionIndex = index
+            optionPickerPopup.close()
+            commit(index)
+            return true
+        }
+        onAboutToHide: root._optionCommit = null // X / Back / outside only cancel.
+        onOpened: optionPickerList.positionViewAtIndex(root._pendingOptionIndex, ListView.Contain)
         contentItem: ColumnLayout {
-            spacing: root.dp(12)
+            spacing: root.dp(8)
             GenDialogHeader {
+                id: optionPickerHeader
                 title: optionPickerPopup.titleText
                 onCloseRequested: optionPickerPopup.close()
             }
             ListView {
+                id: optionPickerList
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
                 spacing: root.dp(2)
                 boundsBehavior: Flickable.StopAtBounds
                 model: optionPickerPopup.options
+                currentIndex: root._pendingOptionIndex
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                 delegate: GenChoiceRow {
                     required property var modelData
                     required property int index
                     width: ListView.view.width
+                    compact: true
                     title: String(modelData)
                     iconName: index === 0 ? "calgen.clear" : optionPickerPopup.optionIcon
                     accent: optionPickerPopup.accentColor
                     accentSoft: optionPickerPopup.accentSoftColor
                     selected: index === root._pendingOptionIndex
-                    onPicked: root._pendingOptionIndex = index
-                }
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: root.dp(10)
-                GenDialogButton {
-                    text: "Cancelar"
-                    onClicked: optionPickerPopup.close()
-                }
-                GenDialogButton {
-                    text: "Seleccionar"
-                    primary: true
-                    accent: optionPickerPopup.accentColor
-                    onClicked: {
-                        var commit = root._optionCommit
-                        var index = root._pendingOptionIndex
-                        optionPickerPopup.close()
-                        if (commit) commit(index)
-                    }
+                    onPicked: optionPickerPopup.chooseOption(index)
                 }
             }
         }
@@ -6746,7 +6746,7 @@ Item {
                                 // Patrón = proyección del laboratorio (solo lectura).
                                 PrfPickField {
                                     visible: !prfEditorCard.anthropicLike
-                                    label: "Símbolo / patrón (Laboratorio)"
+                                    label: "Símbolo / patrón SUCS (Laboratorio)"
                                     readOnly: true
                                     boxHeight: root.hField
                                     patterns: root.stratumPatternFilesFor(prfEditorCard.s)
@@ -6787,11 +6787,21 @@ Item {
                                         Layout.fillWidth: true
                                         visible: !(prfEditorCard.origin === "Antrópico")
                                         text: (prfEditorCard.projection.sucs || prfEditorCard.projection.aashto)
-                                              ? [prfEditorCard.projection.sucs, prfEditorCard.projection.aashto].filter(function(x) { return !!x }).join(" · ") + " (desde Laboratorio)"
+                                              ? [(prfEditorCard.projection.sucs ? "SUCS: " + prfEditorCard.projection.sucs : ""),
+                                                 (prfEditorCard.projection.aashto ? "AASHTO: " + prfEditorCard.projection.aashto : "")]
+                                                .filter(function(x) { return !!x }).join(" · ") + " (Laboratorio)"
                                               : "Pendiente de laboratorio"
                                         color: root.cMuted
                                         font.pixelSize: root.sp(15)
                                         font.weight: Font.DemiBold
+                                        wrapMode: Text.WordWrap
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        visible: !prfEditorCard.anthropicLike
+                                        text: Rules.labPatternInfo(prfEditorCard.s).detail
+                                        color: root.cMuted
+                                        font.pixelSize: root.fsLabel
                                         wrapMode: Text.WordWrap
                                     }
                                     Text {
@@ -10964,6 +10974,13 @@ Item {
                                                 }
                                             }
                                         }
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: labClassPanel.info ? Rules.labPatternInfo(labClassPanel.info.plain).detail : ""
+                                            color: root.cMuted
+                                            font.pixelSize: root.sp(11)
+                                            wrapMode: Text.WordWrap
+                                        }
                                         RowLayout {
                                             Layout.fillWidth: true
                                             spacing: root.dp(8)
@@ -10987,7 +11004,7 @@ Item {
                                             Layout.fillWidth: true
                                             spacing: root.dp(6)
                                             Repeater {
-                                                model: [{ key: false, label: "SUCS simple" }, { key: true, label: "Clasificación compuesta" }]
+                                                model: [{ key: false, label: "SUCS simple" }, { key: true, label: "SUCS doble" }]
                                                 delegate: PrfSegment {
                                                     required property var modelData
                                                     implicitHeight: root.dp(38)

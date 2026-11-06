@@ -1424,7 +1424,7 @@ function labSuggestion(form, review) {
 function formatSucsProjection(primary, isComposite, secondary) {
     primary = _labCatalog(primary, webSucsCodes); secondary = _labCatalog(secondary, webSucsCodes)
     if (!primary) return ""
-    return isComposite === true && secondary ? primary + " + " + secondary : primary
+    return isComposite === true && secondary && secondary !== primary ? primary + " + " + secondary : primary
 }
 
 // Web sucsSymbols.ts: las mismas teselas 24×24 (SUCS/web, generadas del mismo
@@ -1441,7 +1441,7 @@ function sucsExportSymbolUrl(code) {
 // Web resolveCalicataSucsPattern: una capa por código (compuesto = dos).
 function resolveCalicataSucsPattern(primary, isComposite, secondary) {
     primary = _labCatalog(primary, webSucsCodes); secondary = _labCatalog(secondary, webSucsCodes)
-    var codes = primary ? (isComposite === true && secondary ? [primary, secondary] : [primary]) : []
+    var codes = primary ? (isComposite === true && secondary && secondary !== primary ? [primary, secondary] : [primary]) : []
     return {
         key: codes.length ? "SUCS_" + codes.join("_") : "SUCS_NONE",
         layers: codes.map(function(code, position) { return { id: position + ":" + code, code: code, url: sucsSymbolUrl(code) } }),
@@ -1459,6 +1459,25 @@ function labProjection(plain) {
         sucs: formatSucsProjection(form.primarySucs, form.isComposite, form.secondarySucs),
         pattern: resolveCalicataSucsPattern(form.primarySucs, form.isComposite, form.secondarySucs)
     }
+}
+
+// Read-only explanation: AASHTO is another classification, never a second SUCS texture.
+function labPatternInfo(plain) {
+    var p=labProjection(plain), kind="pending", detail="El patrón requiere un SUCS adoptado en Laboratorio."
+    if (p.primary) {
+        if (p.isComposite && (!p.secondary || p.secondary===p.primary)) {
+            kind="incomplete"
+            detail="SUCS doble incompleto: elige un segundo SUCS distinto en Laboratorio."
+        } else if (p.pattern.layers.length===2) {
+            kind="double"
+            detail="Patrón SUCS doble: "+p.sucs+" (dos tramas)."
+        } else {
+            kind="simple"
+            detail="Patrón SUCS simple: "+p.primary+" (una trama)."
+        }
+    }
+    if (p.aashto) detail+=" AASHTO "+p.aashto+" es otro sistema y no añade una trama SUCS."
+    return {kind:kind,detail:detail}
 }
 
 // Datos de ensayo (sin clasificación): etapa del estrato en Laboratorio.
