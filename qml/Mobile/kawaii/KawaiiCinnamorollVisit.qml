@@ -8,11 +8,13 @@ Item {
     id: visitor
     required property bool allowed
     required property double lastInteractionAt
-    property int idleDelayMs: 10000
-    // The video lasts 10s: replay immediately while AFK, so starts recur ~every 10s.
-    property int repeatDelayMs: 0
+    // One complete MP4 at most once per 20-second window (start-to-start).
+    // Its 10-second playback is followed by approximately 10 seconds quiet.
+    property int idleDelayMs: 20000
+    property int repeatDelayMs: 20000
     property bool showing: false
     property bool playbackFailed: false
+    property double lastStartedMs: -1
     property double nextEligibleMs: Date.now() + idleDelayMs
 
     anchors.fill: parent
@@ -23,17 +25,26 @@ Item {
     function endVisit() {
         movie.stop()
         showing = false
-        nextEligibleMs = Date.now() + repeatDelayMs
+        // Never restart immediately if MediaPlayer finishes or stops early.
+        nextEligibleMs = Math.max(nextEligibleMs, lastStartedMs + repeatDelayMs)
     }
     function cancelVisit() {
         if (showing) endVisit()
-        nextEligibleMs = Date.now() + idleDelayMs
+        // User activity, switching themes or reopening the app resets idle.
+        // Preserve the last-played cooldown across such transitions.
+        nextEligibleMs = Math.max(Date.now() + idleDelayMs,
+                                  lastStartedMs + repeatDelayMs)
     }
     function tryStart() {
         if (!allowed || showing || playbackFailed)
             return
-        if (Date.now() - lastInteractionAt < idleDelayMs
-                || Date.now() < nextEligibleMs) return
+        var now = Date.now()
+        if (now - lastInteractionAt < idleDelayMs
+                || now < nextEligibleMs
+                || (lastStartedMs >= 0 && now - lastStartedMs < repeatDelayMs))
+            return
+        lastStartedMs = now
+        nextEligibleMs = now + repeatDelayMs
         showing = true
         console.info("INGE_KAWAII_CINNAMOROLL_START mp4=original sound=true")
         movie.stop()
@@ -42,7 +53,7 @@ Item {
     }
     onAllowedChanged: {
         if (!allowed) cancelVisit()
-        else nextEligibleMs = Date.now() + idleDelayMs
+        else nextEligibleMs = Math.max(nextEligibleMs, Date.now() + idleDelayMs)
     }
     onLastInteractionAtChanged: cancelVisit()
 
