@@ -10380,14 +10380,10 @@ Item {
     Popup {
         id: stratumSheet
         parent: Overlay.overlay
-        // Laboratorio: ventana flotante grande sobre la lista (márgenes, radio 26,
-        // máx. 780 dp, termina sobre la zona del Dock). Profundidad (Perfil) conserva
-        // su hoja completa.
+        // Laboratorio comparte la geometría del editor de estratos, incluido el IME.
         readonly property bool floating: root.labSheetActive
-        readonly property real dockInset: root.dp(92)
-        readonly property real sideMargin: root.dp(14)
-        readonly property real baseX: Math.round((parent.width - width) / 2)
-        readonly property real baseY: Math.max(root.dp(22), parent.height - dockInset - height)
+        readonly property real baseX: prfStratumPopup.x
+        readonly property real baseY: prfStratumPopup.baseY
         property real offsetX: 0
         property real offsetY: 0
         // Desde/hacia la tarjeta de origen; sin tarjeta: centro con 24 dp de subida.
@@ -10396,8 +10392,8 @@ Item {
         readonly property real originScale: root.labOriginValid ? 0.86 : 0.94
         x: floating ? baseX + offsetX : 0
         y: floating ? baseY + offsetY : 0
-        width: floating ? Math.min(parent.width - 2 * sideMargin, root.dp(780)) : parent.width
-        height: floating ? Math.max(root.dp(320), Math.min(parent.height * 0.88, parent.height - root.dp(22) - dockInset)) : parent.height
+        width: floating ? prfStratumPopup.width : parent.width
+        height: floating ? prfStratumPopup.height : parent.height
         // No modal en Laboratorio: el velo propio (labDetailScrim) cubre solo la página,
         // así el Dock del shell sigue visible y contextual (calicatas/.../lab-detail).
         modal: !floating
