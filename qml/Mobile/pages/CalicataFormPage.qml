@@ -10767,6 +10767,37 @@ Item {
                                 visible: root.labTab === "lab" && !!mobileSampleCard.info
                                 spacing: root.dp(10)
 
+                                // Laboratorio / procedencia: filas compactas; lo guardado se muestra tal cual.
+                                Text { text: "Laboratorio / procedencia"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text { Layout.fillWidth: true; text: "Fecha de ensayo"; color: root.cMuted; font.pixelSize: root.fsLabel }
+                                    BoundTextField {
+                                        Layout.preferredWidth: root.dp(150)
+                                        placeholderText: "AAAA-MM-DD"
+                                        modelText: String(mobileSampleCard.labExtra().test_date || "")
+                                        onCommit: function(t) { if(String(t).length && !/^\d{4}-\d{2}-\d{2}$/.test(String(t))){root.showInfo("Fecha de ensayo","Usa AAAA-MM-DD.");return false}; root.setWebLabMeta(mobileSampleCard.corteIdx,"test_date",t); return true }
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text { Layout.fillWidth: true; text: "Laboratorio"; color: root.cMuted; font.pixelSize: root.fsLabel }
+                                    BoundTextField {
+                                        Layout.preferredWidth: root.dp(190)
+                                        placeholderText: "Nombre"
+                                        modelText: String(mobileSampleCard.labExtra().laboratory_source || "")
+                                        onCommit: function(t) { root.setWebLabMeta(mobileSampleCard.corteIdx,"laboratory_source",String(t).trim().replace(/\s+/g," ")); return true }
+                                    }
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.WordWrap
+                                    color: mobileSampleCard.info && !mobileSampleCard.info.validation.valid ? (root.flow ? root.flow.theme.error : "#B4232E") : root.cMuted
+                                    text: !mobileSampleCard.info ? ""
+                                          : !mobileSampleCard.info.validation.valid ? "Revisar ensayos: " + mobileSampleCard.info.validation.errors.join(" · ")
+                                          : "Contrato de laboratorio válido."
+                                }
+
                                 Text { text: "Granulometría (MTC E107) · % que pasa"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
                                 GridLayout {
                                     Layout.fillWidth: true
@@ -11021,60 +11052,6 @@ Item {
                                             font.pixelSize: root.sp(11)
                                             wrapMode: Text.WordWrap
                                         }
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            spacing: root.dp(8)
-                                            PrfPickField {
-                                                Layout.fillWidth: true
-                                                label: labClassPanel.form && labClassPanel.form.isComposite ? "1.º SUCS principal" : "SUCS principal"
-                                                valueText: labClassPanel.form ? labClassPanel.form.primarySucs : ""
-                                                placeholder: "Sin seleccionar"
-                                                onActivated: root.pickLabClassification(mobileSampleCard.corteIdx, "primary_sucs")
-                                            }
-                                            PrfPickField {
-                                                Layout.fillWidth: true
-                                                visible: !!labClassPanel.form && labClassPanel.form.isComposite
-                                                label: "2.º Segundo SUCS"
-                                                valueText: labClassPanel.form ? labClassPanel.form.secondarySucs : ""
-                                                placeholder: "Sin seleccionar"
-                                                onActivated: root.pickLabClassification(mobileSampleCard.corteIdx, "secondary_sucs")
-                                            }
-                                        }
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            spacing: root.dp(6)
-                                            Repeater {
-                                                model: [{ key: false, label: "SUCS simple" }, { key: true, label: "SUCS doble" }]
-                                                delegate: PrfSegment {
-                                                    required property var modelData
-                                                    implicitHeight: root.dp(38)
-                                                    label: modelData.label
-                                                    isOn: !!(labClassPanel.form && labClassPanel.form.isComposite) === modelData.key
-                                                    accent: root.cGenBlue
-                                                    accentSoft: root.cGenBlueSoft
-                                                    onPicked: root.setLabClassification(mobileSampleCard.corteIdx, "is_composite", modelData.key)
-                                                }
-                                            }
-                                        }
-                                        PrfPickField {
-                                            Layout.fillWidth: true
-                                            label: "AASHTO"
-                                            valueText: labClassPanel.form ? labClassPanel.form.aashto : ""
-                                            placeholder: "Sin seleccionar"
-                                            onActivated: root.pickLabClassification(mobileSampleCard.corteIdx, "aashto")
-                                        }
-                                        Repeater {
-                                            model: ["primarySucs", "secondarySucs"]
-                                            delegate: Text {
-                                                required property var modelData
-                                                Layout.fillWidth: true
-                                                visible: text.length > 0
-                                                text: String(labClassPanel.fieldErrors[modelData] || "")
-                                                color: root.flow ? root.flow.theme.error : "#B4232E"
-                                                font.pixelSize: root.sp(11)
-                                                wrapMode: Text.WordWrap
-                                            }
-                                        }
                                         Text {
                                             Layout.fillWidth: true
                                             wrapMode: Text.WordWrap
@@ -11086,36 +11063,7 @@ Item {
                                     }
                                 }
 
-                                // Laboratorio / procedencia: filas compactas; lo guardado se muestra tal cual.
-                                Text { text: "Laboratorio / procedencia"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    Text { Layout.fillWidth: true; text: "Fecha de ensayo"; color: root.cMuted; font.pixelSize: root.fsLabel }
-                                    BoundTextField {
-                                        Layout.preferredWidth: root.dp(150)
-                                        placeholderText: "AAAA-MM-DD"
-                                        modelText: String(mobileSampleCard.labExtra().test_date || "")
-                                        onCommit: function(t) { if(String(t).length && !/^\d{4}-\d{2}-\d{2}$/.test(String(t))){root.showInfo("Fecha de ensayo","Usa AAAA-MM-DD.");return false}; root.setWebLabMeta(mobileSampleCard.corteIdx,"test_date",t); return true }
-                                    }
-                                }
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    Text { Layout.fillWidth: true; text: "Laboratorio"; color: root.cMuted; font.pixelSize: root.fsLabel }
-                                    BoundTextField {
-                                        Layout.preferredWidth: root.dp(190)
-                                        placeholderText: "Nombre"
-                                        modelText: String(mobileSampleCard.labExtra().laboratory_source || "")
-                                        onCommit: function(t) { root.setWebLabMeta(mobileSampleCard.corteIdx,"laboratory_source",String(t).trim().replace(/\s+/g," ")); return true }
-                                    }
-                                }
-                                Text {
-                                    Layout.fillWidth: true
-                                    wrapMode: Text.WordWrap
-                                    color: mobileSampleCard.info && !mobileSampleCard.info.validation.valid ? (root.flow ? root.flow.theme.error : "#B4232E") : root.cMuted
-                                    text: !mobileSampleCard.info ? ""
-                                          : !mobileSampleCard.info.validation.valid ? "Revisar ensayos: " + mobileSampleCard.info.validation.errors.join(" · ")
-                                          : "Contrato de laboratorio válido."
-                                }
+
                             }
                         }
                     }
