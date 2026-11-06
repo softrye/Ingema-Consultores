@@ -4138,8 +4138,8 @@ Item {
         property string code: ""
         property bool current: false
         signal adopt()
-        implicitWidth: chipText.implicitWidth + root.dp(18)
-        implicitHeight: root.dp(30)
+        implicitWidth: Math.max(root.dp(48), chipText.implicitWidth + root.dp(24))
+        implicitHeight: root.dp(44)
         Layout.preferredWidth: implicitWidth
         Layout.preferredHeight: implicitHeight
         radius: root.dp(8)
@@ -10773,6 +10773,50 @@ Item {
                                 visible: root.labTab === "lab" && !!mobileSampleCard.info
                                 spacing: root.dp(10)
 
+                                ColumnLayout {
+                                    id: labReviewPanel
+                                    readonly property var suggestion: mobileSampleCard.info ? mobileSampleCard.info.suggestion : null
+                                    Layout.fillWidth: true
+                                    spacing: root.dp(6)
+                                    Text { text: "Clasificación sugerida"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: root.dp(6)
+                                        Text { Layout.preferredWidth: root.dp(64); text: "AASHTO"; color: root.cMuted; font.bold: true; font.pixelSize: root.sp(11) }
+                                        LabSuggestionChip {
+                                            visible: !!(labReviewPanel.suggestion && labReviewPanel.suggestion.aashto)
+                                            code: visible ? labReviewPanel.suggestion.aashto.code : ""
+                                            current: visible && labReviewPanel.suggestion.aashto.current
+                                            onAdopt: root.adoptLabAashto(mobileSampleCard.corteIdx, code)
+                                        }
+                                        Text { visible: !(labReviewPanel.suggestion && labReviewPanel.suggestion.aashto); text: "Pendiente"; color: root.cMuted; font.pixelSize: root.sp(11) }
+                                        Item { Layout.fillWidth: true }
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: root.dp(6)
+                                        Text { Layout.preferredWidth: root.dp(64); text: "SUCS"; color: root.cMuted; font.bold: true; font.pixelSize: root.sp(11) }
+                                        Flow {
+                                            Layout.fillWidth: true
+                                            spacing: root.dp(6)
+                                            Repeater {
+                                                model: labReviewPanel.suggestion ? labReviewPanel.suggestion.sucs : []
+                                                delegate: LabSuggestionChip {
+                                                    required property var modelData
+                                                    code: modelData.code; current: modelData.current
+                                                    onAdopt: root.adoptLabSucs(mobileSampleCard.corteIdx, code)
+                                                }
+                                            }
+                                            Text {
+                                                visible: !!labReviewPanel.suggestion && labReviewPanel.suggestion.hidden > 0
+                                                text: labReviewPanel.suggestion ? "+" + labReviewPanel.suggestion.hidden : ""
+                                                color: root.cMuted; font.pixelSize: root.sp(11)
+                                            }
+                                            Text { visible: !labReviewPanel.suggestion || labReviewPanel.suggestion.sucs.length === 0; text: "Pendiente"; color: root.cMuted; font.pixelSize: root.sp(11) }
+                                        }
+                                    }
+                                }
+
                                 // Laboratorio / procedencia: filas compactas; lo guardado se muestra tal cual.
                                 Text { text: "Laboratorio / procedencia"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
                                 RowLayout {
@@ -10910,49 +10954,7 @@ Item {
                                     }
                                 }
 
-                                ColumnLayout {
-                                    id: labReviewPanel
-                                    readonly property var suggestion: mobileSampleCard.info ? mobileSampleCard.info.suggestion : null
-                                    Layout.fillWidth: true
-                                    spacing: root.dp(6)
-                                    Text { text: "Clasificación sugerida"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: root.dp(6)
-                                        Text { Layout.preferredWidth: root.dp(64); text: "AASHTO"; color: root.cMuted; font.bold: true; font.pixelSize: root.sp(11) }
-                                        LabSuggestionChip {
-                                            visible: !!(labReviewPanel.suggestion && labReviewPanel.suggestion.aashto)
-                                            code: visible ? labReviewPanel.suggestion.aashto.code : ""
-                                            current: visible && labReviewPanel.suggestion.aashto.current
-                                            onAdopt: root.adoptLabAashto(mobileSampleCard.corteIdx, code)
-                                        }
-                                        Text { visible: !(labReviewPanel.suggestion && labReviewPanel.suggestion.aashto); text: "Pendiente"; color: root.cMuted; font.pixelSize: root.sp(11) }
-                                        Item { Layout.fillWidth: true }
-                                    }
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: root.dp(6)
-                                        Text { Layout.preferredWidth: root.dp(64); text: "SUCS"; color: root.cMuted; font.bold: true; font.pixelSize: root.sp(11) }
-                                        Flow {
-                                            Layout.fillWidth: true
-                                            spacing: root.dp(6)
-                                            Repeater {
-                                                model: labReviewPanel.suggestion ? labReviewPanel.suggestion.sucs : []
-                                                delegate: LabSuggestionChip {
-                                                    required property var modelData
-                                                    code: modelData.code; current: modelData.current
-                                                    onAdopt: root.adoptLabSucs(mobileSampleCard.corteIdx, code)
-                                                }
-                                            }
-                                            Text {
-                                                visible: !!labReviewPanel.suggestion && labReviewPanel.suggestion.hidden > 0
-                                                text: labReviewPanel.suggestion ? "+" + labReviewPanel.suggestion.hidden : ""
-                                                color: root.cMuted; font.pixelSize: root.sp(11)
-                                            }
-                                            Text { visible: !labReviewPanel.suggestion || labReviewPanel.suggestion.sucs.length === 0; text: "Pendiente"; color: root.cMuted; font.pixelSize: root.sp(11) }
-                                        }
-                                    }
-                                }
+
 
                             }
                         }
