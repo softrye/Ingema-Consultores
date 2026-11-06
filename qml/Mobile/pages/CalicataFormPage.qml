@@ -12151,8 +12151,8 @@ Item {
                 GridLayout {
                     id: prfLayout
                     Layout.fillWidth: true
-                    readonly property int mode: width >= root.dp(1180) ? 3 : width >= root.dp(760) ? 2 : 1
-                    readonly property real sideWidth: mode === 3 ? root.dp(300) : root.dp(290)
+                    readonly property int mode: width >= root.dp(1180) ? 3 : width >= root.dp(640) ? 2 : 1
+                    readonly property real sideWidth: mode === 3 ? root.dp(300) : Math.min(root.dp(290), width * 0.38)
                     columns: mode === 3 ? 3 : mode === 2 ? 2 : 1
                     columnSpacing: root.dp(16)
                     rowSpacing: root.dp(16)
