@@ -1775,7 +1775,7 @@ Item {
         case 2: return stageIndex === 1
         case 3: return stageIndex === 2 && profileMode === "depth"
         case 4: return stageIndex === 2
-        case 5: return false
+        case 5: return root.labSheetActive && root.profileMode === "samples"
         case 7: return stageIndex === 3
         case 8: return stageIndex === 4 && reviewNotesEditing
         }
