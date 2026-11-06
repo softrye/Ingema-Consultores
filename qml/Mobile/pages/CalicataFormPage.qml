@@ -6995,6 +6995,17 @@ Item {
                                         accent: root.cGenViolet
                                         resizable: true
 
+                                        PrfPickField {
+                                            label: "Tipo de muestra"
+                                            sideLabel: false
+                                            valueText: ["", "MA · Alterada", "MS · En saco", "MI · Inalterada", "MW · Agua", "Otro"][root._sampleTypeIndex(prfEditorCard.s.tipo_muestra)]
+                                            onActivated: root._openOptionPicker("Tipo de muestra",
+                                                ["Sin seleccionar", "MA · Alterada", "MS · En saco", "MI · Inalterada", "MW · Agua", "Otro"],
+                                                root._sampleTypeIndex(prfEditorCard.s.tipo_muestra), "calgen.attach",
+                                                root.cGenBlue, root.cGenBlueSoft,
+                                                function(i) { root.setLabSampleType(prfEditorCard.idx, i > 0 ? root.sampleTypeItems[i] : "") })
+                                        }
+
                                         BoundTextField {
                                             Layout.fillWidth: true
                                             visible: String(prfEditorCard.s.tipo_muestra || "") === "Otro"
