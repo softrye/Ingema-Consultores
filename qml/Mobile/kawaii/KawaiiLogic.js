@@ -7,6 +7,6 @@ function stepGuest(previous, deltaMs, enabled, safe) {
     if (s.remainingMs>0) { s.remainingMs=Math.max(0,s.remainingMs-dt); return s }
     s.elapsedMs+=dt
     var wait=s.serial===0?25000:45000+(s.serial*7919%30000)
-    if (s.elapsedMs>=wait) { s.elapsedMs=0; s.remainingMs=8000; ++s.serial }
+    if (s.elapsedMs>=wait) { s.elapsedMs=0; s.remainingMs=12000; ++s.serial }
     return s
 }

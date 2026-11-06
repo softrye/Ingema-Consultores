@@ -6,6 +6,7 @@
         <file alias="cinnamoroll-engineer.png">images/kawaii/cinnamoroll-engineer.png</file>
         <file alias="pompompurin-dock-sit.png">images/kawaii/pompompurin-dock-sit.png</file>
         <file alias="pompompurin-dock-play.png">images/kawaii/pompompurin-dock-play.png</file>
+        <file alias="pompompurin-dock-walk-wave.gif">images/kawaii/pompompurin-dock-walk-wave.gif</file>
         <file alias="helmet.svg">images/kawaii/helmet.svg</file>
         <file alias="sparkle.svg">images/kawaii/sparkle.svg</file>
     </qresource>
