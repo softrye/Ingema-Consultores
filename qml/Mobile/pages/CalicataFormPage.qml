@@ -6820,19 +6820,6 @@ Item {
                                             root._markDirtySoon()
                                         }
                                     }
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: "Observaciones del estrato"
-                                        color: root.cMuted
-                                        font.pixelSize: root.fsLabel
-                                    }
-                                    PrfTextArea {
-                                        label: "Observaciones del estrato"
-                                        modelText: String(prfEditorCard.s.observations || "")
-                                        maxLength: 0   // sin límite
-                                        placeholder: "Observaciones del estrato…"
-                                        onCommit: function(t) { root.setStratumExtra(prfEditorCard.idx, "observations", t) }
-                                    }
                                     PrfPickField {
                                         visible: !(prfEditorCard.origin === "Antrópico")
                                         sideLabel: prfEditorCard.sideLabels
