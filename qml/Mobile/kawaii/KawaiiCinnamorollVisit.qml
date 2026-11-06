@@ -8,13 +8,12 @@ Item {
     id: visitor
     required property bool allowed
     required property double lastInteractionAt
-    // One complete MP4 at most once per 20-second window (start-to-start).
-    // Its 10-second playback is followed by approximately 10 seconds quiet.
+    // One visit per genuine idle session, NOT a 20s repeating loop.
+    // A new visit requires fresh user input followed by 20 seconds idle.
     property int idleDelayMs: 20000
-    property int repeatDelayMs: 20000
+    property bool playedThisIdle: false
     property bool showing: false
     property bool playbackFailed: false
-    property double lastStartedMs: -1
     property double nextEligibleMs: Date.now() + idleDelayMs
 
     anchors.fill: parent
@@ -25,26 +24,21 @@ Item {
     function endVisit() {
         movie.stop()
         showing = false
-        // Never restart immediately if MediaPlayer finishes or stops early.
-        nextEligibleMs = Math.max(nextEligibleMs, lastStartedMs + repeatDelayMs)
+        // Keep playedThisIdle latched after the clip ends or is interrupted.
     }
     function cancelVisit() {
         if (showing) endVisit()
-        // User activity, switching themes or reopening the app resets idle.
-        // Preserve the last-played cooldown across such transitions.
-        nextEligibleMs = Math.max(Date.now() + idleDelayMs,
-                                  lastStartedMs + repeatDelayMs)
+        nextEligibleMs = Date.now() + idleDelayMs
     }
     function tryStart() {
-        if (!allowed || showing || playbackFailed)
+        if (!allowed || showing || playbackFailed || playedThisIdle)
             return
         var now = Date.now()
-        if (now - lastInteractionAt < idleDelayMs
-                || now < nextEligibleMs
-                || (lastStartedMs >= 0 && now - lastStartedMs < repeatDelayMs))
+        if (now - lastInteractionAt < idleDelayMs || now < nextEligibleMs)
             return
-        lastStartedMs = now
-        nextEligibleMs = now + repeatDelayMs
+        // Latch BEFORE starting the player: EndOfMedia or an error cannot
+        // re-arm the AFK surprise without another real user interaction.
+        playedThisIdle = true
         showing = true
         console.info("INGE_KAWAII_CINNAMOROLL_START mp4=original sound=true")
         movie.stop()
@@ -52,15 +46,24 @@ Item {
         movie.play()
     }
     onAllowedChanged: {
-        if (!allowed) cancelVisit()
-        else nextEligibleMs = Math.max(nextEligibleMs, Date.now() + idleDelayMs)
+        // Losing focus, opening a menu or thermal pressure must not re-arm.
+        if (!allowed) {
+            if (showing) endVisit()
+        } else {
+            nextEligibleMs = Math.max(nextEligibleMs, Date.now() + idleDelayMs)
+        }
     }
-    onLastInteractionAtChanged: cancelVisit()
+    onLastInteractionAtChanged: {
+        // Only an actual input timestamp from Home starts a fresh idle session.
+        playedThisIdle = false
+        cancelVisit()
+    }
 
     Timer {
         interval: 250
         repeat: true
         running: visitor.allowed && !visitor.showing && !visitor.playbackFailed
+            && !visitor.playedThisIdle
         onTriggered: visitor.tryStart()
     }
     // Abort a stalled codec instead of leaving a forever-visible overlay.
