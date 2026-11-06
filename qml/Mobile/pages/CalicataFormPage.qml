@@ -179,6 +179,7 @@ Item {
     // Detalle de Laboratorio abierto: estado propio. profileMode lo reinician las
     // transiciones de etapa (scrollToSection), lo que dejaba la cabecera genérica "Listo".
     property bool labSheetActive: false
+    property string stratumEditorPendingTab: ""
     // Cierre en curso: la ventana anima su salida (Popup.exit) y solo al terminar
     // (onClosed) se limpia el estado. Nunca visible=false directo.
     property bool labDetailClosing: false
@@ -196,6 +197,10 @@ Item {
             // siguiente apertura (Profundidad de Perfil abre sin transición).
             stratumSheet.opacity = 1
             stratumSheet.scale = 1
+            if (root.stratumEditorPendingTab === "stratum") {
+                root.stratumEditorPendingTab = ""
+                Qt.callLater(function() { root.openStratumEditor(root.selectedStratum) })
+            }
         }
     }
     // Única vía de cierre del detalle (flecha, Back del sistema, toque fuera).
@@ -6652,6 +6657,46 @@ Item {
         root.selectStratum(index, "field")
         if (root.selectedStratum === index && !prfStratumPopup.opened) prfStratumPopup.open()
     }
+    component StratumEditorTabs: RowLayout {
+        id: editorTabs
+        property bool laboratory: false
+        Layout.fillWidth: true
+        spacing: root.dp(8)
+        Repeater {
+            model: [{icon: root.iconStrataName, name: "Estrato"}, {icon: root.iconSamplesName, name: "Laboratorio"}]
+            delegate: Rectangle {
+                required property var modelData
+                required property int index
+                Layout.fillWidth: true
+                Layout.preferredHeight: root.dp(42)
+                radius: root.dp(10)
+                readonly property bool active: (index === 1) === editorTabs.laboratory
+                color: active ? root.cGenBlue : root.cSurface
+                border.color: root.cBorder
+                Accessible.role: Accessible.PageTab
+                Accessible.name: modelData.name
+                Components.FlowIcon {
+                    anchors.centerIn: parent
+                    width: root.dp(22); height: width
+                    name: modelData.icon; flow: root.flow
+                    tintColor: parent.active ? "white" : root.cText
+                    activeTintColor: tintColor
+                }
+                TapHandler {
+                    onTapped: {
+                        if (parent.active || !root.commitPendingField()) return
+                        if (index === 1) {
+                            root.stratumEditorPendingTab = "laboratory"
+                            prfStratumPopup.close()
+                        } else {
+                            root.stratumEditorPendingTab = "stratum"
+                            if (!root.closeLabDetail()) root.stratumEditorPendingTab = ""
+                        }
+                    }
+                }
+            }
+        }
+    }
     GenPopup {
         id: prfStratumPopup
         preferredWidth: root.dp(560)
@@ -6659,6 +6704,10 @@ Item {
         onClosed: {
             root.commitPendingField()
             root.flushRequested()
+            if (root.stratumEditorPendingTab === "laboratory") {
+                root.stratumEditorPendingTab = ""
+                Qt.callLater(function() { root.openLabForStratum(root.selectedStratum) })
+            }
         }
         contentItem: ColumnLayout {
             spacing: root.dp(10)
@@ -6669,6 +6718,7 @@ Item {
                                       : ""
                 onCloseRequested: prfStratumPopup.close()
             }
+            StratumEditorTabs { laboratory: false }
             Flickable {
                 id: prfStratumFlick
                 Layout.fillWidth: true
@@ -10433,6 +10483,7 @@ Item {
                 font.pixelSize: root.fsLabel
                 elide: Text.ElideRight
             }
+            StratumEditorTabs { visible: root.labSheetActive; laboratory: true }
             // Tabs (sticky, fuera del scroll): indicador azul que se desplaza entre pestañas.
             Item {
                 id: labTabBar
