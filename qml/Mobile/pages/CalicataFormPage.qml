@@ -12218,17 +12218,7 @@ Item {
                         PrfCard {
                             title: "Estratigrafía"
                             iconName: root.iconStrataName
-                            headerTrailing: [
-                                GenRoundIconButton {
-                                    width: root.dp(36)
-                                    height: root.dp(36)
-                                    iconName: "documents.open"
-                                    enabled: cortesModel.count > 0
-                                    opacity: enabled ? 1 : 0.35
-                                    Accessible.name: "Ampliar vista del perfil"
-                                    onClicked: prfGraphPopup.open()
-                                }
-                            ]
+
 
                             Flow {
                                 Layout.fillWidth: true
@@ -12293,9 +12283,14 @@ Item {
 
                             // Columna estratigráfica: cada estrato añadido (Perfil o Dock «Agregar estrato»)
                             // aparece directamente aquí; la escala se ajusta sola a la profundidad total.
+                            RowLayout {
+                                visible: cortesModel.count > 0
+                                Layout.fillWidth: true
+                                spacing: root.dp(8)
                             CalicataProfile {
                                 visible: cortesModel.count > 0
                                 Layout.fillWidth: true
+                                Layout.minimumWidth: root.dp(150)
                                 Layout.preferredHeight: root.dp(prfLayout.mode === 1 ? 360 : 460)
                                 model: cortesModel
                                 bandInfo: root.stratumBandInfo
@@ -12323,6 +12318,35 @@ Item {
                                     && Qt.application.state === Qt.ApplicationActive
                                 onHeld: function(index) { profileActionsPopup.openFor(index) }
                                 onSelected: function(index) { root.openStratumEditor(index) }
+                            }
+                            ListView {
+                                Layout.preferredWidth: root.dp(112)
+                                Layout.preferredHeight: root.dp(prfLayout.mode === 1 ? 360 : 460)
+                                clip: true
+                                spacing: root.dp(6)
+                                model: cortesModel
+                                delegate: Rectangle {
+                                    required property int index
+                                    width: ListView.view.width
+                                    height: root.dp(52)
+                                    radius: root.dp(10)
+                                    color: root.selectedStratum === index ? root.cGenBlue : root.cSurface
+                                    border.color: root.cBorder
+                                    Text {
+                                        anchors.centerIn: parent
+                                        width: parent.width - root.dp(10)
+                                        horizontalAlignment: Text.AlignHCenter
+                                        text: "E" + (index + 1) + "  ›\n" + String(cortesModel.get(index).de || "0.00") + " – " + String(cortesModel.get(index).a || "…") + " m"
+                                        color: root.selectedStratum === index ? "white" : root.cText
+                                        font.pixelSize: root.sp(11)
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: root.openStratumEditor(index)
+                                        onPressAndHold: profileActionsPopup.openFor(index)
+                                    }
+                                }
+                            }
                             }
                         }
                     }
