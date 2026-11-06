@@ -10800,72 +10800,73 @@ Item {
                                     Layout.fillWidth: true
                                     wrapMode: Text.WordWrap
                                     color: mobileSampleCard.info && !mobileSampleCard.info.validation.valid ? (root.flow ? root.flow.theme.error : "#B4232E") : root.cMuted
-                                    text: !mobileSampleCard.info ? ""
-                                          : !mobileSampleCard.info.validation.valid ? "Revisar ensayos: " + mobileSampleCard.info.validation.errors.join(" · ")
-                                          : "Contrato de laboratorio válido."
+                                    visible: !!mobileSampleCard.info && !mobileSampleCard.info.validation.valid
+                                    text: visible ? "Revisar ensayos: " + mobileSampleCard.info.validation.errors.join(" · ") : ""
                                 }
 
-                                Text { text: "Granulometría (MTC E107) · % que pasa"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
                                 GridLayout {
                                     Layout.fillWidth: true
-                                    columns: 1
+                                    columns: 2
                                     columnSpacing: root.dp(8)
                                     rowSpacing: root.dp(8)
-
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        Text { Layout.fillWidth: true; text: "Máx. · tamaño máx."; color: root.cMuted; font.pixelSize: root.fsLabel }
+                                    PrfLabeledInput {
+                                        label: "Máximo"
                                         BoundTextField {
-                                            Layout.preferredWidth: root.dp(104); numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
-                                            placeholderText: "0–100"; modelText: String(gmax === undefined || gmax === null ? "" : gmax)
+                                            Layout.fillWidth: true
+                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
+                                            placeholderText: "% que pasa"
+                                            modelText: { var value = gmax; return value === undefined || value === null ? "" : String(value) }
                                             onCommit: function(t) { return root.commitWebLabPercent(mobileSampleCard.corteIdx, "gmax", t) }
                                         }
-                                        Text { text: "%"; color: root.cMuted; font.pixelSize: root.fsLabel }
                                     }
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        Text { Layout.fillWidth: true; text: "Nº 4 · 4.75 mm"; color: root.cMuted; font.pixelSize: root.fsLabel }
+                                    PrfLabeledInput {
+                                        label: "N.º 4"
                                         BoundTextField {
-                                            Layout.preferredWidth: root.dp(104); numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
-                                            placeholderText: "0–100"; modelText: String(JSON.parse(_extraJson || "{}").passing_no4 === undefined ? "" : JSON.parse(_extraJson || "{}").passing_no4)
+                                            Layout.fillWidth: true
+                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
+                                            placeholderText: "% que pasa"
+                                            modelText: { var value = mobileSampleCard.labExtra().passing_no4; return value === undefined || value === null ? "" : String(value) }
                                             onCommit: function(t) { return root.commitWebLabPercent(mobileSampleCard.corteIdx, "passing_no4", t) }
                                         }
-                                        Text { text: "%"; color: root.cMuted; font.pixelSize: root.fsLabel }
                                     }
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        Text { Layout.fillWidth: true; text: "Nº 10 · 2.00 mm"; color: root.cMuted; font.pixelSize: root.fsLabel }
+                                    PrfLabeledInput {
+                                        label: "N.º 10"
                                         BoundTextField {
-                                            Layout.preferredWidth: root.dp(104); numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
-                                            placeholderText: "0–100"; modelText: String(g2 === undefined || g2 === null ? "" : g2)
+                                            Layout.fillWidth: true
+                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
+                                            placeholderText: "% que pasa"
+                                            modelText: { var value = g2; return value === undefined || value === null ? "" : String(value) }
                                             onCommit: function(t) { return root.commitWebLabPercent(mobileSampleCard.corteIdx, "g2", t) }
                                         }
-                                        Text { text: "%"; color: root.cMuted; font.pixelSize: root.fsLabel }
                                     }
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        Text { Layout.fillWidth: true; text: "Nº 40 · 0.425 mm"; color: root.cMuted; font.pixelSize: root.fsLabel }
+                                    PrfLabeledInput {
+                                        label: "N.º 40"
                                         BoundTextField {
-                                            Layout.preferredWidth: root.dp(104); numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
-                                            placeholderText: "0–100"; modelText: String(g04 === undefined || g04 === null ? "" : g04)
+                                            Layout.fillWidth: true
+                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
+                                            placeholderText: "% que pasa"
+                                            modelText: { var value = g04; return value === undefined || value === null ? "" : String(value) }
                                             onCommit: function(t) { return root.commitWebLabPercent(mobileSampleCard.corteIdx, "g04", t) }
                                         }
-                                        Text { text: "%"; color: root.cMuted; font.pixelSize: root.fsLabel }
                                     }
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        Text { Layout.fillWidth: true; text: "Nº 200 · 0.075 mm"; color: root.cMuted; font.pixelSize: root.fsLabel }
+                                    PrfLabeledInput {
+                                        label: "N.º 200"
                                         BoundTextField {
-                                            Layout.preferredWidth: root.dp(104); numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
-                                            placeholderText: "0–100"; modelText: String(g008 === undefined || g008 === null ? "" : g008)
+                                            Layout.fillWidth: true
+                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
+                                            placeholderText: "% que pasa"
+                                            modelText: { var value = g008; return value === undefined || value === null ? "" : String(value) }
                                             onCommit: function(t) { return root.commitWebLabPercent(mobileSampleCard.corteIdx, "g008", t) }
                                         }
-                                        Text { text: "%"; color: root.cMuted; font.pixelSize: root.fsLabel }
                                     }
                                 }
 
                                 // Plasticidad (MTC E110 / E111): WL y LP enteros, como Web.
-                                Text { text: "Plasticidad (MTC E110 / E111)"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
+                                RowLayout {
+                                    spacing: root.dp(6)
+                                    Image { source: "qrc:/images/calicata/lab-beaker.svg"; Layout.preferredWidth: root.dp(20); Layout.preferredHeight: root.dp(20); fillMode: Image.PreserveAspectFit }
+                                    Text { text: "Plasticidad"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
+                                }
                                 GridLayout {
                                     Layout.fillWidth: true
                                     columns: 1

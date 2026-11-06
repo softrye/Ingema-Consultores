@@ -1,4 +1,7 @@
 <RCC>
+    <qresource prefix="/images/calicata">
+        <file alias="lab-beaker.svg">images/calicata/lab-beaker.svg</file>
+    </qresource>
     <qresource prefix="/images">
         <file alias="ICONO_LOGO_MTC.jpeg">images/ICONO_LOGO_MTC.jpeg</file>
         <file alias="app_logo_company.png">images/app_logo_company.png</file>
