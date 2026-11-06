@@ -1,0 +1,55 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const assert = require('node:assert/strict');
+const root = path.resolve(__dirname, '..', '..');
+const read = relative => fs.readFileSync(path.join(root, relative), 'utf8').replace(/\r\n/g, '\n');
+const cmake = read('CMakeLists.txt');
+const home = read('qml/Mobile/HomeScreen.qml');
+const visitor = read('qml/Mobile/kawaii/KawaiiCinnamorollVisit.qml');
+const frag = read('qml/Mobile/shaders/kawaii_chroma.frag');
+const source = 'images/kawaii/cinnamoroll-knock-clean-10s.mp4';
+const expectedHash = '449f8be37e480f248cffec5e59d09814019df1e5a7ce1f40d1495004605cc9e1';
+
+assert.ok(cmake.includes('/kawaii/KawaiiCinnamorollVisit.qml'));
+assert.ok(cmake.includes('/shaders/kawaii_chroma.frag'));
+assert.ok(cmake.includes('qt_add_resources(AppCalicatasMobile "inge_kawaii_cinnamoroll_mp4"'));
+assert.ok(cmake.includes('if(EXISTS "${INGE_KAWAII_CINNAMOROLL_VIDEO}")'));
+assert.ok(home.includes('Kawaii.KawaiiCinnamorollVisit'));
+assert.ok(home.includes('home.kawaiiLastInteractionAt = Date.now()'));
+assert.ok(home.includes('halloweenController.safe'));
+assert.match(visitor, /import QtMultimedia/);
+assert.match(visitor, /MediaPlayer\s*\{/);
+assert.match(visitor, /VideoOutput\s*\{/);
+assert.match(visitor, /ShaderEffectSource\s*\{/);
+assert.match(visitor, /ShaderEffect\s*\{/);
+assert.ok(visitor.includes('cinnamoroll-knock-clean-10s.mp4'));
+assert.ok(visitor.includes('kawaii_chroma.frag.qsb'));
+assert.ok(visitor.includes('AudioOutput {'));
+assert.ok(visitor.includes('volume: 1.0'));
+assert.ok(visitor.includes('muted: false'));
+assert.ok(visitor.includes('idleDelayMs: 10000'));
+assert.ok(visitor.includes('repeatDelayMs: 10000'));
+assert.ok(visitor.includes('onLastInteractionAtChanged: cancelVisit()'));
+assert.ok(visitor.includes('playing:') === false, 'one-shot media not an always-playing GIF');
+assert.ok(visitor.includes('mediaStatus === MediaPlayer.EndOfMedia'));
+assert.ok(visitor.includes('playbackFailed = true'));
+assert.match(frag, /sampler2D source/);
+assert.match(frag, /smoothstep/);
+assert.match(frag, /fragColor = vec4\(rgb \* alpha, alpha\)/);
+const installer = read('scripts/install_cinnamoroll_video.ps1');
+assert.ok(installer.includes('Get-FileHash'));
+assert.ok(installer.includes('Reconfigure CMake'));
+assert.ok(installer.includes(expectedHash.toUpperCase()));
+
+const asset = path.join(root, source);
+if (fs.existsSync(asset)) {
+    const bytes = fs.readFileSync(asset);
+    assert.equal(bytes.length, 3996670);
+    assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), expectedHash);
+    console.log('PASS: MP4 installed, identical original Gemini audio/video bytes.');
+} else {
+    console.log('PENDING_MEDIA: original video must be copied to '+source+' (no re-encoding).');
+    if (process.argv.includes('--require-media')) process.exitCode = 2;
+}
+console.log('PASS: Cinnamoroll visitor scheduler, original sound player, shader and safety wiring');
