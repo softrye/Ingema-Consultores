@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<RCC>
+    <!-- Only AppCalicatasMobile includes this QRC; resources.qrc is Desktop-only. -->
+    <qresource prefix="/images/kawaii">
+        <file alias="pompompurin-engineer.png">images/kawaii/pompompurin-engineer.png</file>
+        <file alias="cinnamoroll-engineer.png">images/kawaii/cinnamoroll-engineer.png</file>
+        <file alias="pompompurin-dock-sit.png">images/kawaii/pompompurin-dock-sit.png</file>
+        <file alias="pompompurin-dock-play.png">images/kawaii/pompompurin-dock-play.png</file>
+        <file alias="helmet.svg">images/kawaii/helmet.svg</file>
+        <file alias="sparkle.svg">images/kawaii/sparkle.svg</file>
+    </qresource>
+</RCC>

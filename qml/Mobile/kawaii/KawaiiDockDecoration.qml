@@ -9,14 +9,16 @@ Item {
     visible: active
     KawaiiMascot {
         active: decor.active; frame: 0; tilePixels: 96
-        width: 34*decor.u; height: width
-        x: -4*decor.u; y: -18*decor.u
+        width: 44*decor.u; height: width
+        x: -5*decor.u; y: -28*decor.u
+        opacity: 0.92
     }
     KawaiiMascot {
         active: decor.active; frame: 1; tilePixels: 96
-        width: 38*decor.u; height: width
-        x: parent.width-width+4*decor.u
-        y: decor.vertical ? parent.height-height+8*decor.u : -20*decor.u
+        width: 46*decor.u; height: width
+        x: parent.width-width+5*decor.u
+        y: decor.vertical ? parent.height-height+8*decor.u : -30*decor.u
+        opacity: 0.92
     }
     KawaiiMascot {
         id: guest

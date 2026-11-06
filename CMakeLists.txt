@@ -258,6 +258,7 @@ if(INGE_BUILD_MOBILE)
         find_package(Qt6 REQUIRED COMPONENTS QuickDialogs2)
     endif()
     set(INGE_MOBILE_CALICATAS_QRC "${INGE_PROJECT_ROOT}/resources_mobile_calicatas.qrc")
+    set(INGE_MOBILE_KAWAII_QRC "${INGE_PROJECT_ROOT}/resources_mobile_kawaii.qrc")
 
     set(MOBILE_SOURCES
         "${INGE_PROJECT_ROOT}/main_mobile.cpp"
@@ -274,6 +275,7 @@ if(INGE_BUILD_MOBILE)
         "${INGE_PROJECT_ROOT}/src/core/InGeCoreSkill.h"
         ${INGE_MOBILE_BRAND_QRC}
         ${INGE_MOBILE_CALICATAS_QRC}
+        ${INGE_MOBILE_KAWAII_QRC}
 
         # AUTH compartido con Desktop
         "${INGE_PROJECT_ROOT}/appcontext.h"
