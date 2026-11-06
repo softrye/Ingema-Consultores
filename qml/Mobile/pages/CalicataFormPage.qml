@@ -200,7 +200,10 @@ Item {
             stratumSheet.scale = 1
             if (root.stratumEditorPendingTab === "stratum") {
                 root.stratumEditorPendingTab = ""
-                Qt.callLater(function() { root.openStratumEditor(root.selectedStratum); root.stratumEditorSwitching = false })
+                Qt.callLater(function() {
+                    if (!prfStratumPopup.opened) root.openStratumEditor(root.selectedStratum)
+                    root.stratumEditorSwitching = false
+                })
             }
         }
     }
@@ -6691,8 +6694,8 @@ Item {
                         if (parent.active || !root.commitPendingField()) return
                         if (index === 1) {
                             root.stratumEditorSwitching = true
-                            root.stratumEditorPendingTab = "laboratory"
-                            prfStratumPopup.close()
+                            root.openLabForStratum(root.selectedStratum)
+                            Qt.callLater(function() { root.stratumEditorSwitching = false })
                         } else {
                             root.stratumEditorSwitching = true
                             root.stratumEditorPendingTab = "stratum"
@@ -6711,10 +6714,6 @@ Item {
         onClosed: {
             root.commitPendingField()
             root.flushRequested()
-            if (root.stratumEditorPendingTab === "laboratory") {
-                root.stratumEditorPendingTab = ""
-                Qt.callLater(function() { root.openLabForStratum(root.selectedStratum); root.stratumEditorSwitching = false })
-            }
         }
         contentItem: ColumnLayout {
             spacing: root.dp(10)
@@ -12470,7 +12469,7 @@ Item {
         anchors.fill: parent
         z: 900
         color: "#000000"
-        opacity: root.labSheetActive && !root.labDetailClosing ? (root.darkMode ? 0.42 : 0.26) : 0
+        opacity: root.labSheetActive && !root.labDetailClosing && !prfStratumPopup.visible ? (root.darkMode ? 0.42 : 0.26) : 0
         visible: opacity > 0.001
         Behavior on opacity { NumberAnimation { duration: root.flow ? root.flow.duration(220) : 220; easing.type: Easing.OutCubic } }
         LabDetailScrimBlocker {
