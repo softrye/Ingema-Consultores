@@ -3647,7 +3647,7 @@ Item {
         default property alias sectionContent: sectionBody.data
         visible: root.sectionVisible(sectionNumber)
         // Cambio de etapa: la etapa nueva entra con un fundido corto (antes era instantáneo).
-        onVisibleChanged: if (visible && root.flowMotionEnabled) stageFadeIn.restart()
+        onVisibleChanged: if (visible && root.flowMotionEnabled && !(sectionNumber === 5 && root.labSheetActive)) stageFadeIn.restart()
         NumberAnimation { id: stageFadeIn; target: sectionCard; property: "opacity"; from: 0; to: 1; duration: 220; easing.type: Easing.OutCubic }
         width: parent ? parent.width : 0
         implicitHeight: sectionLayout.implicitHeight + root.dp(12) + 2 * sectionCard.panelPadding
@@ -10408,7 +10408,7 @@ Item {
         closePolicy: Popup.NoAutoClose
         transformOrigin: Popup.Center
         enter: Transition {
-            enabled: stratumSheet.floating && !root.stratumEditorSwitching && !!root.flow && root.flow.motionAllowed
+            enabled: stratumSheet.floating && !prfStratumPopup.visible && !root.stratumEditorSwitching && !!root.flow && root.flow.motionAllowed
             ParallelAnimation {
                 NumberAnimation { property: "opacity"; from: 0; to: 1; duration: root.flow ? root.flow.duration(260) : 260; easing.type: Easing.OutCubic }
                 NumberAnimation { property: "scale"; from: stratumSheet.originScale; to: 1; duration: root.flow ? root.flow.duration(420) : 420; easing.type: Easing.OutQuint }
@@ -10417,7 +10417,7 @@ Item {
             }
         }
         exit: Transition {
-            enabled: stratumSheet.floating && !root.stratumEditorSwitching && !!root.flow && root.flow.motionAllowed
+            enabled: stratumSheet.floating && !prfStratumPopup.visible && !root.stratumEditorSwitching && !!root.flow && root.flow.motionAllowed
             ParallelAnimation {
                 NumberAnimation { property: "opacity"; from: 1; to: 0; duration: root.flow ? root.flow.duration(280) : 280; easing.type: Easing.InCubic }
                 NumberAnimation { property: "scale"; from: 1; to: root.labOriginValid ? 0.9 : 0.96; duration: root.flow ? root.flow.duration(300) : 300; easing.type: Easing.InCubic }
