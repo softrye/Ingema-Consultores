@@ -1661,7 +1661,6 @@ Item {
         { n: 1, label: "Datos generales", shortLabel: "General", icon: root.iconGeneralName },
         { n: 2, label: "Ubicación", shortLabel: "Ubicación", icon: root.iconLocationName },
         { n: 4, label: "Perfil estratigráfico", shortLabel: "Perfil", icon: root.iconStrataName },
-        { n: 5, label: "Muestras / Laboratorio", shortLabel: "Laboratorio", icon: root.iconSamplesName },
         { n: 7, label: "Fotografías", shortLabel: "Fotos", icon: root.iconPhotosName },
         { n: 9, label: "Revisión final", shortLabel: "Revisión", icon: root.iconNotesName }
     ]
@@ -1757,7 +1756,8 @@ Item {
     function sectionPosition(number) {
         if (number === 3) return 2
         if (number === 6) return 0
-        if (number === 8) return 5
+        if (number === 5) return 2
+        if (number === 8) return 4
         for (var i = 0; i < sectionNavigation.length; ++i)
             if (sectionNavigation[i].n === number) return i
         return -1
@@ -1770,9 +1770,9 @@ Item {
         case 2: return stageIndex === 1
         case 3: return stageIndex === 2 && profileMode === "depth"
         case 4: return stageIndex === 2
-        case 5: return stageIndex === 3
-        case 7: return stageIndex === 4
-        case 8: return stageIndex === 5 && reviewNotesEditing
+        case 5: return false
+        case 7: return stageIndex === 3
+        case 8: return stageIndex === 4 && reviewNotesEditing
         }
         return false
     }
@@ -1825,7 +1825,7 @@ Item {
             reviewMessage = ""
             reviewIssues = []
         }
-        if (stageIndex === 5) reviewRefresh.restart()
+        if (stageIndex === 4) reviewRefresh.restart()
     }
     Timer {
         id: reviewRefresh
@@ -1925,13 +1925,9 @@ Item {
         if (position === 2) {
             profileMode = sectionNumber === 3 ? "depth" : "overview"
             if (profileMode === "depth") stratumSheet.open()
-        } else if (position === 3) {
-            profileMode = "overview"
-            if (selectedStratum < 0 && cortesModel.count)
-                selectedStratum = 0
         }
 
-        if (position === 5) reviewForExport()
+        if (position === 4) reviewForExport()
         scrollToTop()
     }
 
@@ -8154,12 +8150,11 @@ Item {
         if (!importedDocId.length || importedDocId !== root._navigationDocId) {
             root._navigationDocId = importedDocId
             var savedStage = Number(view.stage || 0)
-            if (Number(view.stageSchema || 0) >= 2) {
-                stageIndex = Math.max(0, Math.min(5, savedStage))
+            if (Number(view.stageSchema || 0) === 2) {
+                // La etapa de laboratorio retirada vuelve a Perfil; fotos y revisión conservan su destino.
+                stageIndex = savedStage === 3 ? 2 : Math.max(0, Math.min(4, savedStage > 3 ? savedStage - 1 : savedStage))
             } else {
-                // Migración de documentos guardados con el flujo anterior de 5 etapas:
-                // 0 General, 1 Ubicación, 2 Perfil, 3 Fotos, 4 Revisión.
-                stageIndex = savedStage === 3 ? 4 : (savedStage === 4 ? 5 : Math.max(0, Math.min(2, savedStage)))
+                stageIndex = Math.max(0, Math.min(4, savedStage))
             }
             sectionNavCurrent = sectionNavigation[stageIndex].n
             selectedStratum = Math.min(Number(view.selectedStratum === undefined ? -1 : view.selectedStratum), cortesModel.count - 1)
@@ -8187,7 +8182,7 @@ Item {
             if (!doc || !doc.applyingCloudState) root._markDirty()
         }
         setDirty(doc ? !!doc.dirty : false)
-        if (stageIndex === 5) reviewRefresh.restart()
+        if (stageIndex === 4) reviewRefresh.restart()
         // Live: lo cargado (local, hydrate o revalidación) es la línea base; cargar no emite.
         liveTxDebounce.stop()
         root._livePendingState = null
@@ -8285,7 +8280,7 @@ Item {
         return {
             header: h,
             uiState: Object.assign({}, (doc ? (doc.uiState || {}) : {}), {
-                calicatasView: { stageSchema: 2, stage: stageIndex, selectedStratum: selectedStratum,
+                calicatasView: { stageSchema: 3, stage: stageIndex, selectedStratum: selectedStratum,
                                  photoCategory: activePhotoCategory,
                                  validation: { reviewed: reviewRequested, issues: reviewIssues } }
             }),
@@ -12403,222 +12398,9 @@ Item {
                 }
             }
 
-            MobileStageBody {
-                id: mobileLaboratoryOverview
-                glassPanel: false   // compone sus propias superficies primarias
-                sectionNumber: 5
-                sectionTitle: "Muestras / Laboratorio"
-                sectionSubtitle: "Ensayos y clasificación por estrato"
-
-                // Laboratorio (preview final): estado vacío o lista de estratos con
-                // Perfil / Campo separado de Laboratorio.
-                readonly property var labInfos: root.labInfosAll
-                readonly property int labCount: {
-                    var n = 0
-                    for (var i = 0; i < labInfos.length; ++i) if (labInfos[i] && (labInfos[i].hasSample || labInfos[i].hasTests)) ++n
-                    return n
-                }
-
-                // Estado vacío (0 estratos): sin estratos no hay muestras ni ensayos.
-                // Con estratos y sin ensayos se muestran las tarjetas ("Sin ensayo registrado").
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    visible: cortesModel.count === 0
-                    spacing: root.dp(12)
-                    Item { Layout.preferredHeight: root.dp(12) }
-                    Rectangle {
-                        Layout.alignment: Qt.AlignHCenter
-                        Layout.preferredWidth: root.dp(116)
-                        Layout.preferredHeight: root.dp(116)
-                        radius: width / 2
-                        color: "transparent"
-                        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: "tinted" }
-                        Components.FlowIcon {
-                            anchors.centerIn: parent
-                            width: root.dp(54)
-                            height: root.dp(54)
-                            name: root.iconSamplesName
-                            flow: root.flow
-                            tintColor: root.cGenBlue
-                            activeTintColor: root.cGenBlue
-                            inactiveOpacity: 1.0
-                        }
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        horizontalAlignment: Text.AlignHCenter
-                        text: "Aún no hay estratos\npara laboratorio"
-                        color: root.cText
-                        font.bold: true
-                        font.pixelSize: root.sp(20)
-                        wrapMode: Text.WordWrap
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        horizontalAlignment: Text.AlignHCenter
-                        text: "Primero agrega al menos un estrato en Perfil para registrar muestras y ensayos."
-                        color: root.cMuted
-                        font.pixelSize: root.fsLabel
-                        wrapMode: Text.WordWrap
-                    }
-                    PrfToolButton {
-                        Layout.alignment: Qt.AlignHCenter
-                        primaryTone: true
-                        iconName: root.iconStrataName
-                        text: "Ir a Perfil"
-                        onClicked: root.labGoProfile()
-                    }
-                    Item { Layout.preferredHeight: root.dp(12) }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    visible: cortesModel.count > 0
-                    text: "Estratos y muestras"
-                    color: root.cText
-                    font.bold: true
-                    font.pixelSize: root.fsField
-                }
-
-                Repeater {
-                    model: cortesModel
-                    delegate: Rectangle {
-                        id: labCard
-                        property int corteIdx: index
-                        readonly property var info: corteIdx < mobileLaboratoryOverview.labInfos.length ? mobileLaboratoryOverview.labInfos[corteIdx] : null
-                        readonly property string kind: root.labKindChip(info)
-                        visible: !!info
-                        Layout.fillWidth: true
-                        implicitHeight: labCardColumn.implicitHeight + root.dp(24)
-                        radius: root.dp(16)
-                        color: "transparent"
-                        CalicataSurface {
-                            dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
-                            anchors.fill: parent
-                            radius: parent.radius
-                            level: "card"
-                            pressed: labCardTap.pressed
-                            selected: root.labDetailOpen && root.selectedStratum === corteIdx
-                        }
-                        border.width: 0
-                        border.color: root.cBorder
-                        Accessible.role: Accessible.Button
-                        Accessible.name: "Estrato " + (corteIdx + 1) + ", laboratorio " + (info ? info.stageLabel : "")
-                        Rectangle {
-                            anchors.left: parent.left
-                            anchors.top: parent.top
-                            anchors.bottom: parent.bottom
-                            anchors.margins: root.dp(10)
-                            width: root.dp(3)
-                            radius: width / 2
-                            color: root.labStageColor(labCard.info ? labCard.info.stage : "", false)
-                        }
-                        scale: labCardTap.pressed ? 0.985 : 1.0
-                        Behavior on scale { NumberAnimation { duration: root.flow ? root.flow.instantDuration : 70; easing.type: Easing.OutQuad } }
-                        TapHandler { id: labCardTap; onTapped: root.openLabForStratum(labCard.corteIdx, labCard) }
-                        ColumnLayout {
-                            id: labCardColumn
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            anchors.leftMargin: root.dp(22)
-                            anchors.rightMargin: root.dp(12)
-                            anchors.topMargin: root.dp(12)
-                            spacing: root.dp(6)
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: root.dp(8)
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: "Estrato " + (labCard.corteIdx + 1) + " · " + String(de || "—") + " – " + String(a || "—") + " m"
-                                    color: root.cText
-                                    font.bold: true
-                                    font.pixelSize: root.fsField
-                                    elide: Text.ElideRight
-                                }
-                                Rectangle {
-                                    visible: labCard.kind.length > 0
-                                    Layout.preferredWidth: kindText.implicitWidth + root.dp(16)
-                                    Layout.preferredHeight: root.dp(22)
-                                    radius: height / 2
-                                    color: labCard.kind === "RA" ? root.cGenOrangeSoft : labCard.kind === "ROCA" ? (root.darkMode ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(1, 1, 1, 0.62))
-                                         : labCard.kind === "ORG" ? root.cGenGreenSoft : root.cGenTealSoft
-                                    Text {
-                                        id: kindText
-                                        anchors.centerIn: parent
-                                        text: labCard.kind
-                                        color: labCard.kind === "RA" ? root.cGenOrange : labCard.kind === "ROCA" ? root.cMuted
-                                             : labCard.kind === "ORG" ? root.cGenGreen : root.cGenTeal
-                                        font.bold: true
-                                        font.pixelSize: root.sp(11)
-                                    }
-                                }
-                                Text { text: "›"; color: root.cMuted; font.pixelSize: root.sp(22) }
-                            }
-                            Text {
-                                Layout.fillWidth: true
-                                text: root.labContextText(labCard.info)
-                                color: root.cMuted
-                                font.pixelSize: root.fsLabel
-                                elide: Text.ElideRight
-                            }
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: root.dp(12)
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    Layout.preferredWidth: 1
-                                    Layout.alignment: Qt.AlignTop
-                                    spacing: 1
-                                    Text { text: "Estrato (proyección)"; color: root.cMuted; font.bold: true; font.pixelSize: root.sp(11) }
-                                    Text { Layout.fillWidth: true; elide: Text.ElideRight; color: root.cText; font.pixelSize: root.fsLabel
-                                           text: "SUCS: " + (labCard.info && labCard.info.projection.sucs.length ? labCard.info.projection.sucs : "Pendiente de laboratorio") }
-                                    Text { Layout.fillWidth: true; elide: Text.ElideRight; color: root.cText; font.pixelSize: root.fsLabel
-                                           text: "AASHTO: " + (labCard.info && labCard.info.projection.aashto.length ? labCard.info.projection.aashto : "Pendiente de laboratorio") }
-                                }
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    Layout.preferredWidth: 1
-                                    Layout.alignment: Qt.AlignTop
-                                    spacing: 2
-                                    Text {
-                                        text: "Laboratorio"
-                                        color: root.cMuted; font.bold: true; font.pixelSize: root.sp(11)
-                                    }
-                                    Text {
-                                        Layout.fillWidth: true
-                                        wrapMode: Text.WordWrap
-                                        color: labCard.info && labCard.info.labText.length ? root.cText : root.cMuted
-                                        font.pixelSize: root.fsLabel
-                                        text: !labCard.info ? "" : labCard.info.labText.length ? labCard.info.labText
-                                              : labCard.info.hasTests ? "Ensayo sin clasificación" : "Sin ensayo registrado"
-                                    }
-                                    Rectangle {
-                                        visible: !!labCard.info && ["confirmed", "suggested", "in_progress"].indexOf(labCard.info.stage) >= 0
-                                        Layout.preferredWidth: stageText.implicitWidth + root.dp(16)
-                                        Layout.preferredHeight: root.dp(22)
-                                        radius: height / 2
-                                        color: root.labStageColor(labCard.info ? labCard.info.stage : "", true)
-                                        Text {
-                                            id: stageText
-                                            anchors.centerIn: parent
-                                            text: labCard.info ? labCard.info.stageLabel : ""
-                                            color: root.labStageColor(labCard.info ? labCard.info.stage : "", false)
-                                            font.bold: true
-                                            font.pixelSize: root.sp(11)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-            }
-
             CalicataReview {
                 width: parent.width
-                visible: root.stageIndex === 5 && !root.reviewNotesEditing
+                visible: root.stageIndex === 4 && !root.reviewNotesEditing
                 flow: root.flow
                 scaleFactor: root.uiScale
                 darkMode: root.darkMode

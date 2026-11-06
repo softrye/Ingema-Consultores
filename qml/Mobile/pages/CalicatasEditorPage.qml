@@ -623,10 +623,8 @@ Page {
                          enabled: root.formValue(formLoader.item, "visibleStrataCount") > 0}
                     ]}
         } else if (stage === 3) {
-            tool = root.labContextAction()
-        } else if (stage === 4) {
             tool = root.photoContextAction()
-        } else if (stage === 5) {
+        } else if (stage === 4) {
             // Revisión: el estado de la ficha (ciclo de vida) es la herramienta
             // central; se toma del árbol "Calicatas abiertas" para no duplicarlo.
             var children = tabs.children || []
@@ -810,7 +808,6 @@ Page {
         // An initialized empty workspace still has a legitimate tabs action.
         ready: !!formLoader.item || (root._formLoaderReady && tabsModel.count === 0)
         contextId: "calicatas/stage-" + root.contextStage
-                   + (root.contextStage === 3 && root.formValue(formLoader.item, "labDetailOpen") === true ? "/lab-detail" : "")
                    + (root.contextCorrectingReview ? "/review-correction" : "")
         actions: root.buildContextActions(root.contextStage, root.contextCorrectingReview,
                                           !!formLoader.item)
