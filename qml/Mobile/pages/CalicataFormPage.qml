@@ -10868,51 +10868,46 @@ Item {
                                 }
                                 GridLayout {
                                     Layout.fillWidth: true
-                                    columns: 1
-                                    columnSpacing: root.dp(8); rowSpacing: root.dp(8)
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        Text { Layout.fillWidth: true; text: "Límite líquido (WL)"; color: root.cMuted; font.pixelSize: root.fsLabel }
+                                    columns: 2
+                                    columnSpacing: root.dp(8)
+                                    rowSpacing: root.dp(8)
+                                    PrfLabeledInput {
+                                        label: "Límite líquido (WL)"
                                         BoundTextField {
-                                            Layout.preferredWidth: root.dp(104); numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 999
+                                            Layout.fillWidth: true
+                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 999
                                             placeholderText: "Ej. 32"; modelText: String(wl === undefined || wl === null ? "" : wl)
                                             onCommit: function(t) { return root.commitLabLimit(mobileSampleCard.corteIdx, "wl", t) }
                                         }
                                     }
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        Text { Layout.fillWidth: true; text: "Límite plástico (LP)"; color: root.cMuted; font.pixelSize: root.fsLabel }
+                                    PrfLabeledInput {
+                                        label: "Límite plástico (LP)"
                                         BoundTextField {
-                                            Layout.preferredWidth: root.dp(104); numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 999
+                                            Layout.fillWidth: true
+                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 999
                                             placeholderText: "Ej. 18"; modelText: String(lp === undefined || lp === null ? "" : lp)
                                             onCommit: function(t) { return root.commitLabLimit(mobileSampleCard.corteIdx, "lp", t) }
                                         }
                                     }
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        Text { Layout.fillWidth: true; text: "Índice de plasticidad (IP)"; color: root.cMuted; font.pixelSize: root.fsLabel }
-                                        Text { text: root.labIpText(mobileSampleCard.info); color: root.cText; font.bold: true; font.pixelSize: root.fsField }
-                                        Rectangle {
-                                            Layout.preferredWidth: autoTag.implicitWidth + root.dp(12)
-                                            Layout.preferredHeight: root.dp(20)
-                                            radius: height / 2
-                                            color: "transparent"
-                                            CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: "tinted" }
-                                            Text { id: autoTag; anchors.centerIn: parent; text: "Auto"; color: root.cGenBlue; font.pixelSize: root.sp(10); font.bold: true }
+                                    PrfLabeledInput {
+                                        label: "Índice (IP) · automático"
+                                        Text {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: root.hField
+                                            verticalAlignment: Text.AlignVCenter
+                                            text: root.labIpText(mobileSampleCard.info)
+                                            color: root.cText; font.bold: true; font.pixelSize: root.fsField
                                         }
                                     }
-                                }
-
-                                // Humedad natural: dato de ensayo, nunca la humedad de campo.
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    Text { Layout.fillWidth: true; text: "Humedad natural (MTC E108)"; color: root.cMuted; font.pixelSize: root.fsLabel }
-                                    BoundTextField {
-                                        Layout.preferredWidth: root.dp(104); numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 500
-                                        placeholderText: "—"; modelText: String(hum2 === undefined || hum2 === null ? "" : hum2)
-                                        onCommit: function(t) { var n=Rules.webLabNormalizePercent(t,{min:0,max:500}); if(n===null){root.showInfo("Humedad natural","Usa un valor entre 0 y 500 %.");return false}; cortesModel.setProperty(mobileSampleCard.corteIdx,"hum2",n);root._markDirty();root.deriveLabFields();return true }
+                                    PrfLabeledInput {
+                                        label: "Humedad natural (%)"
+                                        BoundTextField {
+                                            Layout.fillWidth: true
+                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 500
+                                            placeholderText: "—"; modelText: String(hum2 === undefined || hum2 === null ? "" : hum2)
+                                            onCommit: function(t) { var n=Rules.webLabNormalizePercent(t,{min:0,max:500}); if(n===null){root.showInfo("Humedad natural","Usa un valor entre 0 y 500 %.");return false}; cortesModel.setProperty(mobileSampleCard.corteIdx,"hum2",n);root._markDirty();root.deriveLabFields();return true }
+                                        }
                                     }
-                                    Text { text: "%"; color: root.cMuted; font.pixelSize: root.fsLabel }
                                 }
 
                                 // Clasificación sugerida (Web SuggestedClassification): chips
@@ -11014,61 +11009,6 @@ Item {
                                     }
                                 }
 
-                                // Clasificación del laboratorio (autoridad): mismos campos que
-                                // la tabla Web. Estrato y patrón la proyectan en solo lectura.
-                                Rectangle {
-                                    id: labClassPanel
-                                    readonly property var info: mobileSampleCard.info
-                                    readonly property var form: info ? info.form : null
-                                    readonly property var fieldErrors: info ? info.validation.fieldErrors : ({})
-                                    Layout.fillWidth: true
-                                    implicitHeight: labClassColumn.implicitHeight + root.dp(20)
-                                    radius: root.dp(12)
-                                    color: "transparent"
-                                    CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; level: "card" }
-                                    ColumnLayout {
-                                        id: labClassColumn
-                                        anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-                                        anchors.margins: root.dp(10)
-                                        spacing: root.dp(8)
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            Text { Layout.fillWidth: true; text: "Clasificación del laboratorio"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
-                                            Rectangle {
-                                                readonly property string stage: labClassPanel.info ? labClassPanel.info.stage : ""
-                                                Layout.preferredWidth: estadoText.implicitWidth + root.dp(16)
-                                                Layout.preferredHeight: root.dp(22)
-                                                radius: height / 2
-                                                color: root.labStageColor(stage, true)
-                                                Behavior on color { ColorAnimation { duration: root.flow ? root.flow.duration(220) : 220 } }
-                                                Text {
-                                                    id: estadoText
-                                                    anchors.centerIn: parent
-                                                    text: (parent.stage === "confirmed" ? "✓ " : "") + (labClassPanel.info ? labClassPanel.info.stageLabel : "")
-                                                    color: root.labStageColor(parent.stage, false)
-                                                    font.bold: true
-                                                    font.pixelSize: root.sp(11)
-                                                    Behavior on color { ColorAnimation { duration: root.flow ? root.flow.duration(220) : 220 } }
-                                                }
-                                            }
-                                        }
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: labClassPanel.info ? Rules.labPatternInfo(labClassPanel.info.plain).detail : ""
-                                            color: root.cMuted
-                                            font.pixelSize: root.sp(11)
-                                            wrapMode: Text.WordWrap
-                                        }
-                                        Text {
-                                            Layout.fillWidth: true
-                                            wrapMode: Text.WordWrap
-                                            color: root.cMuted
-                                            font.pixelSize: root.sp(11)
-                                            text: "Estrato muestra: SUCS " + (labClassPanel.info && labClassPanel.info.projection.sucs.length ? labClassPanel.info.projection.sucs : "Pendiente de laboratorio")
-                                                  + " · AASHTO " + (labClassPanel.info && labClassPanel.info.projection.aashto.length ? labClassPanel.info.projection.aashto : "Pendiente de laboratorio")
-                                        }
-                                    }
-                                }
 
 
                             }
