@@ -6852,19 +6852,6 @@ Item {
                                     PrfPickField {
                                         visible: !(prfEditorCard.origin === "Antrópico")
                                         sideLabel: prfEditorCard.sideLabels
-                                        label: "Estabilidad (local)"
-                                        valueText: prfEditorCard.s.estabilidad >= 0 && prfEditorCard.s.estabilidad < root.estItems.length
-                                                   ? root.estItems[prfEditorCard.s.estabilidad] : ""
-                                        onActivated: root.prfPickIndex("Estabilidad (local)", root.estItems, prfEditorCard.s.estabilidad,
-                                                                       "status.warning",
-                                                                       function(i) {
-                                                                           cortesModel.setProperty(prfEditorCard.idx, "estabilidad", i)
-                                                                           root._markDirty()
-                                                                       })
-                                    }
-                                    PrfPickField {
-                                        visible: !(prfEditorCard.origin === "Antrópico")
-                                        sideLabel: prfEditorCard.sideLabels
                                         label: "Excavabilidad"
                                         valueText: prfEditorCard.s.excavabilidad >= 0 && prfEditorCard.s.excavabilidad < root.excItems.length
                                                    ? root.excItems[prfEditorCard.s.excavabilidad] : ""

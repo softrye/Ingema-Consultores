@@ -6,7 +6,7 @@ Actualizado: 06/11/2026. Ambos puntos implementados en código; queda la validac
   - [x] Popup compartido con ancho máximo 360 dp, alto máximo 400 dp y hasta seis filas visibles. Las filas conservan al menos 48 dp; listas largas con desplazamiento e indicador.
   - [x] Un toque aplica y cierra; se retiran «Cancelar»/«Seleccionar». X, Atrás o exterior cancelan. Callback consumido una sola vez para evitar doble escritura.
   - [x] Se conserva «Sin seleccionar» y se desplaza inicialmente hasta la opción actual.
-  - [ ] Comprobar en dispositivo/emulador: Humedad, Consistencia/densidad, Estabilidad, Excavabilidad y demás selectores compartidos; teclado, pantalla pequeña, fuentes grandes y tema oscuro.
+  - [ ] Comprobar en dispositivo/emulador: Humedad, Consistencia/densidad, Excavabilidad y demás selectores compartidos; teclado, pantalla pequeña, fuentes grandes y tema oscuro.
 
 - [ ] **Validar clasificación y representación del patrón** (observado el 05/11/2026).
   - [x] Diagnóstico: «GP · A-1-a» combina SUCS y AASHTO. Un solo patrón GP es correcto; AASHTO no añade una segunda trama SUCS.
@@ -23,3 +23,5 @@ Actualizado: 06/11/2026. Ambos puntos implementados en código; queda la validac
 - `git diff --check`: sin errores propios. No se cambian servidores, almacenamiento, Excel/PDF, mapas, Earth, Login ni el motor de animación.
 
 Evidencia de transporte revisada sin modificar: calicatacloudservice.cpp lee los tres campos desde laboratorio y los envía en el RPC; CalicataFormPage._liveLabFields conserva la clasificación separada de AASHTO. Las pruebas no sustituyen una sincronización real.
+
+06/11/2026: retirado «Estabilidad (local)» del editor por paridad con la web del ZIP ingeplus-main (2).zip. En src/ no existe selector de estabilidad; exportExcel.test.ts:280 y exportPdf.test.ts:193 exigen que no aparezca ESTABILIDAD. Se conservan los valores locales anteriores; no se cambia persistencia ni exportadores.
