@@ -202,4 +202,19 @@
         <file alias="SW-SM.svg">SUCS/mtc/SW-SM.svg</file>
         <file alias="SW.svg">SUCS/mtc/SW.svg</file>
     </qresource>
+    <!-- AASHTO: identificación gráfica InGe+, independiente de las tramas SUCS. -->
+    <qresource prefix="/AASHTO">
+        <file alias="A-1-a.svg">AASHTO/A-1-a.svg</file>
+        <file alias="A-1-b.svg">AASHTO/A-1-b.svg</file>
+        <file alias="A-2-4.svg">AASHTO/A-2-4.svg</file>
+        <file alias="A-2-5.svg">AASHTO/A-2-5.svg</file>
+        <file alias="A-2-6.svg">AASHTO/A-2-6.svg</file>
+        <file alias="A-2-7.svg">AASHTO/A-2-7.svg</file>
+        <file alias="A-3.svg">AASHTO/A-3.svg</file>
+        <file alias="A-4.svg">AASHTO/A-4.svg</file>
+        <file alias="A-5.svg">AASHTO/A-5.svg</file>
+        <file alias="A-6.svg">AASHTO/A-6.svg</file>
+        <file alias="A-7-5.svg">AASHTO/A-7-5.svg</file>
+        <file alias="A-7-6.svg">AASHTO/A-7-6.svg</file>
+    </qresource>
 </RCC>

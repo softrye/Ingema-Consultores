@@ -1461,9 +1461,26 @@ function labProjection(plain) {
     }
 }
 
-// Read-only explanation: AASHTO is another classification, never a second SUCS texture.
+// AASHTO code stamps are InGe+ identification graphics, not SUCS classifications.
+function aashtoSymbolUrl(code) {
+    code=normalizeAashtoCode(code)
+    return code ? "qrc:/AASHTO/"+code+".svg" : ""
+}
+function calicataGraphicPattern(plain) {
+    var p=labProjection(plain), layers=p.pattern.layers.map(function(layer) {
+        return {id:layer.id,code:layer.code,system:"SUCS",url:layer.url}
+    })
+    var aashto=normalizeAashtoCode(p.aashto)
+    if (aashto) layers.push({id:"AASHTO:"+aashto,code:aashto,system:"AASHTO",url:aashtoSymbolUrl(aashto)})
+    var labels=[]
+    if (p.sucs) labels.push(p.sucs)
+    if (aashto) labels.push("AASHTO "+aashto)
+    return {key:layers.map(function(x){return x.system+":"+x.code}).join("|"),layers:layers,label:labels.join(" | ")}
+}
+
+// Read-only explanation: SUCS and AASHTO are drawn as separate labelled bands.
 function labPatternInfo(plain) {
-    var p=labProjection(plain), kind="pending", detail="El patrón requiere un SUCS adoptado en Laboratorio."
+    var p=labProjection(plain), kind="pending", detail="SUCS pendiente de adoptar en Laboratorio."
     if (p.primary) {
         if (p.isComposite && (!p.secondary || p.secondary===p.primary)) {
             kind="incomplete"

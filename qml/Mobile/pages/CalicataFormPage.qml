@@ -1239,7 +1239,7 @@ Item {
     // cambian adoptando en Laboratorio. Una capa por código (compuesto = dos).
     function stratumPatternFilesFor(plain) {
         if (Rules.isAnthropicFill(plain.material_origin)) return [Rules.REPORT_RA_PATTERN]
-        return Rules.labProjection(plain).pattern.layers.map(function(layer) { return layer.url })
+        return Rules.calicataGraphicPattern(plain).layers.map(function(layer) { return layer.url })
     }
     // Vista del perfil: trama, color y rótulo de una banda en una sola lectura.
     function stratumBandInfo(index) {
@@ -1250,7 +1250,7 @@ Item {
     }
     function stratumPatternLabel(plain) {
         if (Rules.isAnthropicFill(plain.material_origin)) return Rules.REPORT_RA_CODE
-        return Rules.labProjection(plain).sucs
+        return Rules.calicataGraphicPattern(plain).label
     }
     // Clasificación que muestra la tabla según el método del perfil (proyección
     // del laboratorio; vacío = pendiente de laboratorio).
@@ -5502,7 +5502,7 @@ Item {
         }
     }
 
-    // Símbolo del estrato: capas SUCS del laboratorio (qrc:/SUCS/web, = Web) sobre su color.
+    // Símbolo: tramas SUCS y bandas AASHTO rotuladas, sobre el color manual.
     component PrfStratumSymbol: Rectangle {
         id: prfSymbol
         property color tone: "#E7E7E4"
@@ -6746,7 +6746,7 @@ Item {
                                 // Patrón = proyección del laboratorio (solo lectura).
                                 PrfPickField {
                                     visible: !prfEditorCard.anthropicLike
-                                    label: "Símbolo / patrón SUCS (Laboratorio)"
+                                    label: "Símbolos SUCS / AASHTO (Laboratorio)"
                                     readOnly: true
                                     boxHeight: root.hField
                                     patterns: root.stratumPatternFilesFor(prfEditorCard.s)
@@ -11061,17 +11061,16 @@ Item {
     }
 
     // ===== Hoja de la ficha (patrón QField) =====
-    // Franja de auras arriba (fondo real de CalicatasEditorPage), hoja con el Liquid
-    // Glass del Dock, cabecera ✕ · código · guardado y pestañas con estado en texto.
+    // Fondo a toda el área del editor; navegación desde el Dock global.
     Item {
         id: fichaSheet
         anchors.fill: parent
-        anchors.topMargin: root.dp(44)
+        anchors.topMargin: 0
         anchors.bottomMargin: -root.dp(40)         // las esquinas inferiores quedan fuera
         MobileGlass.DockGlassPanel {
             id: fichaSheetGlass
             glassUi: genGlassUi
-            radius: root.dp(28)
+            radius: 0
             u: root.dp(1)
             dark: root.darkMode
             reducedMotion: root.flowReduceMotion
@@ -11079,21 +11078,7 @@ Item {
             // Esmerilado visible: auras difuminadas + velo blanco 25 % / grafito 30 %.
             tint: root.darkMode ? Qt.rgba(28 / 255, 28 / 255, 30 / 255, 0.30) : Qt.rgba(1, 1, 1, 0.25)
         }
-        Rectangle {                                    // asa
-            anchors.horizontalCenter: parent.horizontalCenter
-            y: root.dp(8); width: root.dp(40); height: root.dp(5); radius: height / 2
-            color: root.darkMode ? Qt.rgba(1, 1, 1, 0.3) : Qt.rgba(0, 0, 0, 0.18)
-        }
-        Text {                                         // cabecera: solo el nombre de la calicata
-            id: fichaCodeText
-            x: root.dp(20); y: root.dp(22)
-            width: parent.width - root.dp(40)
-            text: root._genDash(txtCodigo.text)
-            color: root.cText
-            font.pixelSize: root.sp(22); font.weight: Font.DemiBold
-            elide: Text.ElideRight
-            Accessible.role: Accessible.Heading
-        }
+
     }
 
     // Capa visual mínima de la etapa entrante durante el swipe. Replica la
@@ -11123,7 +11108,7 @@ Item {
         id: vFlick
         flow: root.flow
         anchors.fill: parent
-        anchors.topMargin: root.dp(44 + 62)           // franja de auras + nombre de la calicata
+        anchors.topMargin: 0                         // editor sin cabecera
         anchors.bottomMargin: root.fichaDockClearance          // el contenido llega hasta el Dock
         clip: true
         boundsBehavior: Flickable.StopAtBounds

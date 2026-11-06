@@ -9,8 +9,8 @@ Actualizado: 06/11/2026. Ambos puntos implementados en código; queda la validac
   - [ ] Comprobar en dispositivo/emulador: Humedad, Consistencia/densidad, Excavabilidad y demás selectores compartidos; teclado, pantalla pequeña, fuentes grandes y tema oscuro.
 
 - [ ] **Validar clasificación y representación del patrón** (observado el 05/11/2026).
-  - [x] Diagnóstico: «GP · A-1-a» combina SUCS y AASHTO. Un solo patrón GP es correcto; AASHTO no añade una segunda trama SUCS.
-  - [x] UI explícita «SUCS: … · AASHTO: …», campo «Símbolo / patrón SUCS» y explicación de patrón simple, doble o segundo SUCS pendiente, también en Laboratorio.
+  - [x] Diagnóstico: «GP · A-1-a» combina SUCS y AASHTO. Un solo patrón GP era el contrato web; AASHTO no es otro SUCS. Por solicitud posterior, se añade una banda AASHTO rotulada independiente.
+  - [x] UI explícita «SUCS: … · AASHTO: …», campo «Símbolos SUCS / AASHTO» y explicación de patrón simple, doble o segundo SUCS pendiente, también en Laboratorio.
   - [x] GP-GM adoptado guarda primary_sucs/is_composite/secondary_sucs en una sola operación; pruebas de JSON y proyección comprueban dos capas con sus recursos SVG. Se conservan AASHTO, color y segundo valor oculto al volver a simple.
   - [x] Dos códigos iguales no se dibujan como dos tramas: se indica compuesto incompleto y se pide otro SUCS distinto, sin borrar datos.
   - [ ] Tras compilar: adoptar GP-GM desde Laboratorio, guardar/reabrir y sincronizar; comprobar las dos tramas. Verificar GP con A-1-a como simple y compuesto sin segundo SUCS como incompleto.
@@ -25,3 +25,5 @@ Actualizado: 06/11/2026. Ambos puntos implementados en código; queda la validac
 Evidencia de transporte revisada sin modificar: calicatacloudservice.cpp lee los tres campos desde laboratorio y los envía en el RPC; CalicataFormPage._liveLabFields conserva la clasificación separada de AASHTO. Las pruebas no sustituyen una sincronización real.
 
 06/11/2026: retirado «Estabilidad (local)» del editor por paridad con la web del ZIP ingeplus-main (2).zip. En src/ no existe selector de estabilidad; exportExcel.test.ts:280 y exportPdf.test.ts:193 exigen que no aparezca ESTABILIDAD. Se conservan los valores locales anteriores; no se cambia persistencia ni exportadores.
+
+Solicitud posterior del 06/11/2026: añadido AASHTO gráfico en editor, preview y código de PDF/Excel; editor sin cabecera. Falta validación en app compilada. Detalle: CALICATAS_AASHTO_GRAFICO_20261106.md.
