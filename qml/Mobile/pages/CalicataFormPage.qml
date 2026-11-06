@@ -6711,6 +6711,15 @@ Item {
         suppressTransitions: root.stratumEditorSwitching
         preferredWidth: root.dp(560)
         preferredHeight: Math.min(root.dp(760), Math.max(root.dp(180), prfStratumPopup.freeHeight * 0.82))
+        background: Item {
+            MobileGlass.DockGlassPanel {
+                glassUi: genGlassUi
+                radius: root.dp(28)
+                u: root.uiScale
+                reducedMotion: root.flowReduceMotion
+                lowFallback: false
+            }
+        }
         onClosed: {
             root.commitPendingField()
             root.flushRequested()
@@ -10435,11 +10444,16 @@ Item {
             }
             // Ventana flotante de Laboratorio: el material de los emergentes, un grab
             // estable sobre su rect final mientras anima desde la tarjeta de origen.
-            GenPopupSurface {
+            Item {
                 visible: stratumSheet.floating
                 anchors.fill: parent
-                popupItem: stratumSheet
-                radius: root.dp(26)
+                MobileGlass.DockGlassPanel {
+                    glassUi: genGlassUi
+                    radius: root.dp(28)
+                    u: root.uiScale
+                    reducedMotion: root.flowReduceMotion
+                    lowFallback: false
+                }
             }
         }
         contentItem: ColumnLayout {
