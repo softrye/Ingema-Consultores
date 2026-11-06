@@ -1260,7 +1260,7 @@ Item {
     // cambian adoptando en Laboratorio. Una capa por código (compuesto = dos).
     function stratumPatternFilesFor(plain) {
         if (Rules.isAnthropicFill(plain.material_origin)) return [Rules.REPORT_RA_PATTERN]
-        return Rules.calicataGraphicPattern(plain).layers.map(function(layer) { return layer.url })
+        return Rules.labProjection(plain).pattern.layers.map(function(layer) { return layer.url })
     }
     // Vista del perfil: trama, color y rótulo de una banda en una sola lectura.
     function stratumBandInfo(index) {
@@ -1271,7 +1271,7 @@ Item {
     }
     function stratumPatternLabel(plain) {
         if (Rules.isAnthropicFill(plain.material_origin)) return Rules.REPORT_RA_CODE
-        return Rules.calicataGraphicPattern(plain).label
+        return Rules.labProjection(plain).sucs
     }
     // Clasificación que muestra la tabla según el método del perfil (proyección
     // del laboratorio; vacío = pendiente de laboratorio).
@@ -5535,7 +5535,7 @@ Item {
         }
     }
 
-    // Símbolo: tramas SUCS y bandas AASHTO rotuladas, sobre el color manual.
+    // Símbolo: tramas SUCS sobre el color manual.
     component PrfStratumSymbol: Rectangle {
         id: prfSymbol
         property color tone: "#E7E7E4"
@@ -6914,7 +6914,7 @@ Item {
                                 // Patrón = proyección del laboratorio (solo lectura).
                                 PrfPickField {
                                     visible: !prfEditorCard.anthropicLike
-                                    label: "Símbolos SUCS / AASHTO (Laboratorio)"
+                                    label: "Símbolo / patrón SUCS (Laboratorio)"
                                     readOnly: true
                                     boxHeight: root.hField
                                     patterns: root.stratumPatternFilesFor(prfEditorCard.s)
