@@ -692,8 +692,6 @@ Page {
                          command: "calicatas.lab.tab:context", selected: tab === "context"},
                         {id: "lab.tab.history", label: "Historial", icon: "status.sync",
                          command: "calicatas.lab.tab:history", selected: tab === "history"},
-                        {id: "lab.summary", label: "Resultados y seguimiento", icon: "documents.file",
-                         command: "calicatas.lab.summary"},
                         {id: "lab.close", label: "Volver a la lista", icon: "system.back",
                          command: "calicatas.lab.close"}
                     ]}
@@ -702,29 +700,10 @@ Page {
             return {id: "lab", label: "Laboratorio", icon: "lab.flask", command: "calicatas.lab.profile", priority: 20,
                     children: [{id: "lab.profile", label: "Ir a Perfil", icon: "module.stratigraphy",
                                 command: "calicatas.lab.profile"}]}
-        var entries = root.formValue(form, "labStrataEntries") || []
-        var pending = root.formValue(form, "labPendingCount") || 0
-        var dataCount = root.formValue(form, "labDataCount") || 0
-        var filterKey = String(root.formValue(form, "labFilterKey") || "")
-        var filters = [{id: "lab.filter.all", label: "Todos", icon: "action.menu",
-                        command: "calicatas.lab.filter:", selected: filterKey === ""}]
-        for (var i = 0; i < entries.length; ++i)
-            filters.push({id: "lab.filter." + i, label: entries[i].label, icon: "module.stratigraphy",
-                          command: "calicatas.lab.filter:" + entries[i].key, selected: filterKey === entries[i].key})
-        var children = [
-            {id: "lab.new", label: "Nueva muestra", icon: "action.add", command: "calicatas.lab.new"},
-            {id: "lab.filter", label: "Filtrar por estrato", icon: "action.menu", command: "", children: filters}
-        ]
-        if (pending > 0)
-            children.push({id: "lab.pending", label: "Ver pendientes (" + pending + ")", icon: "status.sync",
-                           command: "calicatas.lab.pending", selected: filterKey === "pending"})
-        var view = String(root.formValue(form, "labView") || "strata")
-        children.push(view === "results"
-            ? {id: "lab.strata", label: "Estratos y muestras", icon: "module.stratigraphy", command: "calicatas.lab.strata"}
-            : {id: "lab.summary", label: "Resultados y seguimiento", icon: "documents.file", command: "calicatas.lab.summary"})
-        if (dataCount > 0)
+        var children = []
+        if ((root.formValue(form, "labDataCount") || 0) > 0)
             children.push({id: "lab.history", label: "Historial", icon: "status.sync", command: "calicatas.lab.history"})
-        return {id: "lab", label: "Laboratorio", icon: "lab.flask", command: "calicatas.lab.new", priority: 20,
+        return {id: "lab", label: "Laboratorio", icon: "lab.flask", command: "calicatas.lab.strata", priority: 20,
                 children: children}
     }
 

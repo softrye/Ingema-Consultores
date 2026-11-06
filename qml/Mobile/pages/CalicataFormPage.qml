@@ -12471,56 +12471,13 @@ Item {
                     Item { Layout.preferredHeight: root.dp(12) }
                 }
 
-                RowLayout {
+                Text {
                     Layout.fillWidth: true
                     visible: cortesModel.count > 0
-                    spacing: root.dp(8)
-                    Text { Layout.fillWidth: true; text: "Estratos y muestras"; color: root.cText; font.bold: true; font.pixelSize: root.fsField }
-                    PrfToolButton {
-                        primaryTone: true
-                        iconName: "action.add"
-                        text: "Nueva muestra"
-                        onClicked: root.labNewSample()
-                    }
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    visible: cortesModel.count > 0
-                    spacing: root.dp(6)
-                    Repeater {
-                        model: [{ key: "strata", label: "Estratos y muestras" }, { key: "results", label: "Resultados" }]
-                        delegate: PrfSegment {
-                            required property var modelData
-                            implicitHeight: root.dp(36)
-                            label: modelData.label
-                            isOn: root.labView === modelData.key
-                            accent: root.cGenBlue
-                            accentSoft: root.cGenBlueSoft
-                            onPicked: root.labView = modelData.key
-                        }
-                    }
-                }
-                Flow {
-                    Layout.fillWidth: true
-                    visible: cortesModel.count > 0
-                    spacing: root.dp(6)
-                    // Un solo estado de filtro (root.labFilterKey), compartido con el Dock.
-                    Repeater {
-                        model: cortesModel.count > 0
-                               ? [{ key: "", label: "Todos (" + cortesModel.count + ")" }]
-                                 .concat(root.labStrataEntries.map(function(e, i) {
-                                     var x = root.labInfosAll[i]
-                                     return { key: e.key, label: e.label + " (" + (x && (x.hasSample || x.hasTests) ? 1 : 0) + ")" }
-                                 }))
-                                 .concat(root.labPendingCount > 0 ? [{ key: "pending", label: "Pendientes (" + root.labPendingCount + ")" }] : [])
-                               : []
-                        delegate: PrfChip {
-                            required property var modelData
-                            label: modelData.label
-                            isOn: root.labFilterKey === modelData.key
-                            onFlipped: root.labSetFilter(modelData.key)
-                        }
-                    }
+                    text: "Estratos y muestras"
+                    color: root.cText
+                    font.bold: true
+                    font.pixelSize: root.fsField
                 }
 
                 Repeater {
@@ -12530,7 +12487,7 @@ Item {
                         property int corteIdx: index
                         readonly property var info: corteIdx < mobileLaboratoryOverview.labInfos.length ? mobileLaboratoryOverview.labInfos[corteIdx] : null
                         readonly property string kind: root.labKindChip(info)
-                        visible: root.labView === "strata" && root.labCardVisible(info)
+                        visible: !!info
                         Layout.fillWidth: true
                         implicitHeight: labCardColumn.implicitHeight + root.dp(24)
                         radius: root.dp(16)
@@ -12656,82 +12613,7 @@ Item {
                         }
                     }
                 }
-                // Resultados y seguimiento: una tarjeta por muestra/ensayo real (sin datos inventados).
-                Text {
-                    Layout.fillWidth: true
-                    visible: root.labView === "results" && cortesModel.count > 0
-                    text: root.labDataCount === 0 ? "Sin muestras ni ensayos registrados todavía."
-                          : root.labSummaryText().split(String.fromCharCode(10)).join(" · ")
-                    color: root.cMuted
-                    font.pixelSize: root.fsLabel
-                    wrapMode: Text.WordWrap
-                }
-                Repeater {
-                    model: root.labView === "results" ? root.labInfosAll : []
-                    delegate: Rectangle {
-                        id: resultCard
-                        required property var modelData
-                        required property int index
-                        readonly property var p: modelData ? modelData.plain : ({})
-                        readonly property string code: String(p.sample_code || "").length ? String(p.sample_code) : "M-" + (index + 1 < 10 ? "0" : "") + (index + 1)
-                        function num(v) { var t = String(v === undefined || v === null ? "" : v); return t.length ? t : "—" }
-                        visible: !!modelData && (modelData.hasSample || modelData.hasTests) && root.labCardVisible(modelData)
-                        Layout.fillWidth: true
-                        implicitHeight: resultColumn.implicitHeight + root.dp(24)
-                        radius: root.dp(16)
-                        color: "transparent"
-                        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; level: "card" }
-                        Rectangle {
-                            anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
-                            anchors.margins: root.dp(10)
-                            width: root.dp(3); radius: width / 2
-                            color: root.labStageColor(resultCard.modelData ? resultCard.modelData.stage : "", false)
-                        }
-                        scale: resultCardTap.pressed ? 0.985 : 1.0
-                        Behavior on scale { NumberAnimation { duration: root.flow ? root.flow.instantDuration : 70; easing.type: Easing.OutQuad } }
-                        TapHandler { id: resultCardTap; onTapped: root.openLabForStratum(resultCard.index, resultCard) }
-                        ColumnLayout {
-                            id: resultColumn
-                            anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-                            anchors.leftMargin: root.dp(22); anchors.rightMargin: root.dp(12); anchors.topMargin: root.dp(12)
-                            spacing: root.dp(4)
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: root.dp(8)
-                                Text { text: resultCard.code; color: root.cText; font.bold: true; font.pixelSize: root.fsField }
-                                Rectangle {
-                                    Layout.preferredWidth: resultStage.implicitWidth + root.dp(16)
-                                    Layout.preferredHeight: root.dp(22)
-                                    radius: height / 2
-                                    color: root.labStageColor(resultCard.modelData ? resultCard.modelData.stage : "", true)
-                                    Text { id: resultStage; anchors.centerIn: parent; text: resultCard.modelData ? resultCard.modelData.stageLabel : ""
-                                           color: root.labStageColor(resultCard.modelData ? resultCard.modelData.stage : "", false); font.bold: true; font.pixelSize: root.sp(11) }
-                                }
-                                Item { Layout.fillWidth: true }
-                                Text { text: "›"; color: root.cMuted; font.pixelSize: root.sp(22) }
-                            }
-                            Text { Layout.fillWidth: true; text: "Estrato " + (resultCard.index + 1) + " · " + resultCard.num(resultCard.p.de) + " – " + resultCard.num(resultCard.p.a) + " m"
-                                   color: root.cText; font.pixelSize: root.fsLabel; font.bold: true; elide: Text.ElideRight }
-                            Text { Layout.fillWidth: true; text: root.labContextText(resultCard.modelData); color: root.cMuted; font.pixelSize: root.fsLabel; elide: Text.ElideRight }
-                            Repeater {
-                                model: resultCard.modelData && resultCard.modelData.hasTests ? [
-                                    { l: "Humedad natural", v: resultCard.num(resultCard.p.hum2) + (String(resultCard.p.hum2 || "").length ? " %" : "") },
-                                    { l: "Límite líquido / plástico", v: resultCard.num(resultCard.p.wl) + " / " + resultCard.num(resultCard.p.lp) },
-                                    { l: "Granulometría (N.º 4/10/40/200)", v: resultCard.num(resultCard.p.passing_no4) + " / " + resultCard.num(resultCard.p.g2)
-                                                                             + " / " + resultCard.num(resultCard.p.g04) + " / " + resultCard.num(resultCard.p.g008) },
-                                    { l: "Clasificación", v: resultCard.modelData.labText.length ? resultCard.modelData.labText : "Pendiente" }
-                                ] : [{ l: "Ensayos", v: "Sin ensayos registrados" }]
-                                delegate: RowLayout {
-                                    required property var modelData
-                                    Layout.fillWidth: true
-                                    spacing: root.dp(8)
-                                    Text { Layout.fillWidth: true; text: modelData.l; color: root.cMuted; font.pixelSize: root.sp(11); elide: Text.ElideRight }
-                                    Text { text: modelData.v; color: root.cText; font.pixelSize: root.sp(11) }
-                                }
-                            }
-                        }
-                    }
-                }
+
             }
 
             CalicataReview {
