@@ -138,10 +138,16 @@ Item {
                     // El video permanece 16:9; se recortan solo los laterales verdes.
                     Item {
                         id: videoFrame
-                        height: parent.height
+                        // Conserva el cuadro completo en vertical y deja espacio lateral para las orejas.
+                        height: visit.kawaiiEngineer ? Math.min(parent.height, parent.width / (0.58 * 16 / 9)) : parent.height
                         width: height * 16 / 9
                         anchors.centerIn: parent
-                        VideoOutput { id: engineerVideoOutput; anchors.fill: parent; fillMode: VideoOutput.PreserveAspectFit }
+                        VideoOutput {
+                            id: engineerVideoOutput
+                            anchors.fill: parent
+                            fillMode: VideoOutput.PreserveAspectFit
+                            endOfStreamPolicy: VideoOutput.KeepLastFrame
+                        }
                         ShaderEffectSource {
                             id: videoTexture
                             anchors.fill: parent
@@ -150,13 +156,6 @@ Item {
                         }
                         ShaderEffect {
                             anchors.fill: parent
-                            // Atenúa el empalme sin crear un segundo reproductor ni textura.
-                            opacity: visit.kawaiiEngineer && engineerPlayer.cryingLoop
-                                ? (engineerPlayer.duration > 0
-                                   ? Math.max(0, Math.min(1, engineerPlayer.position / 220,
-                                                        (engineerPlayer.duration - engineerPlayer.position) / 220))
-                                   : 0)
-                                : 1
                             property var source: videoTexture
                             fragmentShader: "qrc:/InGe/Mobile/shaders/kawaii_chroma.frag.qsb"
                         }
@@ -181,8 +180,12 @@ Item {
                         autoPlay: true
                         onMediaStatusChanged: {
                             if (visit.kawaiiEngineer && !cryingLoop && mediaStatus === MediaPlayer.EndOfMedia
-                                    && String(source) === "qrc:/images/calicata/pomp-intro-original.mp4")
+                                    && String(source) === "qrc:/images/calicata/pomp-intro-original.mp4") {
                                 cryingLoop = true
+                            } else if (visit.kawaiiEngineer && cryingLoop && mediaStatus === MediaPlayer.LoadedMedia
+                                       && visit.playEngineer && playbackState !== MediaPlayer.PlayingState) {
+                                play()
+                            }
                         }
                         onErrorOccurred: function(error, errorString) {
                             console.warn("INGE_CALICATA_ENGINEER_MEDIA_ERROR", error, errorString)
