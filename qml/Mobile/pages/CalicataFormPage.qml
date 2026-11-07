@@ -11682,27 +11682,27 @@ Item {
                                     Layout.fillWidth: true; Layout.preferredHeight: photoCard.previewHeight
                                     radius: root.dp(12); clip: true
                                     color: root.darkMode ? "#263242" : "#E8EEF4"
-                                    Image {
-                                        id: compactPhotoImage
-                                        anchors.fill: parent
-                                        visible: false
-                                        source: photoCard.info.has ? root._photoSource(photoCard.slot) : ""
-                                        fillMode: Image.PreserveAspectCrop
-                                        asynchronous: true; cache: true
-                                    }
                                     Item {
                                         id: compactPhotoMask
                                         anchors.fill: parent
                                         visible: false
-                                        layer.enabled: photoCard.info.has
+                                        layer.enabled: true
                                         Rectangle { anchors.fill: parent; radius: compactPhotoPreview.radius; color: "black" }
                                     }
-                                    MultiEffect {
+                                    Image {
+                                        id: compactPhotoImage
                                         anchors.fill: parent
-                                        source: compactPhotoImage
-                                        visible: compactPhotoImage.status === Image.Ready
-                                        maskEnabled: true; maskSource: compactPhotoMask
-                                        maskThresholdMin: 0.5; maskSpreadAtMin: 1.0
+                                        visible: photoCard.info.has
+                                        source: photoCard.info.has ? root._photoSource(photoCard.slot) : ""
+                                        fillMode: Image.PreserveAspectCrop
+                                        asynchronous: true; cache: true
+                                        layer.enabled: visible
+                                        layer.effect: MultiEffect {
+                                            maskEnabled: true
+                                            maskSource: compactPhotoMask
+                                            maskThresholdMin: 0.5
+                                            maskSpreadAtMin: 0.1
+                                        }
                                     }
                                     Rectangle {
                                         anchors.centerIn: parent
