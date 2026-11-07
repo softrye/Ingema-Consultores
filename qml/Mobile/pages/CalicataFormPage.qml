@@ -11660,18 +11660,16 @@ Item {
                         readonly property int slot: index + 1
                         readonly property var info: root.photoSlotInfo(slot)
                         Layout.fillWidth: true
-                        implicitHeight: photoCardColumn.implicitHeight + root.dp(16)
-                        radius: root.dp(18)
+                        implicitHeight: photoCardColumn.implicitHeight
+                        Layout.bottomMargin: root.dp(10)
+                        readonly property real previewHeight: Math.max(root.dp(160), Math.min(root.dp(220), (vFlick.height - root.dp(150)) / 3))
                         color: "transparent"
-                        border.width: root.activePhotoCategory === slot ? root.dp(2) : 0
-                        border.color: root.cGenBlue
                         Component.onCompleted: root._photoCardItems[slot] = compactPhotoPreview
                         Component.onDestruction: if (root._photoCardItems[slot] === compactPhotoPreview) delete root._photoCardItems[slot]
-                        CalicataSurface { anchors.fill: parent; radius: photoCard.radius; dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#B4232E"; level: "card" }
                         ColumnLayout {
                             id: photoCardColumn
                             anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-                            anchors.margins: root.dp(8); spacing: root.dp(5)
+                            anchors.margins: 0; spacing: root.dp(5)
                             RowLayout {
                                 Layout.fillWidth: true; spacing: root.dp(6)
                                 Text { Layout.fillWidth: true; text: photoCard.modelData; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel; elide: Text.ElideRight }
@@ -11687,7 +11685,7 @@ Item {
                                 Layout.fillWidth: true; spacing: root.dp(8)
                                 Rectangle {
                                     id: compactPhotoPreview
-                                    Layout.fillWidth: true; Layout.preferredHeight: root.dp(160)
+                                    Layout.fillWidth: true; Layout.preferredHeight: photoCard.previewHeight
                                     radius: root.dp(12); clip: true
                                     color: root.darkMode ? "#263242" : "#E8EEF4"
                                     Image {
@@ -11713,7 +11711,7 @@ Item {
                                 }
                                 Item {
                                     id: photoToolDock
-                                    Layout.preferredWidth: root.dp(48); Layout.preferredHeight: root.dp(160)
+                                    Layout.preferredWidth: root.dp(48); Layout.preferredHeight: photoCard.previewHeight
                                     MobileGlass.DockGlassPanel {
                                         glassUi: genGlassUi; radius: root.dp(24); u: root.uiScale
                                         reducedMotion: root.flowReduceMotion; lowFallback: false; liquidTouch: true
@@ -11727,6 +11725,7 @@ Item {
                                                 id: toolCell
                                                 required property var modelData
                                                 Layout.fillWidth: true; Layout.fillHeight: true
+                                                Layout.preferredHeight: root.dp(40)
                                                 enabled: !root._photoRequestPending && root.photoHasAction(photoCard.slot, modelData[0])
                                                 opacity: enabled ? 1 : 0.35
                                                 Accessible.role: Accessible.Button
@@ -11745,7 +11744,7 @@ Item {
                             }
                             Text {
                                 Layout.fillWidth: true
-                                visible: photoCard.info.label.length > 0 || photoCard.info.error.length > 0
+                                visible: photoCard.info.error.length > 0 || (photoCard.info.state !== "SYNCED" && photoCard.info.label.length > 0)
                                 text: photoCard.info.error.length ? photoCard.info.error : photoCard.info.label
                                 color: photoCard.info.error.length ? root.photoToneColor("red", false) : root.cMuted
                                 font.pixelSize: root.sp(11); wrapMode: Text.WordWrap
