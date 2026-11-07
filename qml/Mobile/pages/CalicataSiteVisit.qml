@@ -14,6 +14,8 @@ Item {
     signal back()
     readonly property real u: ui ? ui.u : 1
     readonly property bool dark: editor ? editor.darkMode === true : false
+    readonly property color ink: dark ? "#FFFFFF" : "#151A30"
+    readonly property color mutedInk: dark ? "#DBE4E9" : "#45556B"
     readonly property bool motion: !!flow && flow.motionAllowed && !flow.reduceMotion
     readonly property int percent: snapshot ? Math.max(0, Math.min(100, Number(snapshot.percent) || 0)) : 0
     readonly property string code: snapshot && snapshot.code ? String(snapshot.code) : "Sin código"
@@ -41,9 +43,10 @@ Item {
     // Captura la misma capa de auras de Calicatas, sin duplicar el motor visual.
     ShaderEffectSource {
         id: auraTexture
+        anchors.fill: parent
         sourceItem: visit.editor ? visit.editor.background : null
         hideSource: false
-        visible: false
+        visible: !!sourceItem
         live: visit.visible && !!sourceItem
         smooth: true
     }
@@ -55,11 +58,6 @@ Item {
         property int glassTick: 0
     }
 
-    // Las auras existentes permanecen visibles bajo el tinte de la referencia.
-    Rectangle {
-        anchors.fill: parent
-        color: visit.dark ? Qt.rgba(0.02, 0.22, 0.13, 0.72) : Qt.rgba(0.03, 0.35, 0.21, 0.65)
-    }
     MouseArea { anchors.fill: parent }
 
     Item {
@@ -67,10 +65,10 @@ Item {
         x: visit.gutter
         y: (visit.ui ? visit.ui.topInset : 0) + 10 * visit.u
         width: 48 * visit.u; height: width
-        Mobile.DockGlassPanel { glassUi: glassHost; radius: backButton.width / 2; u: visit.u; lowFallback: false }
+        Mobile.DockGlassPanel { glassUi: glassHost; radius: backButton.width / 2; u: visit.u; tint: visit.ui && visit.ui.dockGlassTint !== undefined ? visit.ui.dockGlassTint : Qt.rgba(0, 0, 0, 0); lowFallback: false }
         Components.FlowIcon {
             anchors.centerIn: parent; width: 24 * visit.u; height: width
-            name: "system.back"; flow: visit.flow; tintColor: "white"; activeTintColor: "white"; inactiveOpacity: 1
+            name: "system.back"; flow: visit.flow; onDark: visit.dark; tintColor: visit.ink; activeTintColor: visit.ink; inactiveOpacity: 1
         }
         TapHandler { enabled: !visit.openingEditor; onTapped: visit.back() }
         Accessible.role: Accessible.Button
@@ -84,11 +82,11 @@ Item {
         width: visit.width - 2 * visit.gutter
         spacing: 0
         Text {
-            text: "Calicata"; color: "white"; font.family: visit.ui ? visit.ui.fontFamily : ""
+            text: "Calicata"; color: visit.ink; font.family: visit.ui ? visit.ui.fontFamily : ""
             font.pixelSize: Math.min(42 * visit.u, visit.width * 0.105); font.bold: true
         }
         Text {
-            width: parent.width; text: visit.code; color: "white"; elide: Text.ElideRight
+            width: parent.width; text: visit.code; color: visit.ink; elide: Text.ElideRight
             font.family: visit.ui ? visit.ui.fontFamily : ""
             font.pixelSize: Math.min(42 * visit.u, visit.width * 0.105); font.bold: true
         }
@@ -101,12 +99,12 @@ Item {
         width: visit.width * 0.43
         Text {
             text: visit.snapshot ? visit.percent + "%" : "—"
-            color: "white"; font.family: visit.ui ? visit.ui.fontFamily : ""
+            color: visit.ink; font.family: visit.ui ? visit.ui.fontFamily : ""
             font.pixelSize: Math.min(48 * visit.u, visit.width * 0.12); font.bold: true
         }
         Text {
             width: parent.width; text: "Estimación de\nrellenado"; wrapMode: Text.WordWrap
-            color: Qt.rgba(1, 1, 1, 0.80); font.pixelSize: 16 * visit.u
+            color: visit.mutedInk; font.pixelSize: 16 * visit.u
         }
     }
 
@@ -176,16 +174,17 @@ Item {
         height: 76 * visit.u
         Mobile.DockGlassPanel {
             glassUi: glassHost; radius: editButton.height / 2; u: visit.u
+            tint: visit.ui && visit.ui.dockGlassTint !== undefined ? visit.ui.dockGlassTint : Qt.rgba(0, 0, 0, 0)
             lowFallback: false; liquidTouch: true; reducedMotion: !visit.motion
         }
         Rectangle {
             width: 56 * visit.u; height: width; radius: width / 2
             anchors.left: parent.left; anchors.leftMargin: 9 * visit.u; anchors.verticalCenter: parent.verticalCenter
             color: Qt.rgba(1, 1, 1, 0.15); border.color: Qt.rgba(1, 1, 1, 0.45)
-            Components.FlowIcon { anchors.centerIn: parent; width: 26 * visit.u; height: width; name: "action.edit"; flow: visit.flow; tintColor: "white"; activeTintColor: "white"; inactiveOpacity: 1 }
+            Components.FlowIcon { anchors.centerIn: parent; width: 26 * visit.u; height: width; name: "action.edit"; flow: visit.flow; onDark: visit.dark; tintColor: visit.ink; activeTintColor: visit.ink; inactiveOpacity: 1 }
         }
-        Text { anchors.centerIn: parent; text: "Editar"; color: "white"; font.pixelSize: 24 * visit.u; font.bold: true }
-        Text { anchors.right: parent.right; anchors.rightMargin: 24 * visit.u; anchors.verticalCenter: parent.verticalCenter; text: "›››"; color: Qt.rgba(1, 1, 1, 0.7); font.pixelSize: 29 * visit.u }
+        Text { anchors.centerIn: parent; text: "Editar"; color: visit.ink; font.pixelSize: 24 * visit.u; font.bold: true }
+        Text { anchors.right: parent.right; anchors.rightMargin: 24 * visit.u; anchors.verticalCenter: parent.verticalCenter; text: "›››"; color: visit.mutedInk; font.pixelSize: 29 * visit.u }
         TapHandler {
             enabled: !visit.openingEditor
             onTapped: {
@@ -197,12 +196,18 @@ Item {
         Accessible.role: Accessible.Button
         Accessible.name: "Editar calicata"
     }
-    Rectangle { anchors.fill: parent; z: 100; color: "white"; opacity: visit.flashOpacity; visible: opacity > 0; enabled: false }
+    Rectangle {
+        // Fuera del Loader: el destello sigue visible mientras cambia a General.
+        parent: visit.editor ? visit.editor : visit
+        anchors.fill: parent
+        z: 1000; color: "white"; opacity: visit.flashOpacity
+        visible: opacity > 0; enabled: false
+    }
     SequentialAnimation {
         id: flashTransition
-        NumberAnimation { target: visit; property: "flashOpacity"; to: 0.72; duration: visit.flow ? visit.flow.duration(90) : 90; easing.type: Easing.OutQuad }
+        NumberAnimation { target: visit; property: "flashOpacity"; to: 1; duration: visit.flow ? visit.flow.duration(120) : 120; easing.type: Easing.OutQuad }
         ScriptAction { script: visit.openSection(1) }
-        NumberAnimation { target: visit; property: "flashOpacity"; to: 0; duration: visit.flow ? visit.flow.duration(180) : 180; easing.type: Easing.InOutQuad }
+        NumberAnimation { target: visit; property: "flashOpacity"; to: 0; duration: visit.flow ? Math.min(240, visit.flow.duration(240)) : 240; easing.type: Easing.InOutQuad }
         ScriptAction { script: visit.openingEditor = false }
     }
 }
