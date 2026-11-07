@@ -11280,6 +11280,23 @@ Item {
                                 root._setProgresiva(pkFromCode, false)
                         }
                     }
+                    GenFieldShell {
+                        label: "Lado de la vía"
+                        iconName: "map.location"
+                        tappable: true
+                        valueText: root.roadSideValue
+                        placeholder: "Seleccionar"
+                        onActivated: root.prfPick("Lado de la vía", Rules.ROAD_SIDE_OPTIONS, root.roadSideValue,
+                                                  "map.location", function(v) { root.roadSideValue = v; root._markDirty() })
+                    }
+                    GenHeaderField {
+                        label: "Progresiva"
+                        iconName: "calgen.code"
+                        boundText: txtPk.text
+                        hint: ""
+                        inputPlaceholder: "Ej. 12+340"
+                        commitHandler: function(t) { root._setProgresiva(t, true) }
+                    }
                     GenHeaderField {
                         objectName: "fichaField_project_name"
                         mandatory: true
@@ -11328,12 +11345,11 @@ Item {
                     wrapMode: Text.WordWrap
                 }
                     GenGroupHeader { title: "FICHA Y PERIODO" }
-                    GenFieldShell {
-                        label: "Tipo de ficha"
-                        tappable: true
-                        valueText: root.doc ? String(root.doc.header.description || "") : ""
-                        placeholder: "Seleccionar tipo de ficha"
-                        onActivated: root._openSheetTypePicker()
+                    GenHeaderField {
+                        label: "Título de la ficha / testificación"
+                        headerKey: "description"
+                        hint: ""
+                        inputPlaceholder: "Título de la ficha"
                     }
                     GenFieldShell {
                         objectName: "fichaField_fecha_inicio"
@@ -11394,6 +11410,13 @@ Item {
                     }
                     GridLayout {
                         Layout.fillWidth: true
+                        // Los valores antiguos inválidos siguen editables para poder corregirlos.
+                        visible: root.doc && ["length_m", "width_m"].some(function(key) {
+                            var value = root.doc.header[key]
+                            if (value === undefined || value === null || String(value).trim() === "") return false
+                            var n = Rules.parseDecimalSafe(value)
+                            return !isFinite(n) || n < 0
+                        })
                         columns: width >= root.dp(300) ? 2 : 1
                         columnSpacing: root.dp(10)
                         rowSpacing: root.dp(10)
@@ -11428,6 +11451,7 @@ Item {
                     }
 
                     GenHeaderField {
+                        visible: false // El dato histórico se conserva; la web usa el título de ficha.
                         label: "Descripción técnica"
                         iconName: "calgen.description"
                         accent: root.cGenGreen
