@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtMultimedia
 import ".." as Mobile
@@ -33,7 +34,8 @@ Item {
                 visit.stillEngineerIndex = Math.floor(Math.random() * visit.stillEngineerSources.length)
         }
     }
-    readonly property bool engineerAllowed: !!flow && flow.appSkin !== "ingenieros"
+    readonly property bool kawaiiEngineer: !!flow && flow.appSkin === "ingenieros"
+    readonly property bool engineerAllowed: !!flow
     readonly property string fidelity: flow && flow.graphicsCore ? String(flow.graphicsCore.fidelity || "") : ""
     readonly property bool videoTier: ["HIGH", "VERY_HIGH", "EXTREME"].indexOf(fidelity) >= 0
     readonly property bool playEngineer: engineerAllowed && videoTier && motion && visible
@@ -122,7 +124,9 @@ Item {
         Image {
             anchors.fill: parent
             visible: visit.engineerAllowed && (!visit.videoTier || !visit.motion)
-            source: visible ? visit.stillEngineerSources[visit.stillEngineerIndex] : ""
+            source: !visible ? "" : visit.kawaiiEngineer
+                    ? "qrc:/images/kawaii/pompompurin-engineer.png"
+                    : visit.stillEngineerSources[visit.stillEngineerIndex]
             asynchronous: true; cache: true; fillMode: Image.PreserveAspectFit
         }
         Loader {
@@ -146,17 +150,40 @@ Item {
                         }
                         ShaderEffect {
                             anchors.fill: parent
+                            // Atenúa el empalme sin crear un segundo reproductor ni textura.
+                            opacity: visit.kawaiiEngineer && engineerPlayer.cryingLoop
+                                ? (engineerPlayer.duration > 0
+                                   ? Math.max(0, Math.min(1, engineerPlayer.position / 220,
+                                                        (engineerPlayer.duration - engineerPlayer.position) / 220))
+                                   : 0)
+                                : 1
                             property var source: videoTexture
                             fragmentShader: "qrc:/InGe/Mobile/shaders/kawaii_chroma.frag.qsb"
                         }
                     }
+                    Connections {
+                        target: visit
+                        function onKawaiiEngineerChanged() { engineerPlayer.cryingLoop = false }
+                    }
                     MediaPlayer {
                         id: engineerPlayer
-                        source: "qrc:/images/calicata/site-engineer-animated.mp4"
+                        property bool cryingLoop: false
+                        // La fase inicial y la espera provienen del tiempo real del MP4.
+                        readonly property string characterState: !visit.kawaiiEngineer ? "HUMAN"
+                            : cryingLoop ? "LLANTO_CONTINUO"
+                            : position < 5000 ? "FELIZ" : "TRANSICION_Y_LLANTO"
+                        source: !visit.kawaiiEngineer ? "qrc:/images/calicata/site-engineer-animated.mp4"
+                            : cryingLoop ? "qrc:/images/calicata/pomp-cry-loop.mp4"
+                            : "qrc:/images/calicata/pomp-intro-original.mp4"
                         videoOutput: engineerVideoOutput
                         audioOutput: AudioOutput { muted: true; volume: 0 }
-                        loops: MediaPlayer.Infinite
+                        loops: visit.kawaiiEngineer && !cryingLoop ? 1 : MediaPlayer.Infinite
                         autoPlay: true
+                        onMediaStatusChanged: {
+                            if (visit.kawaiiEngineer && !cryingLoop && mediaStatus === MediaPlayer.EndOfMedia
+                                    && String(source) === "qrc:/images/calicata/pomp-intro-original.mp4")
+                                cryingLoop = true
+                        }
                         onErrorOccurred: function(error, errorString) {
                             console.warn("INGE_CALICATA_ENGINEER_MEDIA_ERROR", error, errorString)
                         }

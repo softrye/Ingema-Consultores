@@ -5,6 +5,9 @@
         <file alias="site-engineer-field.png">images/calicata/site-engineer-field.png</file>
         <file alias="site-engineer-ingema.png">images/calicata/site-engineer-ingema.png</file>
         <file alias="site-engineer-animated.mp4">images/calicata/site-engineer-animated.mp4</file>
+        <file alias="pomp-intro-original.mp4">images/calicata/pomp-intro-original.mp4</file>
+        <file alias="pomp-cry-original.mp4">images/calicata/pomp-cry-original.mp4</file>
+        <file alias="pomp-cry-loop.mp4">images/calicata/pomp-cry-loop.mp4</file>
         <file alias="photo-view.svg">images/calicata/photo-view.svg</file>
         <file alias="photo-edit.svg">images/calicata/photo-edit.svg</file>
         <file alias="photo-camera.svg">images/calicata/photo-camera.svg</file>
