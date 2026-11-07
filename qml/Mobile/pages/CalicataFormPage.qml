@@ -11261,8 +11261,8 @@ Item {
                 ColumnLayout {
                     id: generalList
                     Layout.fillWidth: true
-                    spacing: root.dp(10)
-                    GenGroupHeader { title: "CÓDIGO / PROYECTO / SUPERVISOR"; Layout.topMargin: 0 }
+                    spacing: root.dp(8)
+                    GenGroupHeader { title: "DATOS GENERALES"; Layout.topMargin: 0 }
                     GenHeaderField {
                         objectName: "fichaField_codigo"
                         mandatory: true
@@ -11326,7 +11326,6 @@ Item {
                     missing: !!root.fichaMissingKeys.project
                     rule: root.fichaIssueMessage("project")
                     label: "Carpeta del proyecto"
-                    caption: "Proyecto / carpeta de trabajo. Define dónde se guarda y sincroniza la ficha."
                     iconName: "calgen.project"
                     tappable: true
                     emphasized: true
@@ -11334,24 +11333,20 @@ Item {
                     placeholder: "Seleccionar carpeta"
                     onActivated: root._openProjectPicker()
                 }
-                Text {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: root.dp(4)
-                    Layout.topMargin: -root.dp(6)
-                    text: root.doc ? String(root.doc.header.projectCode || "") : ""
-                    visible: text.length > 0
-                    color: root.cMuted
-                    font.pixelSize: root.fsLabel
-                    wrapMode: Text.WordWrap
-                }
-                    GenGroupHeader { title: "FICHA Y PERIODO" }
                     GenHeaderField {
                         label: "Título de la ficha / testificación"
                         headerKey: "description"
                         hint: ""
                         inputPlaceholder: "Título de la ficha"
                     }
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: width >= root.dp(300) ? 2 : 1
+                        columnSpacing: root.dp(8)
+                        rowSpacing: root.dp(8)
                     GenFieldShell {
+                        Layout.preferredWidth: 1
+                        Layout.alignment: Qt.AlignTop
                         objectName: "fichaField_fecha_inicio"
                         mandatory: true
                         missing: !!root.fichaMissingKeys.fecha_inicio
@@ -11366,6 +11361,8 @@ Item {
                         onActivated: root._openDatePicker(btnFechaInicio, "FECHA INICIO")
                     }
                     GenFieldShell {
+                        Layout.preferredWidth: 1
+                        Layout.alignment: Qt.AlignTop
                         objectName: "fichaField_fecha_fin"
                         missing: !!root.fichaMissingKeys.fecha_fin
                         rule: root.fichaIssueMessage("fecha_fin")
@@ -11377,6 +11374,7 @@ Item {
                         valueText: btnFechaFin.text === "Seleccionar fecha" ? "" : btnFechaFin.text
                         placeholder: "Seleccionar fecha"
                         onActivated: root._openDatePicker(btnFechaFin, "FECHA FIN")
+                    }
                     }
                     Text {
                         Layout.fillWidth: true
@@ -11392,13 +11390,11 @@ Item {
                         missing: !!root.fichaMissingKeys.logos
                         rule: root.fichaIssueMessage("logos")
                         label: "Identidad del reporte y logos"
-                        caption: "Logo MTC / entidad y logo del proyecto"
                         iconName: "calgen.identity"
                         tappable: true
                         valueText: (root.hasLogoMtc ? "MTC / entidad" : "Sin MTC") + " · " + (root.hasLogoProyecto ? "Proyecto" : "Sin proyecto")
                         onActivated: identityPopup.open()
                     }
-                    GenGroupHeader { title: "TRABAJO DE CAMPO" }
                     GenFieldShell {
                         objectName: "generalBoxMachine"
                         readonly property int machineIndex: root._catalogIndex(txtMaquina.text, Rules.MACHINE_OPTIONS, root.machineHistorical)
@@ -11469,7 +11465,6 @@ Item {
                             Layout.alignment: Qt.AlignTop
                             label: "Profundidad (m)"
                             labelCaps: false
-                            caption: "Derivada de los cortes"
                             iconName: "calgen.depth"
                             accent: root.cGenGreen
                             accentSoft: root.cGenGreenSoft
@@ -11482,7 +11477,6 @@ Item {
                             Layout.alignment: Qt.AlignTop
                             label: "Nivel freático (m)"
                             labelCaps: false
-                            caption: root.groundwaterCustom ? "Personalizado" : "Primer corte con AGUA"
                             iconName: "calgen.water"
                             accent: root.cGenGreen
                             accentSoft: root.cGenGreenSoft
