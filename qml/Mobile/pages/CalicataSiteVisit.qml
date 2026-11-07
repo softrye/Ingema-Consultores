@@ -1,4 +1,5 @@
 import QtQuick
+import QtMultimedia
 import ".." as Mobile
 import "../components" as Components
 
@@ -19,6 +20,12 @@ Item {
     readonly property real gutter: Math.max(20 * u, width * 0.065)
     property real flashOpacity: 0
     property bool openingEditor: false
+    readonly property bool engineerAllowed: !!flow && flow.appSkin !== "ingenieros"
+    readonly property string fidelity: flow && flow.graphicsCore ? String(flow.graphicsCore.fidelity || "") : ""
+    readonly property bool videoTier: ["HIGH", "VERY_HIGH", "EXTREME"].indexOf(fidelity) >= 0
+    readonly property bool playEngineer: engineerAllowed && videoTier && motion && visible
+                                          && !!editor && editor.siteVisitActive
+                                          && Qt.application["state"] === Qt.ApplicationActive
 
     // Captura la misma capa de auras de Calicatas, sin duplicar el motor visual.
     ShaderEffectSource {
@@ -92,15 +99,62 @@ Item {
         }
     }
 
-    Image {
+    // Un solo reproductor, creado únicamente con el preset y ciclo de vida permitidos.
+    Item {
         id: engineer
-        source: "qrc:/images/calicata/site-engineer.png"
-        asynchronous: true; cache: true; fillMode: Image.PreserveAspectFit
         width: Math.min(visit.width * 0.65, 340 * visit.u)
         height: Math.max(0, Math.min(visit.height * 0.47, editButton.y - progressColumn.y - 12 * visit.u))
         anchors.right: parent.right
         anchors.rightMargin: visit.gutter * 0.45
         y: Math.max(progressColumn.y + 10 * visit.u, editButton.y - height - 14 * visit.u)
+        clip: true
+        visible: visit.engineerAllowed
+        enabled: false
+        Image {
+            anchors.fill: parent
+            visible: visit.engineerAllowed && (!visit.videoTier || !visit.motion)
+            source: visible ? "qrc:/images/calicata/site-engineer.png" : ""
+            asynchronous: true; cache: true; fillMode: Image.PreserveAspectFit
+        }
+        Loader {
+            anchors.fill: parent
+            active: visit.playEngineer
+            sourceComponent: Component {
+                Item {
+                    clip: true
+                    // El video permanece 16:9; se recortan solo los laterales verdes.
+                    Item {
+                        id: videoFrame
+                        height: parent.height
+                        width: height * 16 / 9
+                        anchors.centerIn: parent
+                        VideoOutput { id: engineerVideoOutput; anchors.fill: parent; fillMode: VideoOutput.PreserveAspectFit }
+                        ShaderEffectSource {
+                            id: videoTexture
+                            anchors.fill: parent
+                            sourceItem: engineerVideoOutput
+                            hideSource: true; live: true; visible: false
+                        }
+                        ShaderEffect {
+                            anchors.fill: parent
+                            property var source: videoTexture
+                            fragmentShader: "qrc:/InGe/Mobile/shaders/kawaii_chroma.frag.qsb"
+                        }
+                    }
+                    MediaPlayer {
+                        id: engineerPlayer
+                        source: "qrc:/images/calicata/site-engineer-animated.mp4"
+                        videoOutput: engineerVideoOutput
+                        audioOutput: AudioOutput { muted: true; volume: 0 }
+                        loops: MediaPlayer.Infinite
+                        autoPlay: true
+                        onErrorOccurred: function(error, errorString) {
+                            console.warn("INGE_CALICATA_ENGINEER_MEDIA_ERROR", error, errorString)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Item {

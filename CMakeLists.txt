@@ -255,7 +255,7 @@ if(INGE_BUILD_MOBILE)
     # y sus recursos con las rutas qrc originales.
     find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS QuickControls2)
     if(QT_VERSION_MAJOR GREATER_EQUAL 6)
-        find_package(Qt6 REQUIRED COMPONENTS QuickDialogs2)
+        find_package(Qt6 REQUIRED COMPONENTS QuickDialogs2 Multimedia)
     endif()
     set(INGE_MOBILE_CALICATAS_QRC "${INGE_PROJECT_ROOT}/resources_mobile_calicatas.qrc")
     set(INGE_MOBILE_KAWAII_QRC "${INGE_PROJECT_ROOT}/resources_mobile_kawaii.qrc")
@@ -533,7 +533,7 @@ if(INGE_BUILD_MOBILE)
 
         if(QT_VERSION_MAJOR GREATER_EQUAL 6)
             target_include_directories(AppCalicatasMobile PRIVATE "${INGE_PROJECT_ROOT}/src/documents")
-            target_link_libraries(AppCalicatasMobile PRIVATE Qt6::GuiPrivate Qt6::QuickDialogs2)
+            target_link_libraries(AppCalicatasMobile PRIVATE Qt6::GuiPrivate Qt6::QuickDialogs2 Qt6::Multimedia)
         endif()
 
         if(ANDROID)
@@ -769,9 +769,13 @@ if(INGE_BUILD_MOBILE)
         qt_add_shaders(AppCalicatasMobile "inge_access_shaders"
             PREFIX "/InGe/Mobile"
             BASE "${MOBILE_QML_DIR}"
+            GLSL "100es,120,150"
+            HLSL 50
+            MSL 12
             FILES
                 "${MOBILE_QML_DIR}/shaders/aurora.frag"
                 "${MOBILE_QML_DIR}/shaders/glass.frag"
+                "${MOBILE_QML_DIR}/shaders/kawaii_chroma.frag"
         )
 
         if(ANDROID)

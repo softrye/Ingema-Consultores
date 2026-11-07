@@ -2,6 +2,7 @@
     <qresource prefix="/images/calicata">
         <file alias="lab-beaker.svg">images/calicata/lab-beaker.svg</file>
         <file alias="site-engineer.png">images/calicata/site-engineer.png</file>
+        <file alias="site-engineer-animated.mp4">images/calicata/site-engineer-animated.mp4</file>
         <file alias="photo-view.svg">images/calicata/photo-view.svg</file>
         <file alias="photo-edit.svg">images/calicata/photo-edit.svg</file>
         <file alias="photo-camera.svg">images/calicata/photo-camera.svg</file>
