@@ -178,14 +178,24 @@ Item {
                         audioOutput: AudioOutput { muted: true; volume: 0 }
                         loops: visit.kawaiiEngineer && !cryingLoop ? 1 : MediaPlayer.Infinite
                         autoPlay: true
-                        onMediaStatusChanged: {
-                            if (visit.kawaiiEngineer && !cryingLoop && mediaStatus === MediaPlayer.EndOfMedia
-                                    && String(source) === "qrc:/images/calicata/pomp-intro-original.mp4") {
+                        function beginCryingLoop() {
+                            if (visit.kawaiiEngineer && !cryingLoop && visit.playEngineer
+                                    && String(source) === "qrc:/images/calicata/pomp-intro-original.mp4")
                                 cryingLoop = true
-                            } else if (visit.kawaiiEngineer && cryingLoop && mediaStatus === MediaPlayer.LoadedMedia
-                                       && visit.playEngineer && playbackState !== MediaPlayer.PlayingState) {
+                        }
+                        // Se cambia una sola vez, cerca del final real del primer clip;
+                        // el segundo sigue usando el bucle nativo de MediaPlayer.
+                        onPositionChanged: {
+                            if (duration > 0 && position >= duration - 450)
+                                beginCryingLoop()
+                        }
+                        onMediaStatusChanged: {
+                            if (mediaStatus === MediaPlayer.EndOfMedia && !cryingLoop)
+                                beginCryingLoop()
+                            else if (visit.kawaiiEngineer && cryingLoop && mediaStatus === MediaPlayer.LoadedMedia
+                                     && visit.playEngineer
+                                     && String(source) === "qrc:/images/calicata/pomp-cry-loop.mp4")
                                 play()
-                            }
                         }
                         onErrorOccurred: function(error, errorString) {
                             console.warn("INGE_CALICATA_ENGINEER_MEDIA_ERROR", error, errorString)
