@@ -20,6 +20,17 @@ Item {
     readonly property real gutter: Math.max(20 * u, width * 0.065)
     property real flashOpacity: 0
     property bool openingEditor: false
+    property int stillEngineerIndex: Math.floor(Math.random() * 3)
+    readonly property var stillEngineerSources: ["qrc:/images/calicata/site-engineer.png",
+        "qrc:/images/calicata/site-engineer-field.png", "qrc:/images/calicata/site-engineer-ingema.png"]
+    Connections {
+        target: visit.editor
+        ignoreUnknownSignals: true
+        function onSiteVisitActiveChanged() {
+            if (visit.editor && visit.editor.siteVisitActive)
+                visit.stillEngineerIndex = Math.floor(Math.random() * visit.stillEngineerSources.length)
+        }
+    }
     readonly property bool engineerAllowed: !!flow && flow.appSkin !== "ingenieros"
     readonly property string fidelity: flow && flow.graphicsCore ? String(flow.graphicsCore.fidelity || "") : ""
     readonly property bool videoTier: ["HIGH", "VERY_HIGH", "EXTREME"].indexOf(fidelity) >= 0
@@ -113,7 +124,7 @@ Item {
         Image {
             anchors.fill: parent
             visible: visit.engineerAllowed && (!visit.videoTier || !visit.motion)
-            source: visible ? "qrc:/images/calicata/site-engineer.png" : ""
+            source: visible ? visit.stillEngineerSources[visit.stillEngineerIndex] : ""
             asynchronous: true; cache: true; fillMode: Image.PreserveAspectFit
         }
         Loader {
