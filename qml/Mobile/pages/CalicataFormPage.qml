@@ -3055,7 +3055,7 @@ Item {
     }
     function _refreshRemoteLogos() {
         if (!doc || doc.closed === true || !String(doc.header.remoteCalicataId || "").length
-                || typeof CalicataCloud === "undefined") return
+                || !root.auth || !root.auth.logged || typeof CalicataCloud === "undefined") return
         ensureDocsRoots()
         if (!String(docsCtl.resourcesPath || "").length) return
         root._setLogoReadState("PROJECT", "LOADING", "")
@@ -3075,7 +3075,8 @@ Item {
         }
         for (var category in root.logoReadStates) {
             var read = root.logoReadStates[category]
-            if (read.state === "ERROR" || read.failed) issues.push({ key: "logo-" + category, message: read.message, area: "General · Logos" })
+            if (read.state === "ERROR" || read.failed) issues.push({ key: "logo-" + category, message: read.message,
+                area: category === "PROJECT" ? "General · Logo del proyecto" : "General · Logo de la entidad" })
         }
         for (var slot in root.remotePhotoReadIssues)
             issues.push({ key: "photo-" + slot, message: root.remotePhotoReadIssues[slot], area: "Fotos" })
