@@ -1347,41 +1347,44 @@ function sucsSelection(code) {
 function selectedSucsCode(form) {
     return form.primarySucs+(form.isComposite===true && form.secondarySucs ? "-"+form.secondarySucs : "")
 }
+function narrowToDivision(candidates, division, reason) {
+    var matching = division ? candidates.filter(function(code) { return code.indexOf(division) === 0 }) : []
+    var kept = matching.length ? matching : candidates
+    var divisionReason = division === "G" ? "Más de la mitad del grueso queda retenido en el Nº 4: es grava."
+        : division === "S" ? "Más de la mitad del grueso pasa el Nº 4: es arena."
+        : "No se registra el tamiz Nº 4, que separa grava de arena."
+    return {candidates: kept, conclusive: kept.length === 1, reason: reason + " " + divisionReason}
+}
+
+// Paridad con soilClassification.ts del ZIP web ingeplus-main (3).
 function recommendSucs(sample) {
-    var f=sample.passing200, ll=sample.liquidLimit, pi=labPlasticityIndex(sample)
-    if (typeof f!=="number" || !isFinite(f) || f<0 || f>100) return null
-    var previous=null, values=[sample.passing4,sample.passing10,sample.passing40,f]
-    for (var i=0; i<values.length; ++i) if (values[i]!==null && values[i]!==undefined) {
-        if (!isFinite(values[i]) || values[i]<0 || values[i]>100 || (previous!==null && values[i]>previous)) return null
-        previous=values[i]
+    var f = sample.passing200, ll = sample.liquidLimit, pi = labPlasticityIndex(sample)
+    if (f === null) return null
+    if (f >= 50) {
+        if (ll === null || pi === null) return null
+        var line = aLinePlasticity(ll)
+        if (ll >= 50)
+            return pi > line
+                ? {candidates:["CH"], conclusive:true, reason:"Fino con LL ≥ 50 por encima de la línea A."}
+                : {candidates:["MH","OH"], conclusive:false, reason:"Fino con LL ≥ 50 bajo la línea A; separar MH de OH exige el ensayo de secado en horno."}
+        if (pi > line && pi > 7)
+            return {candidates:["CL"], conclusive:true, reason:"Fino con LL < 50, IP > 7 y por encima de la línea A."}
+        if (pi < 4 || pi < line)
+            return {candidates:["ML","OL"], conclusive:false, reason:"Fino con LL < 50 bajo la línea A; separar ML de OL exige el ensayo de secado en horno."}
+        return {candidates:["CL","ML"], conclusive:false, reason:"Fino en la zona CL-ML de la carta de plasticidad (4 ≤ IP ≤ 7)."}
     }
-    if (ll!==null && (!isFinite(ll)||ll<0)) return null
-    if (pi!==null && (!isFinite(pi)||pi<0||pi>ll)) return null
-    var limits=ll!==null && pi!==null, line=limits?aLinePlasticity(ll):null
-    if (f>=50) {
-        if (!limits) return null
-        if (ll<50 && pi>=4 && pi<=7 && pi>=line)
-            return {candidates:["CL-ML"],conclusive:true,reason:"Zona rayada: LL < 50, 4 ≤ IP ≤ 7, sobre o en la línea A; símbolo doble CL-ML (suelo inorgánico)."}
-        var clay=pi>=line && (ll>=50 || pi>7), mineral=clay?(ll>=50?"CH":"CL"):(ll>=50?"MH":"ML")
-        return {candidates:[mineral,ll>=50?"OH":"OL"],conclusive:false,
-            reason:"IP = LL − LP; línea A = 0.73(LL − 20); LL = 50 separa baja y alta plasticidad. Separar suelo inorgánico de orgánico requiere ensayo de secado en horno."}
+    var division = coarseDivision(sample)
+    if (f < 5)
+        return narrowToDivision(["GW","GP","SW","SP"], division, "Grueso limpio (finos < 5 %); la graduación exige Cu y Cc de la curva completa.")
+    if (f > 12) {
+        if (pi === null || ll === null)
+            return narrowToDivision(["GM","GC","SM","SC"], division, "Grueso con finos (> 12 %), sin límites de Atterberg para saber si son limosos o arcillosos.")
+        return pi > aLinePlasticity(ll) && pi > 7
+            ? narrowToDivision(["GC","SC"], division, "Grueso con finos arcillosos (sobre la línea A).")
+            : narrowToDivision(["GM","SM"], division, "Grueso con finos limosos (bajo la línea A o IP ≤ 7).")
     }
-    var division=coarseDivision(sample), groups=division?[division]:["G","S"], d=sucsDiameters(sample), codes=[]
-    var borderline=limits && pi>=4 && pi<=7 && pi>=line
-    var fines=limits?(borderline?["C","M"]:[pi>=line && pi>7?"C":"M"]):["C","M"]
-    for (i=0; i<groups.length; ++i) {
-        var g=groups[i], graded=sucsGradation(g,d), bases=graded?[graded]:[g+"W",g+"P"]
-        if (f<5) codes=codes.concat(bases)
-        else if (f<=12) for (var b=0; b<bases.length; ++b) for (var k=0; k<fines.length; ++k) codes.push(bases[b]+"-"+g+fines[k])
-        else if (borderline) codes.push(g+"C-"+g+"M")
-        else for (k=0; k<fines.length; ++k) codes.push(g+fines[k])
-    }
-    var reason=f<5?"Finos < 5 %: símbolo simple de graduación.":f<=12?"Finos entre 5 y 12 % inclusive: símbolo doble de graduación y finos.":"Finos > 12 %: la línea A y el IP determinan los finos; zona CL-ML produce GC-GM o SC-SM."
-    if (f<=12) reason+=" Cu = D60/D10; Cc = D30²/(D10·D60). W: Cu ≥ 4 (grava) o ≥ 6 (arena), y 1 ≤ Cc ≤ 3."
-    if (f<=12 && !sucsGradation("S",d)) reason+=" Falta D10, D30 o D60 dentro de la curva medida; no se extrapolan."
-    if (!division) reason+=" Falta Nº 4 para separar grava y arena."
-    if (f>=5 && !limits) reason+=" Faltan límites de Atterberg."
-    return {candidates:codes,conclusive:codes.length===1,reason:reason}
+    return narrowToDivision(["GW","GP","GM","GC","SW","SP","SM","SC"], division,
+                            "Grueso con 5–12 % de finos: la norma pide una clasificación doble, que esta ficha no registra.")
 }
 
 function reviewLaboratorySample(form) {
