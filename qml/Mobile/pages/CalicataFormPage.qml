@@ -190,7 +190,7 @@ Item {
     Connections {
         target: stratumSheet
         function onClosed() {
-            root.labSheetActive = false
+            if (!prfStratumPopup.visible) root.labSheetActive = false
             root.labDetailClosing = false
             stratumSheet.offsetX = 0
             stratumSheet.offsetY = 0
@@ -1779,7 +1779,7 @@ Item {
         case 2: return stageIndex === 1
         case 3: return stageIndex === 2 && profileMode === "depth"
         case 4: return stageIndex === 2
-        case 5: return root.labSheetActive && root.profileMode === "samples"
+        case 5: return root.labSheetActive
         case 7: return stageIndex === 3
         case 8: return stageIndex === 4 && reviewNotesEditing
         }
@@ -8588,7 +8588,7 @@ Item {
         } else if (selectedStratum >= cortesModel.count) {
             selectedStratum = cortesModel.count - 1
         }
-        profileMode = "overview"
+        if (!root.labSheetActive) profileMode = "overview"
         activePhotoCategory = Math.max(1, Math.min(3, Number(view.photoCategory || 1)))
 
         // observaciones
@@ -11973,7 +11973,10 @@ Item {
                                         anchors.centerIn: parent
                                         width: parent.width - root.dp(10)
                                         horizontalAlignment: Text.AlignHCenter
-                                        text: "E" + (index + 1) + "  ›\n" + String(cortesModel.get(index).de || "0.00") + " – " + String(cortesModel.get(index).a || "…") + " m"
+                                        text: {
+                                            var row = index >= 0 && index < cortesModel.count ? cortesModel.get(index) : null
+                                            return row ? "E" + (index + 1) + "  ›\n" + String(row.de || "0.00") + " – " + String(row.a || "…") + " m" : ""
+                                        }
                                         color: root.selectedStratum === index ? "white" : root.cText
                                         font.pixelSize: root.sp(11)
                                     }

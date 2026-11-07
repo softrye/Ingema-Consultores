@@ -1,4 +1,11 @@
 <RCC>
+    <qresource prefix="/images/calicata">
+        <file alias="lab-beaker.svg">images/calicata/lab-beaker.svg</file>
+        <file alias="photo-view.svg">images/calicata/photo-view.svg</file>
+        <file alias="photo-edit.svg">images/calicata/photo-edit.svg</file>
+        <file alias="photo-camera.svg">images/calicata/photo-camera.svg</file>
+        <file alias="photo-upload.svg">images/calicata/photo-upload.svg</file>
+    </qresource>
     <!-- Mobile Calicatas only: retain QRC aliases used by exporter and photographs. -->
     <!-- Desktop retains the original resources.qrc file unchanged. -->
     <qresource prefix="/images">
