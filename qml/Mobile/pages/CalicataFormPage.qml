@@ -209,11 +209,11 @@ Item {
     }
     // Única vía de cierre del detalle (flecha, Back del sistema, toque fuera).
     function closeLabDetail() {
-        if (!root.labSheetActive || root.labDetailClosing || !stratumSheet.visible) return false
-        if (!root.commitPendingField()) return false
-        root.labDetailClosing = true
+        if (!root.labSheetActive || !prfStratumPopup.visible || !root.commitPendingField()) return false
+        root.labSheetActive = false
+        root.profileMode = "field"
         root.dismissInputForNavigation()
-        root.finishStratum(false)   // guarda y llama stratumSheet.close() -> transición de salida
+        prfStratumFlick.contentY = 0
         return true
     }
     // Pestañas del detalle de Laboratorio: cambio inmediato.
@@ -229,7 +229,7 @@ Item {
     }
     property bool _labActionGuard: false
     Timer { id: labActionGuardTimer; interval: 450; repeat: false; onTriggered: root._labActionGuard = false }
-    readonly property bool labDetailOpen: stratumSheet.visible && root.labSheetActive && !root.labDetailClosing
+    readonly property bool labDetailOpen: prfStratumPopup.visible && root.labSheetActive
     // Imperativo, no binding: labInfo() recorre funciones que pueden vaciar la
     // revisión pendiente (_flushCortesRevision) mientras se evalúa -> «Binding loop
     // detected for property labInfosAll». Se recalcula al subir _cortesRevision.
@@ -1630,7 +1630,7 @@ Item {
         if (infoDlg.opened) { infoDlg.close(); return true }
         if (projectPickerPopup.opened) { projectPickerPopup.close(); return true }
         if (identityPopup.opened) { identityPopup.close(); return true }
-        if (root.labSheetActive && stratumSheet.visible) { root.closeLabDetail(); return true }
+        if (root.labSheetActive && prfStratumPopup.visible) { root.closeLabDetail(); return true }
         if (stratumSheet.opened) { finishStratum(false); return true }
         if (!commitPendingField()) return true
         return false
@@ -1847,22 +1847,14 @@ Item {
 
     function openLabForStratum(index, originItem) {
         if (index < 0 || index >= cortesModel.count || !commitPendingField()) return
-        // Shared-origin: la ventana nace desde la tarjeta tocada (sin tarjeta: centro + 24 dp).
-        var origin = originItem && originItem.mapToItem ? originItem.mapToItem(null, originItem.width / 2, originItem.height / 2) : null
-        labOriginValid = !!origin && isFinite(origin.x) && isFinite(origin.y)
-        labOriginX = labOriginValid ? origin.x : 0
-        labOriginY = labOriginValid ? origin.y : 0
-        flushRequested()
-        selectedStratum = index
-        stageIndex = 2
-        sectionNavCurrent = 4
-        labTab = "lab"
-        dismissInputForNavigation()
-        profileMode = "samples"
-        labSheetActive = true
-        labDetailClosing = false
-        stratumSheet.open()
-        scrollToTop()
+        if (!prfStratumPopup.opened || root.selectedStratum !== index)
+            root.openStratumEditor(index)
+        root.selectedStratum = index
+        root.labTab = "lab"
+        root.profileMode = "samples"
+        root.labSheetActive = true
+        root.dismissInputForNavigation()
+        prfStratumFlick.contentY = 0
     }
 
     function selectStratum(index, mode) {
@@ -6692,15 +6684,8 @@ Item {
                 TapHandler {
                     onTapped: {
                         if (parent.active || !root.commitPendingField()) return
-                        if (index === 1) {
-                            root.stratumEditorSwitching = true
-                            root.openLabForStratum(root.selectedStratum)
-                            Qt.callLater(function() { root.stratumEditorSwitching = false })
-                        } else {
-                            root.stratumEditorSwitching = true
-                            root.stratumEditorPendingTab = "stratum"
-                            if (!root.closeLabDetail()) { root.stratumEditorPendingTab = ""; root.stratumEditorSwitching = false }
-                        }
+                        if (index === 1) root.openLabForStratum(root.selectedStratum)
+                        else root.closeLabDetail()
                     }
                 }
             }
@@ -6722,6 +6707,8 @@ Item {
         }
         onClosed: {
             root.commitPendingField()
+            root.labSheetActive = false
+            root.profileMode = "overview"
             root.flushRequested()
         }
         contentItem: ColumnLayout {
@@ -6733,7 +6720,7 @@ Item {
                                       : ""
                 onCloseRequested: prfStratumPopup.close()
             }
-            StratumEditorTabs { laboratory: false }
+            StratumEditorTabs { laboratory: root.labSheetActive }
             Flickable {
                 id: prfStratumFlick
                 Layout.fillWidth: true
@@ -6748,7 +6735,7 @@ Item {
                     spacing: root.dp(12)
                         PrfCard {
                             id: prfEditorCard
-                            visible: cortesModel.count > 0
+                            visible: cortesModel.count > 0 && !root.labSheetActive
                             readonly property int idx: root.selectedStratum
                             readonly property var s: root.prfSel || ({})
                             readonly property bool hasStratum: !!root.prfSel
@@ -7123,6 +7110,378 @@ Item {
                                 }
                             }
                         }
+            MobileStageBody {
+                id: mobileSamplesSection
+                Layout.fillWidth: true
+                glassPanel: false
+                sectionNumber: 5
+                sectionTitle: "Muestras y ensayos"
+                sectionSubtitle: "Datos de laboratorio por intervalo"
+
+
+                Repeater {
+                    model: cortesModel
+
+                    delegate: Rectangle {
+                        id: mobileSampleCard
+                        visible: corteIdx === root.selectedStratum
+                        function labExtra() {
+                            if(corteIdx<0 || corteIdx>=cortesModel.count) return {}
+                            return JSON.parse(cortesModel.get(corteIdx)._extraJson || "{}")
+                        }
+                        property int corteIdx: index
+                        readonly property var info: { root._cortesRevision; return root.labInfo(corteIdx) }
+                        // Repeater delegates can outlive their removed ListModel row
+                        // until deferred destruction. Never dereference that row.
+                        function boundary(key) {
+                            if (corteIdx < 0 || corteIdx >= cortesModel.count) return NaN
+                            var row = cortesModel.get(corteIdx)
+                            return Rules.parseDecimalSafe(row ? row[key] : null)
+                        }
+                        Layout.fillWidth: true
+                        implicitHeight: mobileSampleLayout.implicitHeight + root.dp(20)
+                        radius: root.dp(11)
+                        color: "transparent"   // los bloques internos ya son tarjetas
+                        border.width: 0
+                        border.color: root.cBorder
+
+                        ColumnLayout {
+                            id: mobileSampleLayout
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: root.dp(10)
+                            spacing: root.dp(10)
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: root.dp(8)
+                                Components.FlowIcon {
+                                    Layout.preferredWidth: root.dp(21)
+                                    Layout.preferredHeight: root.dp(21)
+                                    name: root.iconSamplesName
+                                    flow: root.flow
+                                    tintColor: root.cAccent
+                                    activeTintColor: root.cAccent
+                                    inactiveOpacity: 1.0
+                                }
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 1
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "Estrato " + (mobileSampleCard.corteIdx + 1)
+                                        color: root.cText
+                                        font.bold: true
+                                        font.pixelSize: root.sp(root.isPhone ? 14 : 16)
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "Estrato " + ((de || "—") + " – " + (a || "—") + " m")
+                                        color: root.cMuted
+                                        font.pixelSize: root.fsLabel
+                                    }
+                                }
+                            }
+
+                            // CONTEXTO: heredado de Perfil, solo lectura.
+                            PrfSubsection {
+                                Layout.fillWidth: true
+                                visible: root.labTab === "context"
+                                title: "Contexto del estrato (desde Perfil)"
+                                iconName: root.iconStrataName
+                                accent: root.cGenTeal
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: root.dp(10)
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: root.dp(4)
+                                        Repeater {
+                                            model: root.labContextRows(mobileSampleCard.info)
+                                            delegate: RowLayout {
+                                                required property var modelData
+                                                Layout.fillWidth: true
+                                                spacing: root.dp(8)
+                                                Text { Layout.preferredWidth: root.dp(118); text: modelData.label; color: root.cMuted; font.pixelSize: root.fsLabel; wrapMode: Text.WordWrap }
+                                                Text { Layout.fillWidth: true; text: modelData.value; color: root.cText; font.pixelSize: root.fsLabel; wrapMode: Text.WordWrap }
+                                            }
+                                        }
+                                    }
+                                    Rectangle {
+                                        readonly property var files: mobileSampleCard.info ? root.stratumPatternFilesFor(mobileSampleCard.info.plain) : []
+                                        visible: files.length > 0
+                                        Layout.alignment: Qt.AlignTop
+                                        Layout.preferredWidth: root.dp(40)
+                                        Layout.preferredHeight: root.dp(96)
+                                        color: "#FFFFFF"
+                                        border.width: 1
+                                        border.color: root.cBorder
+                                        clip: true
+                                        Row {
+                                            id: labPatternLayers
+                                            readonly property var layerFiles: parent.files
+                                            anchors.fill: parent
+                                            anchors.margins: 1
+                                            Repeater {
+                                                model: labPatternLayers.layerFiles
+                                                delegate: Image {
+                                                    required property string modelData
+                                                    width: labPatternLayers.width / Math.max(1, labPatternLayers.layerFiles.length)
+                                                    height: labPatternLayers.height
+                                                    source: modelData
+                                                    fillMode: Image.Tile
+                                                    sourceSize.width: root.dp(24)
+                                                    sourceSize.height: root.dp(24)
+                                                    asynchronous: true
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "Solo lectura: estos datos se editan en Perfil."
+                                    color: root.cMuted
+                                    font.pixelSize: root.sp(11)
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+
+                            // HISTORIAL: solo hitos reales guardados en la ficha (sin backend de versiones).
+                            PrfSubsection {
+                                Layout.fillWidth: true
+                                visible: root.labTab === "history"
+                                title: "Historial"
+                                iconName: "status.sync"
+                                accent: root.cGenBlue
+                                Repeater {
+                                    model: root.labHistoryRows(mobileSampleCard.info)
+                                    delegate: RowLayout {
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        spacing: root.dp(8)
+                                        Text { Layout.preferredWidth: root.dp(88); text: modelData.label; color: root.cMuted; font.pixelSize: root.fsLabel }
+                                        Text { Layout.fillWidth: true; text: modelData.value; color: root.cText; font.pixelSize: root.fsLabel; wrapMode: Text.WordWrap }
+                                    }
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    visible: root.labHistoryRows(mobileSampleCard.info).length === 0
+                                    text: "Sin eventos de laboratorio registrados en esta ficha."
+                                    color: root.cMuted
+                                    font.pixelSize: root.fsLabel
+                                    wrapMode: Text.WordWrap
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: mobileSampleCard.info && (mobileSampleCard.info.plain.lab_cloud_pending || []).length
+                                          ? "Pendiente de sincronizar con el servidor: "
+                                            + mobileSampleCard.info.plain.lab_cloud_pending.map(function(reason) {
+                                                  return reason === "LAB_LIMITS" ? "WL/LP con decimales (el servidor admite enteros)"
+                                                       : reason === "LAB_INVALID" ? "ensayo con errores de validación" : reason }).join(", ")
+                                            + ". El valor local se conserva."
+                                          : "Sin historial sincronizado desde el servidor."
+                                    color: root.cMuted
+                                    font.pixelSize: root.sp(11)
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+
+                            // Canonical Web laboratory contract. One laboratory row belongs to one stratum.
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                visible: root.labTab === "lab" && !!mobileSampleCard.info
+                                spacing: root.dp(10)
+
+                                ColumnLayout {
+                                    id: labReviewPanel
+                                    readonly property var suggestion: mobileSampleCard.info ? mobileSampleCard.info.suggestion : null
+                                    Layout.fillWidth: true
+                                    spacing: root.dp(6)
+                                    Text { text: "Clasificación sugerida"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: root.dp(6)
+                                        Text { Layout.preferredWidth: root.dp(64); text: "AASHTO"; color: root.cMuted; font.bold: true; font.pixelSize: root.sp(11) }
+                                        LabSuggestionChip {
+                                            visible: !!(labReviewPanel.suggestion && labReviewPanel.suggestion.aashto)
+                                            code: visible ? labReviewPanel.suggestion.aashto.code : ""
+                                            current: visible && labReviewPanel.suggestion.aashto.current
+                                            onAdopt: root.adoptLabAashto(mobileSampleCard.corteIdx, code)
+                                        }
+                                        Text { visible: !(labReviewPanel.suggestion && labReviewPanel.suggestion.aashto); text: "Pendiente"; color: root.cMuted; font.pixelSize: root.sp(11) }
+                                        Item { Layout.fillWidth: true }
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: root.dp(6)
+                                        Text { Layout.preferredWidth: root.dp(64); text: "SUCS"; color: root.cMuted; font.bold: true; font.pixelSize: root.sp(11) }
+                                        Flow {
+                                            Layout.fillWidth: true
+                                            spacing: root.dp(6)
+                                            Repeater {
+                                                model: labReviewPanel.suggestion ? labReviewPanel.suggestion.sucs : []
+                                                delegate: LabSuggestionChip {
+                                                    required property var modelData
+                                                    code: modelData.code; current: modelData.current
+                                                    onAdopt: root.adoptLabSucs(mobileSampleCard.corteIdx, code)
+                                                }
+                                            }
+                                            Text {
+                                                visible: !!labReviewPanel.suggestion && labReviewPanel.suggestion.hidden > 0
+                                                text: labReviewPanel.suggestion ? "+" + labReviewPanel.suggestion.hidden : ""
+                                                color: root.cMuted; font.pixelSize: root.sp(11)
+                                            }
+                                            Text { visible: !labReviewPanel.suggestion || labReviewPanel.suggestion.sucs.length === 0; text: "Pendiente"; color: root.cMuted; font.pixelSize: root.sp(11) }
+                                        }
+                                    }
+                                }
+
+                                // Laboratorio / procedencia: filas compactas; lo guardado se muestra tal cual.
+                                Text { text: "Laboratorio / procedencia"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text { Layout.fillWidth: true; text: "Fecha de ensayo"; color: root.cMuted; font.pixelSize: root.fsLabel }
+                                    BoundTextField {
+                                        Layout.preferredWidth: root.dp(150)
+                                        placeholderText: "AAAA-MM-DD"
+                                        modelText: String(mobileSampleCard.labExtra().test_date || "")
+                                        onCommit: function(t) { if(String(t).length && !/^\d{4}-\d{2}-\d{2}$/.test(String(t))){root.showInfo("Fecha de ensayo","Usa AAAA-MM-DD.");return false}; root.setWebLabMeta(mobileSampleCard.corteIdx,"test_date",t); return true }
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text { Layout.fillWidth: true; text: "Laboratorio"; color: root.cMuted; font.pixelSize: root.fsLabel }
+                                    BoundTextField {
+                                        Layout.preferredWidth: root.dp(190)
+                                        placeholderText: "Nombre"
+                                        modelText: String(mobileSampleCard.labExtra().laboratory_source || "")
+                                        onCommit: function(t) { root.setWebLabMeta(mobileSampleCard.corteIdx,"laboratory_source",String(t).trim().replace(/\s+/g," ")); return true }
+                                    }
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.WordWrap
+                                    color: mobileSampleCard.info && !mobileSampleCard.info.validation.valid ? (root.flow ? root.flow.theme.error : "#B4232E") : root.cMuted
+                                    visible: !!mobileSampleCard.info && !mobileSampleCard.info.validation.valid
+                                    text: visible ? "Revisar ensayos: " + mobileSampleCard.info.validation.errors.join(" · ") : ""
+                                }
+
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    columns: 2
+                                    columnSpacing: root.dp(8)
+                                    rowSpacing: root.dp(8)
+                                    PrfLabeledInput {
+                                        label: "Máximo"
+                                        BoundTextField {
+                                            Layout.fillWidth: true
+                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
+                                            placeholderText: "% que pasa"
+                                            modelText: { var value = gmax; return value === undefined || value === null ? "" : String(value) }
+                                            onCommit: function(t) { return root.commitWebLabPercent(mobileSampleCard.corteIdx, "gmax", t) }
+                                        }
+                                    }
+                                    PrfLabeledInput {
+                                        label: "N.º 4"
+                                        BoundTextField {
+                                            Layout.fillWidth: true
+                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
+                                            placeholderText: "% que pasa"
+                                            modelText: { var value = mobileSampleCard.labExtra().passing_no4; return value === undefined || value === null ? "" : String(value) }
+                                            onCommit: function(t) { return root.commitWebLabPercent(mobileSampleCard.corteIdx, "passing_no4", t) }
+                                        }
+                                    }
+                                    PrfLabeledInput {
+                                        label: "N.º 10"
+                                        BoundTextField {
+                                            Layout.fillWidth: true
+                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
+                                            placeholderText: "% que pasa"
+                                            modelText: { var value = g2; return value === undefined || value === null ? "" : String(value) }
+                                            onCommit: function(t) { return root.commitWebLabPercent(mobileSampleCard.corteIdx, "g2", t) }
+                                        }
+                                    }
+                                    PrfLabeledInput {
+                                        label: "N.º 40"
+                                        BoundTextField {
+                                            Layout.fillWidth: true
+                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
+                                            placeholderText: "% que pasa"
+                                            modelText: { var value = g04; return value === undefined || value === null ? "" : String(value) }
+                                            onCommit: function(t) { return root.commitWebLabPercent(mobileSampleCard.corteIdx, "g04", t) }
+                                        }
+                                    }
+                                    PrfLabeledInput {
+                                        label: "N.º 200"
+                                        BoundTextField {
+                                            Layout.fillWidth: true
+                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
+                                            placeholderText: "% que pasa"
+                                            modelText: { var value = g008; return value === undefined || value === null ? "" : String(value) }
+                                            onCommit: function(t) { return root.commitWebLabPercent(mobileSampleCard.corteIdx, "g008", t) }
+                                        }
+                                    }
+                                }
+
+                                // Plasticidad (MTC E110 / E111): WL y LP enteros, como Web.
+                                RowLayout {
+                                    spacing: root.dp(6)
+                                    Image { source: "qrc:/images/calicata/lab-beaker.svg"; Layout.preferredWidth: root.dp(20); Layout.preferredHeight: root.dp(20); fillMode: Image.PreserveAspectFit }
+                                    Text { text: "Plasticidad"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
+                                }
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    columns: 2
+                                    columnSpacing: root.dp(8)
+                                    rowSpacing: root.dp(8)
+                                    PrfLabeledInput {
+                                        label: "Límite líquido (WL)"
+                                        BoundTextField {
+                                            Layout.fillWidth: true
+                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 999
+                                            placeholderText: "Ej. 32"; modelText: String(wl === undefined || wl === null ? "" : wl)
+                                            onCommit: function(t) { return root.commitLabLimit(mobileSampleCard.corteIdx, "wl", t) }
+                                        }
+                                    }
+                                    PrfLabeledInput {
+                                        label: "Límite plástico (LP)"
+                                        BoundTextField {
+                                            Layout.fillWidth: true
+                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 999
+                                            placeholderText: "Ej. 18"; modelText: String(lp === undefined || lp === null ? "" : lp)
+                                            onCommit: function(t) { return root.commitLabLimit(mobileSampleCard.corteIdx, "lp", t) }
+                                        }
+                                    }
+                                    PrfLabeledInput {
+                                        label: "Índice (IP) · automático"
+                                        Text {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: root.hField
+                                            verticalAlignment: Text.AlignVCenter
+                                            text: root.labIpText(mobileSampleCard.info)
+                                            color: root.cText; font.bold: true; font.pixelSize: root.fsField
+                                        }
+                                    }
+                                    PrfLabeledInput {
+                                        label: "Humedad natural (%)"
+                                        BoundTextField {
+                                            Layout.fillWidth: true
+                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 500
+                                            placeholderText: "—"; modelText: String(hum2 === undefined || hum2 === null ? "" : hum2)
+                                            onCommit: function(t) { var n=Rules.webLabNormalizePercent(t,{min:0,max:500}); if(n===null){root.showInfo("Humedad natural","Usa un valor entre 0 y 500 %.");return false}; cortesModel.setProperty(mobileSampleCard.corteIdx,"hum2",n);root._markDirty();root.deriveLabFields();return true }
+                                        }
+                                    }
+                                }
+
+
+
+                            }
+                        }
+                    }
+                }
+            }
                 }
             }
             RowLayout {
@@ -7130,11 +7489,13 @@ Item {
                 spacing: root.dp(8)
                 PrfFooterButton {
                     text: "Duplicar"
+                    visible: !root.labSheetActive
                     enabled: root.selectedStratum >= 0
                     onClicked: root.duplicateStratum(root.selectedStratum)
                 }
                 PrfFooterButton {
                     text: "Eliminar"
+                    visible: !root.labSheetActive
                     accent: root.flow ? root.flow.theme.error : "#B4232E"
                     soft: true
                     enabled: root.selectedStratum >= 0 && cortesModel.count > 1
@@ -10603,378 +10964,7 @@ Item {
                     }
                 }
             }
-            MobileStageBody {
-                id: mobileSamplesSection
-                Layout.fillWidth: true
-                glassPanel: !stratumSheet.floating
-                sectionNumber: 5
-                sectionTitle: "Muestras y ensayos"
-                sectionSubtitle: "Datos de laboratorio por intervalo"
 
-
-                Repeater {
-                    model: cortesModel
-
-                    delegate: Rectangle {
-                        id: mobileSampleCard
-                        visible: corteIdx === root.selectedStratum
-                        function labExtra() {
-                            if(corteIdx<0 || corteIdx>=cortesModel.count) return {}
-                            return JSON.parse(cortesModel.get(corteIdx)._extraJson || "{}")
-                        }
-                        property int corteIdx: index
-                        readonly property var info: { root._cortesRevision; return root.labInfo(corteIdx) }
-                        // Repeater delegates can outlive their removed ListModel row
-                        // until deferred destruction. Never dereference that row.
-                        function boundary(key) {
-                            if (corteIdx < 0 || corteIdx >= cortesModel.count) return NaN
-                            var row = cortesModel.get(corteIdx)
-                            return Rules.parseDecimalSafe(row ? row[key] : null)
-                        }
-                        Layout.fillWidth: true
-                        implicitHeight: mobileSampleLayout.implicitHeight + root.dp(20)
-                        radius: root.dp(11)
-                        color: "transparent"   // los bloques internos ya son tarjetas
-                        border.width: 0
-                        border.color: root.cBorder
-
-                        ColumnLayout {
-                            id: mobileSampleLayout
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            anchors.margins: root.dp(10)
-                            spacing: root.dp(10)
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: root.dp(8)
-                                Components.FlowIcon {
-                                    Layout.preferredWidth: root.dp(21)
-                                    Layout.preferredHeight: root.dp(21)
-                                    name: root.iconSamplesName
-                                    flow: root.flow
-                                    tintColor: root.cAccent
-                                    activeTintColor: root.cAccent
-                                    inactiveOpacity: 1.0
-                                }
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 1
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: "Estrato " + (mobileSampleCard.corteIdx + 1)
-                                        color: root.cText
-                                        font.bold: true
-                                        font.pixelSize: root.sp(root.isPhone ? 14 : 16)
-                                    }
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: "Estrato " + ((de || "—") + " – " + (a || "—") + " m")
-                                        color: root.cMuted
-                                        font.pixelSize: root.fsLabel
-                                    }
-                                }
-                            }
-
-                            // CONTEXTO: heredado de Perfil, solo lectura.
-                            PrfSubsection {
-                                Layout.fillWidth: true
-                                visible: root.labTab === "context"
-                                title: "Contexto del estrato (desde Perfil)"
-                                iconName: root.iconStrataName
-                                accent: root.cGenTeal
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: root.dp(10)
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        spacing: root.dp(4)
-                                        Repeater {
-                                            model: root.labContextRows(mobileSampleCard.info)
-                                            delegate: RowLayout {
-                                                required property var modelData
-                                                Layout.fillWidth: true
-                                                spacing: root.dp(8)
-                                                Text { Layout.preferredWidth: root.dp(118); text: modelData.label; color: root.cMuted; font.pixelSize: root.fsLabel; wrapMode: Text.WordWrap }
-                                                Text { Layout.fillWidth: true; text: modelData.value; color: root.cText; font.pixelSize: root.fsLabel; wrapMode: Text.WordWrap }
-                                            }
-                                        }
-                                    }
-                                    Rectangle {
-                                        readonly property var files: mobileSampleCard.info ? root.stratumPatternFilesFor(mobileSampleCard.info.plain) : []
-                                        visible: files.length > 0
-                                        Layout.alignment: Qt.AlignTop
-                                        Layout.preferredWidth: root.dp(40)
-                                        Layout.preferredHeight: root.dp(96)
-                                        color: "#FFFFFF"
-                                        border.width: 1
-                                        border.color: root.cBorder
-                                        clip: true
-                                        Row {
-                                            id: labPatternLayers
-                                            readonly property var layerFiles: parent.files
-                                            anchors.fill: parent
-                                            anchors.margins: 1
-                                            Repeater {
-                                                model: labPatternLayers.layerFiles
-                                                delegate: Image {
-                                                    required property string modelData
-                                                    width: labPatternLayers.width / Math.max(1, labPatternLayers.layerFiles.length)
-                                                    height: labPatternLayers.height
-                                                    source: modelData
-                                                    fillMode: Image.Tile
-                                                    sourceSize.width: root.dp(24)
-                                                    sourceSize.height: root.dp(24)
-                                                    asynchronous: true
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: "Solo lectura: estos datos se editan en Perfil."
-                                    color: root.cMuted
-                                    font.pixelSize: root.sp(11)
-                                    wrapMode: Text.WordWrap
-                                }
-                            }
-
-                            // HISTORIAL: solo hitos reales guardados en la ficha (sin backend de versiones).
-                            PrfSubsection {
-                                Layout.fillWidth: true
-                                visible: root.labTab === "history"
-                                title: "Historial"
-                                iconName: "status.sync"
-                                accent: root.cGenBlue
-                                Repeater {
-                                    model: root.labHistoryRows(mobileSampleCard.info)
-                                    delegate: RowLayout {
-                                        required property var modelData
-                                        Layout.fillWidth: true
-                                        spacing: root.dp(8)
-                                        Text { Layout.preferredWidth: root.dp(88); text: modelData.label; color: root.cMuted; font.pixelSize: root.fsLabel }
-                                        Text { Layout.fillWidth: true; text: modelData.value; color: root.cText; font.pixelSize: root.fsLabel; wrapMode: Text.WordWrap }
-                                    }
-                                }
-                                Text {
-                                    Layout.fillWidth: true
-                                    visible: root.labHistoryRows(mobileSampleCard.info).length === 0
-                                    text: "Sin eventos de laboratorio registrados en esta ficha."
-                                    color: root.cMuted
-                                    font.pixelSize: root.fsLabel
-                                    wrapMode: Text.WordWrap
-                                }
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: mobileSampleCard.info && (mobileSampleCard.info.plain.lab_cloud_pending || []).length
-                                          ? "Pendiente de sincronizar con el servidor: "
-                                            + mobileSampleCard.info.plain.lab_cloud_pending.map(function(reason) {
-                                                  return reason === "LAB_LIMITS" ? "WL/LP con decimales (el servidor admite enteros)"
-                                                       : reason === "LAB_INVALID" ? "ensayo con errores de validación" : reason }).join(", ")
-                                            + ". El valor local se conserva."
-                                          : "Sin historial sincronizado desde el servidor."
-                                    color: root.cMuted
-                                    font.pixelSize: root.sp(11)
-                                    wrapMode: Text.WordWrap
-                                }
-                            }
-
-                            // Canonical Web laboratory contract. One laboratory row belongs to one stratum.
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                visible: root.labTab === "lab" && !!mobileSampleCard.info
-                                spacing: root.dp(10)
-
-                                ColumnLayout {
-                                    id: labReviewPanel
-                                    readonly property var suggestion: mobileSampleCard.info ? mobileSampleCard.info.suggestion : null
-                                    Layout.fillWidth: true
-                                    spacing: root.dp(6)
-                                    Text { text: "Clasificación sugerida"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: root.dp(6)
-                                        Text { Layout.preferredWidth: root.dp(64); text: "AASHTO"; color: root.cMuted; font.bold: true; font.pixelSize: root.sp(11) }
-                                        LabSuggestionChip {
-                                            visible: !!(labReviewPanel.suggestion && labReviewPanel.suggestion.aashto)
-                                            code: visible ? labReviewPanel.suggestion.aashto.code : ""
-                                            current: visible && labReviewPanel.suggestion.aashto.current
-                                            onAdopt: root.adoptLabAashto(mobileSampleCard.corteIdx, code)
-                                        }
-                                        Text { visible: !(labReviewPanel.suggestion && labReviewPanel.suggestion.aashto); text: "Pendiente"; color: root.cMuted; font.pixelSize: root.sp(11) }
-                                        Item { Layout.fillWidth: true }
-                                    }
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: root.dp(6)
-                                        Text { Layout.preferredWidth: root.dp(64); text: "SUCS"; color: root.cMuted; font.bold: true; font.pixelSize: root.sp(11) }
-                                        Flow {
-                                            Layout.fillWidth: true
-                                            spacing: root.dp(6)
-                                            Repeater {
-                                                model: labReviewPanel.suggestion ? labReviewPanel.suggestion.sucs : []
-                                                delegate: LabSuggestionChip {
-                                                    required property var modelData
-                                                    code: modelData.code; current: modelData.current
-                                                    onAdopt: root.adoptLabSucs(mobileSampleCard.corteIdx, code)
-                                                }
-                                            }
-                                            Text {
-                                                visible: !!labReviewPanel.suggestion && labReviewPanel.suggestion.hidden > 0
-                                                text: labReviewPanel.suggestion ? "+" + labReviewPanel.suggestion.hidden : ""
-                                                color: root.cMuted; font.pixelSize: root.sp(11)
-                                            }
-                                            Text { visible: !labReviewPanel.suggestion || labReviewPanel.suggestion.sucs.length === 0; text: "Pendiente"; color: root.cMuted; font.pixelSize: root.sp(11) }
-                                        }
-                                    }
-                                }
-
-                                // Laboratorio / procedencia: filas compactas; lo guardado se muestra tal cual.
-                                Text { text: "Laboratorio / procedencia"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    Text { Layout.fillWidth: true; text: "Fecha de ensayo"; color: root.cMuted; font.pixelSize: root.fsLabel }
-                                    BoundTextField {
-                                        Layout.preferredWidth: root.dp(150)
-                                        placeholderText: "AAAA-MM-DD"
-                                        modelText: String(mobileSampleCard.labExtra().test_date || "")
-                                        onCommit: function(t) { if(String(t).length && !/^\d{4}-\d{2}-\d{2}$/.test(String(t))){root.showInfo("Fecha de ensayo","Usa AAAA-MM-DD.");return false}; root.setWebLabMeta(mobileSampleCard.corteIdx,"test_date",t); return true }
-                                    }
-                                }
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    Text { Layout.fillWidth: true; text: "Laboratorio"; color: root.cMuted; font.pixelSize: root.fsLabel }
-                                    BoundTextField {
-                                        Layout.preferredWidth: root.dp(190)
-                                        placeholderText: "Nombre"
-                                        modelText: String(mobileSampleCard.labExtra().laboratory_source || "")
-                                        onCommit: function(t) { root.setWebLabMeta(mobileSampleCard.corteIdx,"laboratory_source",String(t).trim().replace(/\s+/g," ")); return true }
-                                    }
-                                }
-                                Text {
-                                    Layout.fillWidth: true
-                                    wrapMode: Text.WordWrap
-                                    color: mobileSampleCard.info && !mobileSampleCard.info.validation.valid ? (root.flow ? root.flow.theme.error : "#B4232E") : root.cMuted
-                                    visible: !!mobileSampleCard.info && !mobileSampleCard.info.validation.valid
-                                    text: visible ? "Revisar ensayos: " + mobileSampleCard.info.validation.errors.join(" · ") : ""
-                                }
-
-                                GridLayout {
-                                    Layout.fillWidth: true
-                                    columns: 2
-                                    columnSpacing: root.dp(8)
-                                    rowSpacing: root.dp(8)
-                                    PrfLabeledInput {
-                                        label: "Máximo"
-                                        BoundTextField {
-                                            Layout.fillWidth: true
-                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
-                                            placeholderText: "% que pasa"
-                                            modelText: { var value = gmax; return value === undefined || value === null ? "" : String(value) }
-                                            onCommit: function(t) { return root.commitWebLabPercent(mobileSampleCard.corteIdx, "gmax", t) }
-                                        }
-                                    }
-                                    PrfLabeledInput {
-                                        label: "N.º 4"
-                                        BoundTextField {
-                                            Layout.fillWidth: true
-                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
-                                            placeholderText: "% que pasa"
-                                            modelText: { var value = mobileSampleCard.labExtra().passing_no4; return value === undefined || value === null ? "" : String(value) }
-                                            onCommit: function(t) { return root.commitWebLabPercent(mobileSampleCard.corteIdx, "passing_no4", t) }
-                                        }
-                                    }
-                                    PrfLabeledInput {
-                                        label: "N.º 10"
-                                        BoundTextField {
-                                            Layout.fillWidth: true
-                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
-                                            placeholderText: "% que pasa"
-                                            modelText: { var value = g2; return value === undefined || value === null ? "" : String(value) }
-                                            onCommit: function(t) { return root.commitWebLabPercent(mobileSampleCard.corteIdx, "g2", t) }
-                                        }
-                                    }
-                                    PrfLabeledInput {
-                                        label: "N.º 40"
-                                        BoundTextField {
-                                            Layout.fillWidth: true
-                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
-                                            placeholderText: "% que pasa"
-                                            modelText: { var value = g04; return value === undefined || value === null ? "" : String(value) }
-                                            onCommit: function(t) { return root.commitWebLabPercent(mobileSampleCard.corteIdx, "g04", t) }
-                                        }
-                                    }
-                                    PrfLabeledInput {
-                                        label: "N.º 200"
-                                        BoundTextField {
-                                            Layout.fillWidth: true
-                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 100
-                                            placeholderText: "% que pasa"
-                                            modelText: { var value = g008; return value === undefined || value === null ? "" : String(value) }
-                                            onCommit: function(t) { return root.commitWebLabPercent(mobileSampleCard.corteIdx, "g008", t) }
-                                        }
-                                    }
-                                }
-
-                                // Plasticidad (MTC E110 / E111): WL y LP enteros, como Web.
-                                RowLayout {
-                                    spacing: root.dp(6)
-                                    Image { source: "qrc:/images/calicata/lab-beaker.svg"; Layout.preferredWidth: root.dp(20); Layout.preferredHeight: root.dp(20); fillMode: Image.PreserveAspectFit }
-                                    Text { text: "Plasticidad"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
-                                }
-                                GridLayout {
-                                    Layout.fillWidth: true
-                                    columns: 2
-                                    columnSpacing: root.dp(8)
-                                    rowSpacing: root.dp(8)
-                                    PrfLabeledInput {
-                                        label: "Límite líquido (WL)"
-                                        BoundTextField {
-                                            Layout.fillWidth: true
-                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 999
-                                            placeholderText: "Ej. 32"; modelText: String(wl === undefined || wl === null ? "" : wl)
-                                            onCommit: function(t) { return root.commitLabLimit(mobileSampleCard.corteIdx, "wl", t) }
-                                        }
-                                    }
-                                    PrfLabeledInput {
-                                        label: "Límite plástico (LP)"
-                                        BoundTextField {
-                                            Layout.fillWidth: true
-                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 999
-                                            placeholderText: "Ej. 18"; modelText: String(lp === undefined || lp === null ? "" : lp)
-                                            onCommit: function(t) { return root.commitLabLimit(mobileSampleCard.corteIdx, "lp", t) }
-                                        }
-                                    }
-                                    PrfLabeledInput {
-                                        label: "Índice (IP) · automático"
-                                        Text {
-                                            Layout.fillWidth: true
-                                            Layout.preferredHeight: root.hField
-                                            verticalAlignment: Text.AlignVCenter
-                                            text: root.labIpText(mobileSampleCard.info)
-                                            color: root.cText; font.bold: true; font.pixelSize: root.fsField
-                                        }
-                                    }
-                                    PrfLabeledInput {
-                                        label: "Humedad natural (%)"
-                                        BoundTextField {
-                                            Layout.fillWidth: true
-                                            numericKind: Rules.PERCENTAGE; minimumValue: 0; maximumValue: 500
-                                            placeholderText: "—"; modelText: String(hum2 === undefined || hum2 === null ? "" : hum2)
-                                            onCommit: function(t) { var n=Rules.webLabNormalizePercent(t,{min:0,max:500}); if(n===null){root.showInfo("Humedad natural","Usa un valor entre 0 y 500 %.");return false}; cortesModel.setProperty(mobileSampleCard.corteIdx,"hum2",n);root._markDirty();root.deriveLabFields();return true }
-                                        }
-                                    }
-                                }
-
-
-
-                            }
-                        }
-                    }
-                }
-            }
                 }
             }
         }
