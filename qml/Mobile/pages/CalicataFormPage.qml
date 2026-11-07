@@ -11659,282 +11659,103 @@ Item {
                         required property string modelData
                         readonly property int slot: index + 1
                         readonly property var info: root.photoSlotInfo(slot)
-                        readonly property bool selected: root.activePhotoCategory === slot
                         Layout.fillWidth: true
-                        implicitHeight: photoCardColumn.implicitHeight + root.dp(28)
-                        radius: root.dp(22)
-                        // Tarjeta = Liquid Glass (ambiente propio + superficie del sistema).
+                        implicitHeight: photoCardColumn.implicitHeight + root.dp(16)
+                        radius: root.dp(18)
                         color: "transparent"
-                        Behavior on implicitHeight { enabled: !root._stageSettling; NumberAnimation { duration: root.flow ? root.flow.duration(180) : 180; easing.type: Easing.OutCubic } }
-                        scale: photoCardTap.pressed ? 0.99 : 1
-                        Behavior on scale { NumberAnimation { duration: root.flow ? root.flow.instantDuration : 70 } }
-                        // Seleccionar la categoría NUNCA abre cámara, galería ni visor.
-                        TapHandler { id: photoCardTap; onTapped: root.activePhotoCategory = photoCard.slot }
-                        Component.onCompleted: root._photoCardItems[photoCard.slot] = photoCard
-                        Component.onDestruction: if (root._photoCardItems[photoCard.slot] === photoCard) delete root._photoCardItems[photoCard.slot]
-                        PhotoAmbient {
-                            id: photoCardAmbient
-                            anchors.fill: parent
-                            radius: photoCard.radius
-                        }
-                        PhotoBar {
-                            anchors.fill: parent
-                            barRadius: photoCard.radius
-                            absorbTaps: false
-                        }
-                        // Categoría activa: contorno azul sobre el vidrio (transición suave).
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: photoCard.radius
-                            color: "transparent"
-                            border.width: photoCard.selected ? root.dp(2) : 0
-                            border.color: root.cGenBlue
-                            opacity: photoCard.selected ? 1 : 0
-                            Behavior on opacity { NumberAnimation { duration: root.flow ? root.flow.duration(160) : 160 } }
-                        }
+                        border.width: root.activePhotoCategory === slot ? root.dp(2) : 0
+                        border.color: root.cGenBlue
+                        Component.onCompleted: root._photoCardItems[slot] = compactPhotoPreview
+                        Component.onDestruction: if (root._photoCardItems[slot] === compactPhotoPreview) delete root._photoCardItems[slot]
+                        CalicataSurface { anchors.fill: parent; radius: photoCard.radius; dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#B4232E"; level: "card" }
                         ColumnLayout {
                             id: photoCardColumn
                             anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-                            anchors.margins: root.dp(14)
-                            spacing: root.dp(12)
+                            anchors.margins: root.dp(8); spacing: root.dp(5)
+                            RowLayout {
+                                Layout.fillWidth: true; spacing: root.dp(6)
+                                Text { Layout.fillWidth: true; text: photoCard.modelData; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel; elide: Text.ElideRight }
+                                Text { text: photoCard.info.has ? "1 foto" : "Sin foto"; color: root.cMuted; font.pixelSize: root.sp(11) }
+                                GenRoundIconButton {
+                                    Layout.preferredWidth: root.dp(36); Layout.preferredHeight: root.dp(36)
+                                    iconName: "action.more"
+                                    Accessible.name: "Acciones de " + photoCard.modelData
+                                    onClicked: root.openPhotoActions(photoCard.slot)
+                                }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true; spacing: root.dp(8)
+                                Rectangle {
+                                    id: compactPhotoPreview
+                                    Layout.fillWidth: true; Layout.preferredHeight: root.dp(160)
+                                    radius: root.dp(12); clip: true
+                                    color: root.darkMode ? "#263242" : "#E8EEF4"
+                                    Image {
+                                        anchors.fill: parent
+                                        visible: photoCard.info.has
+                                        source: visible ? root._photoSource(photoCard.slot) : ""
+                                        fillMode: Image.PreserveAspectCrop
+                                        asynchronous: true; cache: true
+                                    }
+                                    Text {
+                                        anchors.centerIn: parent; visible: !photoCard.info.has
+                                        text: "Sin fotografía"; color: root.cMuted; font.pixelSize: root.fsLabel
+                                    }
+                                    TapHandler {
+                                        onTapped: {
+                                            root.activePhotoCategory = photoCard.slot
+                                            if (photoCard.info.hasOriginal && !root._photoRequestPending)
+                                                root.runPhotoAction("edit", photoCard.slot)
+                                        }
+                                    }
+                                    Accessible.role: Accessible.Button
+                                    Accessible.name: "Editar fotografía: " + photoCard.modelData
+                                }
+                                Item {
+                                    id: photoToolDock
+                                    Layout.preferredWidth: root.dp(48); Layout.preferredHeight: root.dp(160)
+                                    MobileGlass.DockGlassPanel {
+                                        glassUi: genGlassUi; radius: root.dp(24); u: root.uiScale
+                                        reducedMotion: root.flowReduceMotion; lowFallback: false; liquidTouch: true
+                                    }
+                                    ColumnLayout {
+                                        anchors.fill: parent; anchors.margins: root.dp(3); spacing: 0
+                                        Repeater {
+                                            model: [["view", "Ver", "view"], ["edit", "Editar", "edit"],
+                                                    ["capture", "Tomar foto", "camera"], ["pick", "Importar", "upload"]]
+                                            delegate: Item {
+                                                id: toolCell
+                                                required property var modelData
+                                                Layout.fillWidth: true; Layout.fillHeight: true
+                                                enabled: !root._photoRequestPending && root.photoHasAction(photoCard.slot, modelData[0])
+                                                opacity: enabled ? 1 : 0.35
+                                                Accessible.role: Accessible.Button
+                                                Accessible.name: modelData[1] + " · " + photoCard.modelData
+                                                Components.FlowIcon {
+                                                    anchors.centerIn: parent; width: root.dp(21); height: width
+                                                    sourceOverride: "qrc:/images/calicata/photo-" + toolCell.modelData[2] + ".svg"
+                                                    flow: root.flow; tintColor: root.cText; activeTintColor: root.cGenBlue
+                                                    onDark: root.darkMode; inactiveOpacity: 1
+                                                }
+                                                TapHandler { onTapped: root.runPhotoAction(toolCell.modelData[0], photoCard.slot) }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                visible: photoCard.info.label.length > 0 || photoCard.info.error.length > 0
+                                text: photoCard.info.error.length ? photoCard.info.error : photoCard.info.label
+                                color: photoCard.info.error.length ? root.photoToneColor("red", false) : root.cMuted
+                                font.pixelSize: root.sp(11); wrapMode: Text.WordWrap
+                            }
                             RowLayout {
                                 Layout.fillWidth: true
-                                spacing: root.dp(10)
-                                Rectangle {
-                                    Layout.preferredWidth: root.dp(36); Layout.preferredHeight: root.dp(36)
-                                    radius: root.dp(12)
-                                    color: root.darkMode ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(1, 1, 1, 0.55)
-                                    border.width: 1
-                                    border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(1, 1, 1, 0.9)
-                                    Components.FlowIcon {
-                                        anchors.centerIn: parent
-                                        width: root.dp(19); height: width
-                                        name: root.photoCategoryIcons[photoCard.index]
-                                        flow: root.flow
-                                        tintColor: root.cText; activeTintColor: root.cGenBlue; inactiveOpacity: 1
-                                    }
-                                }
-                                Text { Layout.fillWidth: true; text: photoCard.modelData; color: root.cText; font.bold: true; font.pixelSize: root.fsField; elide: Text.ElideRight }
-                                Rectangle {
-                                    Layout.preferredWidth: photoCountText.implicitWidth + root.dp(20); Layout.preferredHeight: root.dp(26)
-                                    radius: height / 2
-                                    color: root.darkMode ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(1, 1, 1, 0.55)
-                                    border.width: 1
-                                    border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(1, 1, 1, 0.85)
-                                    Text { id: photoCountText; anchors.centerIn: parent; text: photoCard.info.has ? "1 foto" : "0 fotos"; color: root.cMuted; font.pixelSize: root.sp(11) }
-                                }
-                                Rectangle {
-                                    Layout.preferredWidth: root.dp(34); Layout.preferredHeight: root.dp(34)
-                                    radius: width / 2
-                                    color: photoMenuTap.pressed ? Qt.rgba(root.cGenBlue.r, root.cGenBlue.g, root.cGenBlue.b, 0.12) : "transparent"
-                                    Behavior on color { ColorAnimation { duration: 120 } }
-                                    scale: photoMenuTap.pressed ? 0.94 : 1
-                                    Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-                                    Components.FlowIcon {
-                                        anchors.centerIn: parent
-                                        width: root.dp(20); height: width
-                                        name: "action.more"; flow: root.flow
-                                        tintColor: root.cText; activeTintColor: root.cGenBlue; inactiveOpacity: 1
-                                    }
-                                    TapHandler { id: photoMenuTap; onTapped: root.openPhotoActions(photoCard.slot) }
-                                    Accessible.role: Accessible.Button
-                                    Accessible.name: "Acciones de " + photoCard.modelData
-                                }
-                            }
-                            // Foto (protagonista) o panel vacío de vidrio; la barra de acciones
-                            // Liquid Glass flota sobre su borde inferior y refracta lo de detrás.
-                            Item {
-                                id: photoHero
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: photoCard.info.has
-                                                        ? Math.round(Math.min(width * 0.62, root.dp(260)))
-                                                        : photoEmptyContent.implicitHeight + photoActionBar.height + root.dp(46)
-                                Behavior on Layout.preferredHeight { enabled: !root._stageSettling; NumberAnimation { duration: root.flow ? root.flow.duration(200) : 200; easing.type: Easing.OutCubic } }
-                                // Con foto: la imagen es el backdrop del vidrio (nunca la barra).
-                                Item {
-                                    id: photoHeroBackdrop
-                                    anchors.fill: parent
-                                    visible: photoCard.info.has
-                                    Image {
-                                        id: photoHeroImage
-                                        anchors.fill: parent
-                                        source: photoCard.info.has ? root._photoSource(photoCard.slot) : ""
-                                        sourceSize: Qt.size(720, 720)
-                                        fillMode: Image.PreserveAspectCrop
-                                        asynchronous: true
-                                        autoTransform: true
-                                        onStatusChanged: if (status === Image.Ready)
-                                                             root._photoPreviewReady(photoCard.slot, source)
-                                        opacity: status === Image.Ready ? 1 : 0
-                                    }
-                                    TapHandler { enabled: photoCard.info.has; onTapped: root.runPhotoAction("view", photoCard.slot) }
-                                }
-                                // Sin foto: panel interior de vidrio (no un bloque gris).
-                                PhotoBar {
-                                    id: photoEmptyPanel
-                                    anchors.fill: parent
-                                    visible: !photoCard.info.has
-                                    barRadius: root.dp(20)
-                                    absorbTaps: false
-                                    opacity: visible ? 1 : 0
-                                    Behavior on opacity { NumberAnimation { duration: root.flow ? root.flow.duration(200) : 200 } }
-                                    Column {
-                                        id: photoEmptyContent
-                                        anchors.horizontalCenter: parent.horizontalCenter
-                                        y: root.dp(18)
-                                        width: parent.width - root.dp(32)
-                                        spacing: root.dp(6)
-                                        PhotoBadge {
-                                            anchors.horizontalCenter: parent.horizontalCenter
-                                            width: root.dp(58); height: width
-                                            iconName: "documents.image"
-                                            iconSize: root.dp(28)
-                                        }
-                                        Item { width: 1; height: root.dp(2) }
-                                        Text {
-                                            width: parent.width
-                                            horizontalAlignment: Text.AlignHCenter
-                                            text: "Sin fotografía"
-                                            color: root.cText
-                                            font.bold: true
-                                            font.pixelSize: root.fsField
-                                        }
-                                        Text {
-                                            width: parent.width
-                                            horizontalAlignment: Text.AlignHCenter
-                                            text: "Toma o adjunta una foto para esta categoría."
-                                            color: root.cMuted
-                                            font.pixelSize: root.fsLabel
-                                            wrapMode: Text.WordWrap
-                                        }
-                                    }
-                                }
-                                // Acciones rápidas (mismas acciones que la hoja y el Dock).
-                                PhotoBar {
-                                    id: photoActionBar
-                                    anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-                                    anchors.margins: root.dp(photoHero.width < root.dp(330) ? 6 : 10)
-                                    height: photoCard.info.has ? root.dp(66) : root.dp(60)
-                                    barRadius: height / 2
-                                    // Ambiente vivo también sin foto: no conservar una textura vacía al volver
-                                    // de cámara/galería. Sin foto se mantiene el material de bajo coste.
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: root.dp(6); anchors.rightMargin: root.dp(6)
-                                        anchors.topMargin: root.dp(3); anchors.bottomMargin: root.dp(3)
-                                        spacing: 0
-                                        Repeater {
-                                            model: photoCard.info.has
-                                                   ? [["view", "Ver", "action.search"], ["edit", "Editar", "action.edit"],
-                                                      ["capture", "Tomar foto", "action.camera"], ["pick", "Importar", "documents.upload"]]
-                                                   : [["capture", "Tomar foto", "action.camera"], ["pick", "Importar", "documents.upload"]]
-                                            delegate: PhotoActionTile {
-                                                required property var modelData
-                                                required property int index
-                                                label: modelData[1]
-                                                iconName: modelData[2]
-                                                wide: !photoCard.info.has
-                                                divider: index > 0
-                                                enabled: !root._photoRequestPending && (modelData[0] !== "edit" || photoCard.info.hasOriginal)
-                                                onClicked: root.runPhotoAction(modelData[0], photoCard.slot)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            // Estado real de la foto.
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                visible: photoCard.info.has
-                                spacing: root.dp(4)
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: root.dp(8)
-                                    Rectangle {
-                                        visible: photoCard.info.label.length > 0
-                                        Layout.preferredWidth: photoStateRow.implicitWidth + root.dp(18); Layout.preferredHeight: root.dp(24)
-                                        radius: height / 2
-                                        color: root.photoToneColor(photoCard.info.tone, true)
-                                        Behavior on color { ColorAnimation { duration: root.flow ? root.flow.duration(220) : 220 } }
-                                        Row {
-                                            id: photoStateRow
-                                            anchors.centerIn: parent
-                                            spacing: root.dp(4)
-                                            Components.FlowIcon {
-                                                visible: photoCard.info.state === "SYNCED"
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                width: root.dp(12); height: width
-                                                name: "action.check"; flow: root.flow
-                                                tintColor: root.photoToneColor(photoCard.info.tone, false)
-                                                activeTintColor: root.photoToneColor(photoCard.info.tone, false)
-                                                inactiveOpacity: 1
-                                            }
-                                            Text {
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                text: photoCard.info.label
-                                                color: root.photoToneColor(photoCard.info.tone, false)
-                                                font.bold: true
-                                                font.pixelSize: root.sp(11)
-                                            }
-                                        }
-                                    }
-                                    Text { visible: photoCard.info.date.length > 0; text: photoCard.info.date; color: root.cText; font.pixelSize: root.fsLabel }
-                                    Item { Layout.fillWidth: true }
-                                    Text {
-                                        visible: photoCard.info.versionCount > 1
-                                        text: photoCard.info.versionCount + " versiones"
-                                        color: root.cMuted; font.pixelSize: root.sp(11)
-                                    }
-                                }
-                                Text {
-                                    Layout.fillWidth: true
-                                    visible: photoCard.info.versionCount > 1
-                                    text: "Original conservada"
-                                    color: root.cMuted; font.pixelSize: root.sp(11)
-                                }
-                                Text {
-                                    Layout.fillWidth: true
-                                    visible: photoCard.info.error.length > 0 && !photoCard.info.conflict
-                                    text: photoCard.info.error
-                                    color: root.cMuted; font.pixelSize: root.sp(11)
-                                    wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
-                                }
-                            }
-                            // Decisión pendiente: otra versión en la nube / envío fallido.
-                            Rectangle {
-                                Layout.fillWidth: true
                                 visible: photoCard.info.conflict || photoCard.info.failed
-                                implicitHeight: photoDecision.implicitHeight + root.dp(20)
-                                radius: root.dp(12)
-                                color: root.photoToneColor(photoCard.info.conflict ? "orange" : "red", true)
-                                ColumnLayout {
-                                    id: photoDecision
-                                    anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-                                    anchors.margins: root.dp(10)
-                                    spacing: root.dp(8)
-                                    Text {
-                                        Layout.fillWidth: true
-                                        wrapMode: Text.WordWrap
-                                        color: root.cText
-                                        font.pixelSize: root.fsLabel
-                                        text: photoCard.info.conflict
-                                              ? "Otro dispositivo publicó una versión de esta categoría. Tu foto se conserva: elige cuál queda en uso."
-                                              : "No se pudo publicar. La foto está guardada en el dispositivo."
-                                    }
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: root.dp(8)
-                                        PhotoPill {
-                                            primary: true
-                                            text: photoCard.info.conflict ? "Conservar la mía" : "Reintentar"
-                                            onClicked: root.runPhotoAction(photoCard.info.conflict ? "keepMine" : "retry", photoCard.slot)
-                                        }
-                                        PhotoPill {
-                                            text: photoCard.info.conflict ? "Mantener la remota" : "Descartar envío"
-                                            onClicked: root.runPhotoAction(photoCard.info.conflict ? "keepRemote" : "discardSend", photoCard.slot)
-                                        }
-                                    }
-                                }
+                                spacing: root.dp(6)
+                                PhotoPill { primary: true; text: photoCard.info.conflict ? "Conservar la mía" : "Reintentar"; onClicked: root.runPhotoAction(photoCard.info.conflict ? "keepMine" : "retry", photoCard.slot) }
+                                PhotoPill { text: photoCard.info.conflict ? "Mantener remota" : "Descartar envío"; onClicked: root.runPhotoAction(photoCard.info.conflict ? "keepRemote" : "discardSend", photoCard.slot) }
                             }
                         }
                     }
