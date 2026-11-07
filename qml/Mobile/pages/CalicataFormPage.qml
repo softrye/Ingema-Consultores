@@ -11298,17 +11298,6 @@ Item {
                         commitHandler: function(t) { root._setProgresiva(t, true) }
                     }
                     GenHeaderField {
-                        objectName: "fichaField_project_name"
-                        mandatory: true
-                        missing: !!root.fichaMissingKeys.project_name
-                        rule: root.fichaIssueMessage("project_name")
-                        label: "Nombre del proyecto"
-                        iconName: "calgen.project"
-                        headerKey: "project_full_name"
-                        inputPlaceholder: "Denominación oficial completa del proyecto"
-                        inputMaximumLength: 600
-                    }
-                    GenHeaderField {
                         label: "Supervisor"
                         iconName: "calgen.supervisor"
                         accent: root.cGenViolet
