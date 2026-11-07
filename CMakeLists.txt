@@ -622,6 +622,7 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/pages/CalicataPointPicker.qml"
             "${MOBILE_QML_DIR}/pages/CalicataProfile.qml"
             "${MOBILE_QML_DIR}/pages/CalicataReview.qml"
+            "${MOBILE_QML_DIR}/pages/CalicataSiteVisit.qml"
             "${MOBILE_QML_DIR}/pages/CalicataSurface.qml"
             "${MOBILE_QML_DIR}/pages/CalicatasEditorPage.qml"
             "${MOBILE_QML_DIR}/lib/CalicataRules.js"
