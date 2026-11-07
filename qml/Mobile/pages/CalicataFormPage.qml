@@ -11662,7 +11662,7 @@ Item {
                         Layout.fillWidth: true
                         implicitHeight: photoCardColumn.implicitHeight
                         Layout.bottomMargin: root.dp(10)
-                        readonly property real previewHeight: Math.max(root.dp(160), Math.min(root.dp(220), (vFlick.height - root.dp(150)) / 3))
+                        readonly property real previewHeight: Math.max(root.dp(152), Math.min(root.dp(205), (vFlick.height - root.dp(175)) / 3))
                         color: "transparent"
                         Component.onCompleted: root._photoCardItems[slot] = compactPhotoPreview
                         Component.onDestruction: if (root._photoCardItems[slot] === compactPhotoPreview) delete root._photoCardItems[slot]
@@ -11689,11 +11689,38 @@ Item {
                                     radius: root.dp(12); clip: true
                                     color: root.darkMode ? "#263242" : "#E8EEF4"
                                     Image {
+                                        id: compactPhotoImage
                                         anchors.fill: parent
-                                        visible: photoCard.info.has
-                                        source: visible ? root._photoSource(photoCard.slot) : ""
+                                        visible: false
+                                        source: photoCard.info.has ? root._photoSource(photoCard.slot) : ""
                                         fillMode: Image.PreserveAspectCrop
                                         asynchronous: true; cache: true
+                                    }
+                                    Item {
+                                        id: compactPhotoMask
+                                        anchors.fill: parent
+                                        visible: false
+                                        layer.enabled: photoCard.info.has
+                                        Rectangle { anchors.fill: parent; radius: compactPhotoPreview.radius; color: "black" }
+                                    }
+                                    MultiEffect {
+                                        anchors.fill: parent
+                                        source: compactPhotoImage
+                                        visible: compactPhotoImage.status === Image.Ready
+                                        maskEnabled: true; maskSource: compactPhotoMask
+                                        maskThresholdMin: 0.5; maskSpreadAtMin: 1.0
+                                    }
+                                    Rectangle {
+                                        anchors.centerIn: parent
+                                        width: root.dp(40); height: width; radius: width / 2
+                                        visible: photoCard.info.hasOriginal && !root._photoRequestPending
+                                        color: Qt.rgba(0, 0, 0, 0.28)
+                                        enabled: false
+                                        Components.FlowIcon {
+                                            anchors.centerIn: parent; width: root.dp(21); height: width
+                                            sourceOverride: "qrc:/images/calicata/photo-edit.svg"
+                                            flow: root.flow; onDark: true; tintColor: "white"; activeTintColor: "white"; inactiveOpacity: 1
+                                        }
                                     }
                                     Text {
                                         anchors.centerIn: parent; visible: !photoCard.info.has
