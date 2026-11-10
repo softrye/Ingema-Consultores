@@ -35,6 +35,7 @@ QtObject {
     readonly property FlowPerformance performance: FlowPerformance {}
     readonly property FlowTheme theme: FlowTheme {
         colors: core.colors
+        skin: core.appSkin
     }
     readonly property FlowMotion motion: FlowMotion {
         core: core
@@ -98,6 +99,46 @@ QtObject {
 
     // Interruptores globales.
     property bool enabled: true
+    // Shell-owned seasonal presentation; never another CoreFlow instance.
+    property string appSkin: "none"
+    property var halloweenController: null
+    // Liquid Glass oficial (HomeScreen.liquidGlassMaterial): preset único del Dock
+    // para DockGlassPanel en toda la app. Lo publica HomeScreen.
+    property var liquidGlassMaterial: null
+    // Animaciones avanzadas (las que DIOS descargará de GitHub): conéctalas aquí y actívalas sólo con advancedMotion (VERY_HIGH/EXTREME).
+    readonly property bool advancedMotion: GraphicsCore.advancedMotion === true && !reduceMotion
+    // «Extrema» (GraphicsCore.extremeGlass): ganchos globales para pantallas de otras
+    // zonas (cascada 30 ms, hojas desde su origen con desenfoque y gel, realce al pulsar).
+    readonly property bool extremeMotion: GraphicsCore.extremeGlass === true && !reduceMotion
+    // Contexto temporal del Dock (p. ej. mapa de Ubicación de la ficha): mientras no
+    // es null, el Dock real muestra ESTAS acciones y las despacha a `command`.
+    // { id, actions: [{ id, label, glyph, command, selected, enabled }], vertical: bool,
+    //   command: function(actionId) }. Al volver a null, el Dock recupera su contexto.
+    property var dockOverride: null
+    readonly property real sheetOriginBlur: extremeMotion ? 0.6 : 0.0      // MultiEffect.blur inicial
+    readonly property real sheetOriginGel: extremeMotion ? 1.0 : 0.0       // DockGlassPanel.gel máx.
+    readonly property real pressHighlight: extremeMotion ? 0.14 : 0.0      // realce blanco del vidrio
+    // Hero (HeroTransitions/Hero, MIT, thirdparty/hero): curvas y duraciones portadas
+    // literalmente de CAMediaTimingFunction+Hero.swift, HeroDefaultAnimator.swift
+    // (optimizedDurationTo) y DefaultAnimationPreprocessor.swift. Sólo con advancedMotion.
+    readonly property QtObject hero: QtObject {
+        // Easing.BezierSpline: [x1, y1, x2, y2, 1, 1].
+        readonly property var standard: [0.4, 0.0, 0.2, 1.0, 1, 1]
+        readonly property var deceleration: [0.0, 0.0, 0.2, 1.0, 1, 1]
+        readonly property var acceleration: [0.4, 0.0, 1.0, 1.0, 1, 1]
+        readonly property var sharp: [0.4, 0.0, 0.6, 1.0, 1, 1]
+        readonly property var easeOutBack: [0.175, 0.885, 0.32, 1.275, 1, 1]
+        readonly property int defaultDuration: 350             // .duration(0.35)
+        // optimizedDurationTo: 0,208 s + puntos movidos (posición + tamaño, 0..500) / 3000.
+        function duration(movePoints) {
+            return Math.round((0.208 + Math.max(0, Math.min(500, movePoints)) / 3000) * 1000)
+        }
+        readonly property real pushFromShift: 1 / 3              // .push: la vista saliente se mueve 1/3
+        readonly property real overlayOpacity: 0.1               // .overlay(color: .black, opacity: 0.1)
+        readonly property real pageScale: 0.7                    // .pageIn / .pageOut
+        readonly property real zoomScale: 1.3                    // .zoom
+        readonly property real zoomSlideScale: 0.8               // .zoomSlide
+    }
     property bool reduceMotion: false
     // 0 = sin movimiento, 1 = discreto, 2 = completo.
     property int motionLevel: 2
@@ -169,13 +210,13 @@ QtObject {
     readonly property int imeScrollDuration: motionAllowed ? duration(190) : 0
 
     // Navegación y revelado.
-    readonly property int pageOutDuration: duration(105)
-    readonly property int pageInDuration: duration(230)
+    readonly property int pageOutDuration: advancedMotion ? hero.defaultDuration : duration(105)   // Hero: 0,35 s
+    readonly property int pageInDuration: advancedMotion ? hero.defaultDuration : duration(230)
     readonly property int revealDuration: duration(230)
     readonly property int cardRevealDuration: duration(240)
-    readonly property int staggerDuration: duration(42)
-    readonly property int sheetDuration: duration(240)
-    readonly property int dialogDuration: duration(260)
+    readonly property int staggerDuration: extremeMotion ? 30 : duration(42)   // «Extrema»: cascada de 30 ms
+    readonly property int sheetDuration: advancedMotion ? hero.defaultDuration : duration(240)
+    readonly property int dialogDuration: advancedMotion ? hero.defaultDuration : duration(260)
 
     // Retroalimentación.
     readonly property int rippleDuration: duration(390)
@@ -186,7 +227,7 @@ QtObject {
     readonly property int pulseDuration: duration(170)
 
     // Escalas y distancias.
-    readonly property real pressScale: motionAllowed ? 0.965 : 1.0
+    readonly property real pressScale: motionAllowed ? (extremeMotion ? 0.97 : 0.965) : 1.0
     readonly property real compactPressScale: motionAllowed ? 0.948 : 1.0
     readonly property real cardPressScale: motionAllowed ? 0.975 : 1.0
     readonly property real activeIconScale: motionAllowed ? 1.085 : 1.0
@@ -195,7 +236,7 @@ QtObject {
     readonly property real pageInScale: motionAllowed ? 0.982 : 1.0
     readonly property real revealStartScale: motionAllowed ? 0.965 : 1.0
     readonly property real cardRevealOffset: motionAllowed ? 14.0 : 0.0
-    readonly property real sheetStartScale: motionAllowed ? 0.972 : 1.0
+    readonly property real sheetStartScale: motionAllowed ? (extremeMotion ? 0.86 : 0.972) : 1.0   // «Extrema»: desde el origen
     readonly property real focusScale: motionAllowed ? 1.012 : 1.0
 
     // -----------------------------------------------------------------

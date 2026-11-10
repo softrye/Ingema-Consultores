@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import "RStyle.js" as S
 
 // Estado, presentación, versiones inmutables, observaciones y acciones de
@@ -43,22 +42,41 @@ Item {
     readonly property var life: ({ alive: true })
     Component.onDestruction: life.alive = false
 
+    // Deslizar hacia abajo actualiza (mismo gesto que Gastos).
+    readonly property real pull: Math.max(0, reviewFlick.originY - reviewFlick.contentY)
+    readonly property string status: S.text_(current, "status").toUpperCase()
+    readonly property int stepIndex: Math.max(0, S.reviewStateIndex(status))
+    readonly property string statusLabel: {
+        // Etiqueta única del controlador (con tildes: «En revisión»).
+        var t = app.ctl ? app.ctl.statusLabel(status.length ? status : "BORRADOR") : (status || "Borrador")
+        return t + (stepIndex === 0 && detail.writable ? " · edición autorizada" : "")
+    }
+    // Actualizar = sincronización silenciosa + contexto de revisión del servidor.
+    function refresh() {
+        tab.detail.refreshFromPull()
+        reviewPanel.loadContext()
+    }
     function present() {
         app.confirm("Presentar rendición",
                     "Se guardará una versión inmutable con sus gastos, fondo y tipo de cambio, y pasará a revisión. Después sólo podrás editarla si administración la observa.",
                     "Presentar", false, function() {
             tab.app.call("present", {}, "present", function(ok, result, code, message) {
-                if (!ok) { tab.app.toast(tab.app.errorText(code, message), "error"); return }
+                // Clave fija: un intento fallido anterior se retira al presentar con éxito
+                // (antes el aviso quedaba y el fondo seguía en rojo).
+                if (!ok) { tab.app.reportProblem(tab.app.errorText(code, message), "", "present:" + tab.detail.localId); return }
+                if (tab.app.ctl) tab.app.ctl.resolveIssue("present:" + tab.detail.localId)
                 tab.app.toast("Rendición presentada y confirmada por el servidor.", "success")
             })
         })
     }
 
     Flickable {
+        id: reviewFlick
         anchors.fill: parent
         contentWidth: width
         contentHeight: column.height + 140 * tab.ui.u
-        boundsBehavior: Flickable.StopAtBounds
+        boundsBehavior: Flickable.DragOverBounds
+        onDraggingChanged: if (!dragging && tab.pull >= tab.detail.pullThreshold) tab.refresh()
         clip: true
         Column {
             id: column
@@ -66,48 +84,104 @@ Item {
             width: parent.width - 2 * tab.ui.gutter
             spacing: 12 * tab.ui.u
 
-            // ------------------------------------------------ Presentación
+            // ------------------------------------------------ Estado (rediseño aprobado)
             RCard {
+                objectName: "reviewStateCard"
                 width: parent.width
                 ui: tab.ui
-                visible: tab.detail.writable
-                Text { text: "Presentar para revisión"; color: S.text; font.family: tab.ui.fontFamily; font.pixelSize: 15 * tab.ui.u; font.weight: Font.DemiBold }
+                color: S.glass(0.80)
+                border.color: S.edge(1)
+                radius: 24 * tab.ui.u
+                Item {
+                    width: parent.width; height: Math.max(stateText.implicitHeight, 44 * tab.ui.u)
+                    Column {
+                        id: stateText
+                        width: parent.width - 56 * tab.ui.u
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 2 * tab.ui.u
+                        Text { text: "Estado"; color: S.muted; font.family: tab.ui.fontFamily; font.pixelSize: 12.5 * tab.ui.u; font.weight: Font.DemiBold }
+                        Text { width: parent.width; text: tab.statusLabel; wrapMode: Text.WordWrap; color: S.text
+                               font.family: tab.ui.fontFamily; font.pixelSize: 22 * tab.ui.u; font.weight: Font.ExtraBold }
+                    }
+                    RButton {
+                        objectName: "reviewRefresh"
+                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                        width: 44 * tab.ui.u; height: width; radius: width / 2
+                        ui: tab.ui; glyph: 0xE145; color: S.tintSoft
+                        busy: tab.app.busy("sync")
+                        Accessible.name: "Actualizar revisión"
+                        onActivated: tab.refresh()
+                    }
+                }
+                Column {                                  // línea de tiempo completa de estados (Web)
+                    objectName: "reviewTimeline"
+                    width: parent.width
+                    Repeater {
+                        model: S.reviewStates
+                        delegate: Item {
+                            id: step
+                            required property string modelData
+                            required property int index
+                            readonly property bool now: index === tab.stepIndex
+                            readonly property bool done: index < tab.stepIndex
+                            readonly property color tone: now || done ? S.statusColor(modelData) : S.ink(0.18)
+                            width: parent.width; height: 30 * tab.ui.u
+                            Rectangle {                       // tramo vertical hacia el siguiente estado
+                                visible: step.index < S.reviewStates.length - 1
+                                x: 9 * tab.ui.u; y: parent.height / 2; width: 2 * tab.ui.u; height: parent.height
+                                color: step.done ? S.statusColor(step.modelData) : S.ink(0.10)
+                            }
+                            Rectangle {
+                                x: (step.now ? 2 : 4) * tab.ui.u; anchors.verticalCenter: parent.verticalCenter
+                                width: (step.now ? 16 : 12) * tab.ui.u; height: width; radius: width / 2
+                                color: step.now || step.done ? step.tone : "transparent"
+                                border.width: step.now || step.done ? 0 : 2 * tab.ui.u; border.color: step.tone
+                            }
+                            Text {
+                                x: 28 * tab.ui.u; anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width - x; elide: Text.ElideRight
+                                text: tab.ctl.statusLabel(step.modelData) + (step.now ? " · actual" : "")
+                                color: step.now ? S.text : step.done ? S.muted : S.faint
+                                font.family: tab.ui.fontFamily; font.pixelSize: 13 * tab.ui.u
+                                font.weight: step.now ? Font.Bold : Font.Normal
+                            }
+                        }
+                    }
+                }
+                RButton {
+                    width: parent.width; height: 54 * tab.ui.u; radius: 16 * tab.ui.u
+                    visible: tab.detail.writable
+                    ui: tab.ui; primary: true; glyph: 0xE152; label: "Presentar rendición"
+                    enabledButton: tab.presentBlocker.length === 0
+                    busy: tab.app.busy("present") || tab.app.phase === "PRESENTING"
+                    onActivated: tab.present()
+                }
                 Text {
                     width: parent.width
-                    text: tab.presentBlocker.length ? tab.presentBlocker : "Lista para presentar. Se creará una versión inmutable."
-                    color: tab.presentBlocker.length ? S.warning : S.success
-                    wrapMode: Text.WordWrap
-                    font.family: tab.ui.fontFamily; font.pixelSize: 14 * tab.ui.u
-                }
-                Row {
-                    spacing: 8 * tab.ui.u
-                    RButton {
-                        ui: tab.ui; primary: true; label: "Presentar rendición"
-                        enabledButton: tab.presentBlocker.length === 0
-                        busy: tab.app.busy("present") || tab.app.phase === "PRESENTING"
-                        onActivated: tab.present()
-                    }
-                    RButton {
-                        ui: tab.ui; glyph: 0xE145; label: "Sincronizar"
-                        visible: tab.pending > 0 || !tab.remoteId.length
-                        busy: tab.app.busy("sync")
-                        onActivated: tab.app.synchronize()
-                    }
+                    visible: tab.detail.writable && tab.presentBlocker.length > 0
+                    text: tab.presentBlocker
+                    color: S.muted; wrapMode: Text.WordWrap
+                    font.family: tab.ui.fontFamily; font.pixelSize: 13 * tab.ui.u
                 }
             }
 
             ReviewPanel {
+                id: reviewPanel
                 width: parent.width
                 app: tab.app
                 remoteId: tab.remoteId
+                versionId: String(tab.current.currentVersionId || "")
                 active: tab.visible
             }
 
             // -------------------------------------------------- Observaciones
-            Text { text: "Gastos observados"; color: S.text; font.family: tab.ui.fontFamily; font.pixelSize: 17 * tab.ui.u; font.weight: Font.DemiBold }
+            Item { width: parent.width; height: 32 * tab.ui.u
+                   Text { anchors.verticalCenter: parent.verticalCenter; text: "Gastos observados"; color: S.text; font.family: tab.ui.fontFamily; font.pixelSize: 15 * tab.ui.u; font.weight: Font.Bold }
+                   Rectangle { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; width: Math.max(28 * tab.ui.u, obsCount.implicitWidth + 16 * tab.ui.u); height: 28 * tab.ui.u; radius: height / 2; color: S.ink(0.06)
+                               Text { id: obsCount; anchors.centerIn: parent; text: tab.observed.length; color: S.text; font.family: tab.ui.fontFamily; font.pixelSize: 13 * tab.ui.u; font.weight: Font.Bold } } }
             Text {
                 width: parent.width
-                visible: tab.observed.length === 0
+                visible: false                       // el contador «0» ya lo indica
                 text: "No hay observaciones sobre los gastos."
                 color: S.muted
                 font.family: tab.ui.fontFamily; font.pixelSize: 14 * tab.ui.u
@@ -137,10 +211,13 @@ Item {
             }
 
             // ------------------------------------------------------ Versiones
-            Text { text: "Versiones presentadas"; color: S.text; font.family: tab.ui.fontFamily; font.pixelSize: 17 * tab.ui.u; font.weight: Font.DemiBold }
+            Item { width: parent.width; height: 32 * tab.ui.u
+                   Text { anchors.verticalCenter: parent.verticalCenter; text: "Versiones presentadas"; color: S.text; font.family: tab.ui.fontFamily; font.pixelSize: 15 * tab.ui.u; font.weight: Font.Bold }
+                   Rectangle { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; width: Math.max(28 * tab.ui.u, verCount.implicitWidth + 16 * tab.ui.u); height: 28 * tab.ui.u; radius: height / 2; color: S.ink(0.06)
+                               Text { id: verCount; anchors.centerIn: parent; text: tab.versions.length; color: S.text; font.family: tab.ui.fontFamily; font.pixelSize: 13 * tab.ui.u; font.weight: Font.Bold } } }
             Text {
                 width: parent.width
-                visible: tab.versions.length === 0
+                visible: false                       // el contador «0» ya lo indica
                 text: tab.remoteId.length ? "Aún no hay versiones presentadas." : "Las versiones aparecen después de sincronizar y presentar."
                 color: S.muted; wrapMode: Text.WordWrap
                 font.family: tab.ui.fontFamily; font.pixelSize: 14 * tab.ui.u

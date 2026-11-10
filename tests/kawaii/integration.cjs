@@ -1,4 +1,4 @@
-// Static integration check: Kawaii appearance and Extreme-only passive Dock guest.
+// Static integration check: Kawaii appearance and all-fidelity passive Dock guest.
 // Does not build, deploy, or run the Qt application.
 const fs = require('node:fs');
 const path = require('node:path');
@@ -37,7 +37,7 @@ includes('qml/Mobile/HomeScreen.qml', /guestSurfaceReady: dock\.visible/);
 includes('qml/Mobile/HomeScreen.qml', /Kawaii\.KawaiiDockDecoration/);
 includes('qml/Mobile/HomeScreen.qml', /appearancePrefs\.skin/);
 includes('qml/Mobile/halloween/HalloweenController.qml', /kawaiiEnabled: resolvedSkin === "ingenieros"/);
-includes('qml/Mobile/halloween/HalloweenController.qml', /flow\.extremeMotion && motionActive && kawaiiClock\.remainingMs>0/);
+includes('qml/Mobile/halloween/HalloweenController.qml', /motionActive && kawaiiClock\.remainingMs>0/);
 includes('qml/Mobile/halloween/HalloweenController.qml', /safe && guestSurfaceReady && !touchActive/);
 includes('qml/Mobile/halloween/HalloweenController.qml', /KawaiiLogic\.stepGuest/);
 includes('qml/Mobile/renditions/RendicionesSyncBackdrop.qml', /Kawaii\.KawaiiLayer/);
@@ -50,4 +50,4 @@ for (const name of ['helmet.svg', 'sparkle.svg']) {
   assert.ok(qrc.includes('alias="' + name + '"'), name);
   assert.ok(fs.existsSync(path.join(root, 'images/kawaii', name)), name);
 }
-console.log('PASS: Kawaii QML, appearance, Extreme-only guest, PNG and Qt resource wiring');
+console.log('PASS: Kawaii QML, appearance, all-fidelity guest, PNG and Qt resource wiring');

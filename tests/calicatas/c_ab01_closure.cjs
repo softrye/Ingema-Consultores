@@ -136,7 +136,8 @@ await test('FECHA/HORA A · fecha ficha 13/03/26 + hora 20:06:33 => rótulo 13/0
     assert.equal(rules.normalizeOptionalTime('9:42'), '09:42:00');
     assert.equal(rules.normalizeOptionalTime(''), '');
     for (const bad of ['25:00', '20:61:00', 'abc', '20:06:33:1']) assert.equal(rules.normalizeOptionalTime(bad), null);
-    assert.ok(form.includes('headerKey: "hora_inicio"') && form.includes('label: "Hora (opcional)"'));
+    // General (preview aprobado): sin campo Hora visible; el dato hora_inicio se conserva y normaliza.
+    assert.ok(!form.includes('label: "Hora (opcional)"') && form.includes('h.hora_inicio = Rules.normalizeOptionalTime(h.hora_inicio)'));
     const apply = block(doc, 'void applyPhotoCapture(', '} // namespace');
     assert.ok(apply.includes('"fecha_inicio"') && apply.includes('sheetTime(header)'));
     // El rótulo convierte dd/MM/yyyy -> dd/MM/yy ("13/03/26  20:06:33").
@@ -165,7 +166,8 @@ await test('FECHA/HORA D · la fecha del sistema nunca reemplaza la fecha de la 
 // =================================================================== PERSISTENCIA REMOTA / PDF
 await test('FECHA/HORA 17 · hora_inicio viaja cross-device (start_time)', async () => {
     assert.ok(form.includes('h.start_time = h.hora_inicio'), 'exportState mantiene la columna canónica al día');
-    assert.ok(form.includes('h.start_time = normalized   // columna remota (cross-device)'));
+    // El campo Hora salió de General (preview aprobado): la hora existente sigue viajando por exportState.
+    assert.ok(!form.includes('headerKey: "hora_inicio"'));
     assert.ok(cloud.includes('changes[QStringLiteral("start_time")] = nullableTime(value("start_time", "hora_inicio"));'));
     assert.ok(doc.includes('{"start_time", "hora_inicio"}'), 'pull devuelve la hora al campo de la ficha');
 });

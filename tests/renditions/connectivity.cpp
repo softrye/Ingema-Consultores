@@ -61,6 +61,12 @@ int main(int argc, char **argv)
         mobile.onTransport(C::Outcome::Reachable);
         mobile.onNetwork(true);
         check(mobile.online(), "wifi off but mobile data reachable stays ONLINE");
+        check(!mobile.onTransport(C::Outcome::Unreachable) && mobile.online(),
+              "one RPC failure is not proof the server is down");
+        check(mobile.onTransport(C::Outcome::Unreachable) && mobile.offline(),
+              "two consecutive RPC failures confirm connectivity loss");
+        check(mobile.onTransport(C::Outcome::Reachable) && mobile.online(),
+              "server response restores connectivity");
         // Espera creciente por INTENTO (un pull de ~8 RPC cuenta una vez).
         C::State backoff;
         backoff.onNetwork(true);

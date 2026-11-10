@@ -25,11 +25,18 @@ public:
     QVariantList renditions() const;
     bool removeDraft(const QString &localId);
     bool markDraftDeleted(const QString &localId, const QVariantMap &remote);
+    bool requestDraftTrash(const QString &localId);
+    bool markDraftTrashed(const QString &localId, const QVariantMap &remote);
+    bool rejectDraftTrash(const QString &localId, const QString &error);
+    bool requestRenditionArchive(const QString &localId);
+    bool markRenditionArchived(const QString &localId, const QVariantMap &remote);
+    bool rejectRenditionArchive(const QString &localId, const QString &error);
     QVariantList outbox() const { return m_outbox; }
     int pendingCount() const;
     QString lastError() const { return m_lastError; }
     QVariantMap editorDrafts() const { return m_editorDrafts; }
-    bool saveEditorDraft(const QString &key, const QVariantMap &draft);
+    // quiet: autoguardado mientras se escribe; no republica el estado (evita reconstruir la UI).
+    bool saveEditorDraft(const QString &key, const QVariantMap &draft, bool quiet = false);
 
     Q_INVOKABLE void reload();
     bool saveFinancial(const QString &localId, const QString &kind,
@@ -80,7 +87,7 @@ public:
     Q_INVOKABLE QVariantList expensesFor(const QString &localId) const;
     Q_INVOKABLE QVariantList attachmentsFor(const QString &localId,
                                              const QString &expenseLocalId) const;
-    Q_INVOKABLE void mergeRemoteRenditions(const QVariantList &remoteRows);
+    Q_INVOKABLE void mergeRemoteRenditions(const QVariantList &remoteRows, bool fromActiveList = true);
     void reconcileCompleteRenditionList(const QVariantList &remoteRows);
     Q_INVOKABLE void mergeRemoteExpenses(const QString &renditionLocalId,
                                          const QVariantList &remoteRows);
@@ -161,6 +168,9 @@ signals:
     void persistenceFailed(const QString &message);
 
 private:
+    bool requestRenditionLifecycle(const QString &localId, bool archive);
+    bool markRenditionLifecycle(const QString &localId, const QVariantMap &remote, bool archive);
+    bool rejectRenditionLifecycle(const QString &localId, const QString &error, bool archive);
     void selectAccount(const QString &accountScope);
     QString storagePath() const;
     bool persist();

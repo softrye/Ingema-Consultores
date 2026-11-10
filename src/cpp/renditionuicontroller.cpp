@@ -188,6 +188,11 @@ bool RenditionUiController::canEdit(const QVariantMap &rendition) const
     return !rendition.isEmpty() && RenditionContract::canEditWorkingCopy(rendition);
 }
 
+bool RenditionUiController::canArchive(const QVariantMap &rendition) const
+{
+    return !rendition.isEmpty() && RenditionContract::canArchiveState(rendition);
+}
+
 QString RenditionUiController::headerError(const QVariantMap &header) const
 {
     return RenditionValidation::header(
@@ -461,9 +466,13 @@ QString RenditionUiController::statusLabel(const QString &status) const
 {
     static const QHash<QString, QString> labels{
         {QStringLiteral("BORRADOR"), QStringLiteral("Borrador")},
-        {QStringLiteral("OBSERVADO"), QStringLiteral("Observada")},
+        // Mismas etiquetas que renditionReviewState.ts (Web).
+        {QStringLiteral("OBSERVADO"), QStringLiteral("Observado")},
         {QStringLiteral("EN_REVISION"), QStringLiteral("En revisión")},
-        {QStringLiteral("APROBADO"), QStringLiteral("Aprobada")},
+        {QStringLiteral("APROBADO"), QStringLiteral("Aprobado")},
+        {QStringLiteral("REVISADO"), QStringLiteral("Revisado")},
+        {QStringLiteral("ARCHIVADO"), QStringLiteral("Archivado")},
+        {QStringLiteral("EXPORTADO"), QStringLiteral("Exportado")},
         {QStringLiteral("PRESENTADA"), QStringLiteral("Presentada")}};
     return labels.value(status.toUpper(), status);
 }

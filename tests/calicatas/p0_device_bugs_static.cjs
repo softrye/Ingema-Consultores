@@ -96,9 +96,10 @@ const photoEditor = read('qml/Mobile/pages/CalicataPhotoEditor.qml');
   const titleKeys = between(exporter, 'QString exportProjectName(const QVariantMap &header', '\n}\n');
   assert.ok(titleKeys.includes('QStringLiteral("projectName")') && titleKeys.includes('"project_full_name"'),
             'Excel = projects.name (nombre antiguo solo sin proyecto)');
-  assert.ok(form.includes('headerKey: "project_short_name"') && form.includes('headerKey: "project_full_name"')
-            && form.includes('readonly property var sheetTypes: ["FICHA DE CALICATA", "FICHA DE CANTERA"]'),
-            'nombre largo, nombre corto y tipo de ficha (2 opciones) separados');
+  // General (preview aprobado): sin «Nombre corto del proyecto» visible; nombre largo y tipo de ficha (2 opciones).
+  assert.ok(!form.includes('headerKey: "project_short_name"') && form.includes('headerKey: "project_full_name"')
+            && form.includes('var sheetTypes = ["FICHA DE CALICATA", "FICHA DE CANTERA"]'),
+            'nombre largo y tipo de ficha (2 opciones) separados; nombre corto retirado de General');
   pass('Foto: altitud = cota de la ficha con origen, proyecto = projects.name, fecha de ficha + hora manual/fijada');
 }
 

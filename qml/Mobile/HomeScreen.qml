@@ -1,11 +1,18 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Effects
 import QtQuick.Shapes
+import QtQuick.Controls as Controls
+import "halloween" as Halloween
+import "kawaii" as Kawaii
 import QtCore
 import InGe 1.0
 import "lib/AccountText.js" as AccountText
+import "renditions/RStyle.js" as RStyle
 import "renditions" as Renditions
 import "assistant" as Assistant
+import "settings" as AppSettings
+import InGe.Mobile as MobileBackend
 import InGe.CoreFlow 3.0 as CoreFlowModule
 
 // Home V1 de InGe+ (2026-10-12; Preview 1). Fondo fotográfico real
@@ -20,7 +27,131 @@ Item {
     property real u: 1
     property string fontFamily: ""
     property string iconFamily: ""
-    property bool reducedMotion: false
+    // Movimiento: el del sistema (Main) o la preferencia «Reducir movimiento».
+    property bool systemReducedMotion: false
+    readonly property bool reducedMotion: systemReducedMotion || appearancePrefs.reduceMotion
+    // Hero (InGeCoreFlow.hero): sólo con advancedMotion (Muy alta / Extrema); si no, null.
+    readonly property var heroMotion: CoreFlowModule.InGeCoreFlow.advancedMotion === true && !reducedMotion
+                                      ? CoreFlowModule.InGeCoreFlow.hero : null
+    // «Extrema» (GraphicsCore.extremeGlass): zoom hero mosaico <-> app, cascada,
+    // parallax y realce al pulsar, con las curvas Hero de InGeCoreFlow.
+    readonly property bool extremeMotion: !reducedMotion && GraphicsCore.extremeGlass === true
+    readonly property var heroCurves: CoreFlowModule.InGeCoreFlow.hero
+    signal cascadeRequested()
+    readonly property real parallaxY: extremeMotion && page === "home" && typeof homeScroll !== "undefined"
+                                      ? -Math.min(height * 0.05, homeScroll.contentY * 0.12) : 0
+    property rect heroOrigin: Qt.rect(0, 0, 0, 0)
+    property real heroOriginRadius: 18 * u
+    property string heroPrevPage: "home"
+    property real editColumnY: -1               // columna fija durante el modo edición
+    function heroLaunch(item) {
+        if (!extremeMotion || !item) return
+        var p = item.mapToItem(home, 0, 0)
+        heroOrigin = Qt.rect(p.x, p.y, item.width, item.height)
+        heroOriginRadius = item.radius !== undefined ? item.radius : 18 * u
+        heroZoom.run(true)
+    }
+    Connections {
+        target: home
+        function onEditModeChanged() { home.editColumnY = home.editMode ? homeColumn.naturalY : -1 }
+        function onPageChanged() {
+            if (home.page === "home" && home.heroPrevPage !== "home" && home.extremeMotion) {
+                if (home.heroOrigin.width > 0) heroZoom.run(false)
+                home.cascadeRequested()
+            }
+            home.heroPrevPage = home.page
+        }
+    }
+    Timer { interval: 60; running: true; onTriggered: if (home.extremeMotion) home.cascadeRequested() }
+    // Píldora líquida del Dock (Muy alta / Extrema): viaja entre pestañas como líquido.
+    readonly property bool liquidPill: !reducedMotion
+        && (GraphicsCore.advancedMotion === true || GraphicsCore.extremeGlass === true)
+    // Apariencia (Configuración › Apariencia). El tema oscuro aplica por ahora a Configuración.
+    readonly property bool liquidGlass: appearancePrefs.liquidGlass
+    readonly property string appSkin: halloweenController.resolvedSkin
+    readonly property var seasonalController: halloweenController
+    readonly property bool darkTheme: appearancePrefs.theme === "dark"
+                                      || (appearancePrefs.theme === "auto" && Application.styleHints.colorScheme === Qt.ColorScheme.Dark)
+    // El tema oscuro se aplica a la paleta de Rendiciones antes de crearla; al
+    // cambiar de tema la subapp se recrea (si no está en pantalla) con la nueva paleta.
+    onAppSkinChanged: {
+        RStyle.setSkin(appSkin)
+        if (page !== "rendiciones") renditionsEverLoaded = false
+        if (page !== "calicatas") calicatasEditorEverLoaded = false
+    }
+    onDarkThemeChanged: {
+        RStyle.setDark(darkTheme)
+        if (page !== "rendiciones") renditionsEverLoaded = false
+        if (page !== "calicatas") calicatasEditorEverLoaded = false
+    }
+    Settings { id: appearancePrefs; category: "appearance"
+               property bool reduceMotion: false; property bool liquidGlass: true; property string theme: "light"
+               property string skin: "none"
+               property bool halloweenScares: true; property bool halloweenSound: false }
+
+    Binding { target: CoreFlowModule.InGeCoreFlow; property: "appSkin"; value: home.appSkin }
+    Binding { target: CoreFlowModule.InGeCoreFlow; property: "halloweenController"; value: halloweenController }
+    Binding { target: CoreFlowModule.InGeCoreFlow; property: "liquidGlassMaterial"; value: home.liquidGlassMaterial }
+    // Controls popup items and scrims live here, including nested page dialogs.
+    readonly property bool halloweenPopupVisible: {
+        var overlay = Controls.Overlay.overlay
+        if (!overlay) return false
+        for (var i = 0; i < overlay.children.length; ++i)
+            if (overlay.children[i].visible) return true
+        return false
+    }
+    Halloween.HalloweenController {
+        id: halloweenController
+        flow: CoreFlowModule.InGeCoreFlow
+        choice: appearancePrefs.skin
+        foreground: home.visible && home.authReady && auth.logged && Qt.application.state === Qt.ApplicationActive
+            && ["home", "rendiciones", "calicatas", "drive", "settings"].indexOf(home.page) >= 0
+        reducedMotion: home.reducedMotion
+        scaresEnabled: appearancePrefs.halloweenScares
+        soundEnabled: appearancePrefs.halloweenSound
+        guestSurfaceReady: dock.visible && dock.opacity>0.99 && !home.dockVertical && !dockMenuBox.open
+        safeSurface: !home.halloweenPopupVisible && !flow.imeVisible && !flow.imeAnimating
+            && !home.addOpen && !home.dockPressActive && home.dockPath.length === 0
+            && !home.optionsCard && home.sheetGrow <= 0 && home.menuKey.length === 0
+            && home.liftKey.length === 0 && home.overlayLevel <= 0 && !home.editMode
+            && !home.touchFocusActive && !assistantSheet.open && !subAppEnter.running && !subAppExit.running
+            && !CalicataCloud.busy && !settingsApp.halloweenBlocked
+            && (!renditionsLoader.item || !renditionsLoader.item.halloweenBlocked)
+            && (!calicatasEditor.item || !calicatasEditor.item.halloweenBlocked)
+        onScarePresented: home.dockHaptic("light")
+    }
+    // Observe genuine input even inside Calicatas editing and Rendiciones:
+    // Halloween's motionActive/safeSurface are deliberately disabled there.
+    // This handler is passive and never takes the gesture away from a control.
+    property double kawaiiLastInteractionAt: Date.now()
+    readonly property bool kawaiiAppForeground: home.visible && home.authReady
+        && auth.logged && Qt.application.state === Qt.ApplicationActive
+    PointHandler {
+        enabled: halloweenController.motionActive
+                 || (home.appSkin === "ingenieros" && home.kawaiiAppForeground)
+        target: null
+        onActiveChanged: {
+            halloweenController.touchActive = active
+            home.kawaiiLastInteractionAt = Date.now()
+        }
+        onPointChanged: halloweenController.touchPoint = Qt.point(point.position.x / Math.max(1, home.width), point.position.y / Math.max(1, home.height))
+    }
+    // Original 10s MP4/AAC: one visit after 20s of genuine AFK, on every
+    // authenticated InGe+ page. Do NOT gate with Halloween.safe/motionActive:
+    // those exclude the Calicatas editor and other valid Kawaii surfaces.
+    Kawaii.KawaiiCinnamorollVisit {
+        parent: Controls.Overlay.overlay ? Controls.Overlay.overlay : home
+        anchors.fill: parent
+        mediaEnabled: home.appSkin === "ingenieros" && home.kawaiiAppForeground
+        allowed: home.appSkin === "ingenieros" && home.kawaiiAppForeground
+            && !home.reducedMotion && !halloweenController.touchActive
+        lastInteractionAt: home.kawaiiLastInteractionAt
+    }
+    Halloween.HalloweenScare {
+        anchors.fill: parent; z: 79
+        controller: halloweenController
+        bottomInset: home.dockArea
+    }
     signal signOutRequested()
 
     // ------------------------------------------------------------ Paleta
@@ -28,8 +159,8 @@ Item {
     readonly property color navy2: "#1C2D50"
     readonly property color brandBlue: "#0654A2"
     readonly property color brandGreen: "#486426"
-    readonly property color glassFill: Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.50)
-    readonly property color glassBorder: Qt.rgba(1, 1, 1, 0.22)
+    readonly property color glassFill: appSkin === "halloween" ? RStyle.glass(0.9) : darkTheme ? Qt.rgba(8 / 255, 10 / 255, 16 / 255, 0.62) : Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.50)
+    readonly property color glassBorder: appSkin === "halloween" ? RStyle.edge(0.95) : darkTheme ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(1, 1, 1, 0.22)
 
     // Material glass: textura desenfocada COMPARTIDA de la fotografía
     // (GlassSurface.qml + shaders/glass.frag). glassTick avisa a cada
@@ -62,6 +193,10 @@ Item {
     property var selectedCalicata: null
     function navigate(target) {
         addOpen = false
+        if (target === "profile") {                         // Perfil se integró en Configuración › Mi cuenta
+            settingsApp.pendingPage = "account"
+            target = "settings"
+        }
         page = target
     }
     function openCalicatas(projectId, calicataId) {
@@ -92,6 +227,7 @@ Item {
     function handleBackStep(source) {
         console.info("INGE_NAV_BACK_SOURCE " + source + " page=" + page)
         if (assistantSheet.open) { assistantSheet.close(); return true }   // InGe IA global
+        if (page === "settings" && settingsApp.handleBack()) return true
         if (subAppEnter.running || subAppExit.running)
             return true
         if ((page === "calicatas" || page === "earth" || page === "rendiciones") && dockPath.length > 0) {   // submenú del dock
@@ -260,35 +396,50 @@ Item {
     property real dragDy: 0
     property bool dragMoved: false
     property point dragGrab: Qt.point(0, 0)
+    // Dedo en coordenadas de la cuadrícula: la ficha lo sigue aunque la cuadrícula
+    // la cambie de hueco (antes saltaba al reordenar). Su hueco real queda como
+    // hueco fantasma (Tile.dropGhost) y las vecinas se apartan con la transición
+    // move del Flow: sin huecos ni solapes.
+    property point dragPoint: Qt.point(0, 0)
+    property point dragStart: Qt.point(0, 0)
+    property string dragSwapGuard: ""         // histéresis: no reordena dos veces sobre la misma ficha
+    property Item dragTile: null              // ficha arrastrada (hueco fantasma)
     function beginDrag(tile, mouse) {
         editMode = true                       // reorganizar = modo edición (como iOS)
         dragKey = tile.cardKey
+        dragTile = tile
         dragMoved = false
         dragGrab = Qt.point(mouse.x, mouse.y)
+        dragPoint = tile.mapToItem(grid, mouse.x, mouse.y)
+        dragStart = dragPoint
+        dragSwapGuard = ""
         dragDx = 0
         dragDy = 0
     }
     function dragTo(tile, mouse) {
         var p = tile.mapToItem(grid, mouse.x, mouse.y)
+        dragPoint = p
+        if (Math.abs(p.x - dragStart.x) + Math.abs(p.y - dragStart.y) > 12 * u)
+            dragMoved = true
         dragDx = p.x - (tile.x + dragGrab.x)
         dragDy = p.y - (tile.y + dragGrab.y)
-        if (Math.abs(dragDx) + Math.abs(dragDy) > 12 * u)
-            dragMoved = true
-        // La tarjeta arrastrada no sale de la cuadrícula.
-        dragDx = Math.max(-tile.x, Math.min(grid.width - tile.width - tile.x, dragDx))
-        dragDy = Math.max(-tile.y, Math.min(grid.height - tile.height - tile.y, dragDy))
         glassTick++
+        var over = ""
         for (var i = 0; i < grid.children.length; ++i) {
             var other = grid.children[i]
             if (other === tile || other.cardKey === undefined || other.cardKey.length === 0
                     || other.modelIndex < 0 || !other.visible)
                 continue
             if (p.x >= other.x && p.x <= other.x + other.width && p.y >= other.y && p.y <= other.y + other.height) {
-                if (other.modelIndex !== tile.modelIndex)
+                over = other.cardKey
+                if (other.cardKey !== dragSwapGuard && other.modelIndex !== tile.modelIndex) {
                     homeModel.move(tile.modelIndex, other.modelIndex, 1)
+                    dragSwapGuard = other.cardKey
+                }
                 break
             }
         }
+        if (over !== dragSwapGuard) dragSwapGuard = over
     }
     function endDrag(tile) {
         var moved = dragMoved
@@ -314,6 +465,10 @@ Item {
     property real ghostLift: 0
     property real ghostFrom: 0.97
     property real overlayLevel: 0               // atenuación + desenfoque del entorno
+    // Hoja Personalizar: el Home sigue visible detrás (vidrio del Dock), sin desenfoque ni velo negro.
+    readonly property bool optionsSheetOpen: optionsCard !== null && menuKey.length === 0
+    property real overlayBlurLevel: optionsSheetOpen ? 0 : 0.85 * overlayLevel
+    Behavior on overlayBlurLevel { enabled: !home.reducedMotion; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
     property real sheetGrow: 0                  // expansión de Personalizar
     property rect sheetFrom: Qt.rect(0, 0, 0, 0)
     property bool editMode: false               // Jiggle Mode
@@ -612,8 +767,9 @@ Item {
         return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2)
     }
     function localGreeting() {
-        return "Welcome back, " + (AccountText.hasVisibleText(firstName) ? firstName : "Engineer")
-                + ".\nWhat's new to do today?"
+        // Español y neutro en género (la app es en español; se retiró el inglés de bienvenida).
+        return (AccountText.hasVisibleText(firstName) ? "Te damos la bienvenida, " + firstName + "." : "Te damos la bienvenida.")
+                + "\n¿Qué avanzamos hoy?"
     }
     function cleanPhrases(list) {
         var out = []
@@ -637,6 +793,7 @@ Item {
         if (userId.length === 0)
             return
         var cache = readMap(store.greetingsJson)[userId]
+        if (cache && cache.lang !== "es") cache = null    // lotes antiguos en inglés: se piden de nuevo
         var cached = cache && Array.isArray(cache.phrases) ? cleanPhrases(cache.phrases) : []
         if (cached.length > 0) {                     // último lote válido de ESTA cuenta
             aiPhrases = cached
@@ -659,17 +816,17 @@ Item {
         var attempts = greetingAttemptsToday()
         if (attempts >= greetingMaxAttempts)
             return                                   // límite diario: sin solicitudes infinitas
-        var name = AccountText.hasVisibleText(firstName) ? firstName : "Engineer"
+        var name = AccountText.hasVisibleText(firstName) ? firstName : "equipo"
         greetingRequestId = "home-greetings-" + Date.now()
         var accepted = InGeAssistant.request({
             operation: "chat",
             id: greetingRequestId,
             messages: [{ role: "user", text:
-                "Write 6 different short greetings for an engineer named " + name + " who opens the InGe+ field engineering app. "
-                + "English only. Each greeting has exactly two lines separated by a newline: line 1 greets " + name
-                + " by name (for example 'Welcome back, " + name + ".' or 'Good afternoon, " + name + ".'); line 2 is an original, "
-                + "professional and motivating sentence of at most 45 characters about engineering, field work, projects or productivity. "
-                + "No emojis, no quotes inside the lines. Answer ONLY with a JSON array of 6 strings." }]
+                "Escribe 6 saludos breves y distintos para " + name + ", que abre InGe+, una app de ingeniería de campo. "
+                + "Solo en español y con lenguaje neutro en género. Cada saludo tiene exactamente dos líneas separadas por un salto de línea: "
+                + "la línea 1 saluda a " + name + " por su nombre (por ejemplo 'Hola de nuevo, " + name + ".' o 'Buenas tardes, " + name + ".'); "
+                + "la línea 2 es una frase original, profesional y motivadora de 45 caracteres como máximo sobre ingeniería, trabajo de campo, proyectos o productividad. "
+                + "Sin emojis ni comillas dentro de las líneas. Responde SOLO con un arreglo JSON de 6 cadenas." }]
         })
         if (!accepted) {
             greetingRequestId = ""
@@ -723,6 +880,7 @@ Item {
             var entry = all[home.userId] || {}
             entry.date = home.todayKey()
             entry.phrases = phrases
+            entry.lang = "es"
             all[home.userId] = entry
             store.greetingsJson = JSON.stringify(all)
             home.aiPhrases = phrases
@@ -735,7 +893,7 @@ Item {
         interval: 5000
         repeat: true
         running: home.greetingFromAi && home.aiPhrases.length > 1 && home.visible
-                 && home.page === "home" && !home.addOpen
+                 && home.page === "home" && !home.addOpen && !home.editMode   // edición: saludo fijo
                  && Qt.application.state === Qt.ApplicationActive
         onTriggered: {
             if (phraseSwap.running)
@@ -748,7 +906,7 @@ Item {
             phraseSwap.restart()
         }
     }
-    Component.onCompleted: { loadItems(); refreshGreeting(); CalicataCloud.refreshProjects(); syncReminders() }
+    Component.onCompleted: { dockDisplayedSlots = dockSlots; RStyle.setSkin(appSkin); RStyle.setDark(darkTheme); loadItems(); refreshGreeting(); CalicataCloud.refreshProjects(); syncReminders() }
 
     // Foto del día entre las fotografías originales (recorte proporcional).
     readonly property var photos: [
@@ -795,18 +953,25 @@ Item {
         Renditions.RendicionesSyncBackdrop {
             id: corporateHomeBackdrop
             anchors.fill: parent
-            visible: home.appSkin === "ingema"
-            skin: "ingema"
+            visible: home.appSkin === "ingema" || home.appSkin === "halloween" || home.appSkin === "ingenieros"
+            skin: home.appSkin
+            halloweenController: home.seasonalController
             dark: true                       // Home retains white labels over the Web's navy background.
             mode: "synced"
             running: visible && home.visible && home.page === "home"
             reducedMotion: home.reducedMotion
             lowCost: home.dockLowCostGlass
+            // «Extrema»: parallax de las auras con el desplazamiento.
+            transform: [Scale { origin.x: corporateHomeBackdrop.width / 2; xScale: home.extremeMotion ? 1.06 : 1; yScale: xScale },
+                        Translate { y: home.parallaxY }]
         }
         Image {
             id: photoImage
             anchors.fill: parent
-            visible: home.appSkin !== "ingema"
+            // «Extrema»: parallax del fondo; el vidrio lo sigue (GlassSurface mapea sobre photoImage).
+            transform: [Scale { origin.x: photoImage.width / 2; xScale: home.extremeMotion ? 1.06 : 1; yScale: xScale },
+                        Translate { y: home.parallaxY }]
+            visible: home.appSkin !== "ingema" && home.appSkin !== "halloween" && home.appSkin !== "ingenieros"
             source: home.photo.source
             fillMode: Image.PreserveAspectCrop
             horizontalAlignment: home.photo.align
@@ -814,12 +979,17 @@ Item {
             cache: true
             sourceSize.height: Math.min(2400, Math.round(home.height * 1.5))
         }
+        Rectangle {                                    // tema oscuro: foto atenuada
+            anchors.fill: photoImage; color: "#000000"
+            opacity: home.darkTheme ? 0.45 : 0
+            Behavior on opacity { NumberAnimation { duration: 400 } }
+        }
         // Desenfoque real de la foto, una sola vez en GPU (la foto es estática)
         // y a media resolución; todas las superficies glass lo reutilizan.
         MultiEffect {
             id: photoBlur
             anchors.fill: photoImage
-            source: home.appSkin === "ingema" ? corporateHomeBackdrop : photoImage
+            source: home.appSkin === "ingema" || home.appSkin === "halloween" || home.appSkin === "ingenieros" ? corporateHomeBackdrop : photoImage
             blurEnabled: true
             blurMax: 64
             blur: 1.0
@@ -852,16 +1022,34 @@ Item {
             boundsBehavior: Flickable.StopAtBounds
             interactive: contentHeight > height && home.dragKey.length === 0 && home.menuKey.length === 0
             opacity: home.page === "home" ? 1 : 0
+            scale: home.page === "settings" ? 0.95 : 1          // Home se aleja al entrar a Configuración
             visible: opacity > 0
             Behavior on opacity { OpacityAnimator { duration: home.reducedMotion ? 0 : 260 } }
+            Behavior on scale { ScaleAnimator { duration: home.reducedMotion ? 0 : 560; easing.type: Easing.OutQuint } }
 
+            Rectangle {                                // hueco fantasma: donde caerá la ficha arrastrada
+                z: -1
+                visible: home.dragKey.length > 0 && home.dragTile !== null
+                x: visible ? homeColumn.x + grid.x + home.dragTile.x : 0
+                y: visible ? homeColumn.y + grid.y + home.dragTile.y : 0
+                width: visible ? home.dragTile.width : 0
+                height: visible ? home.dragTile.height : 0
+                radius: 18 * home.u
+                color: Qt.rgba(1, 1, 1, 0.07)
+                border.width: 1.5
+                border.color: Qt.rgba(1, 1, 1, 0.42)
+                Behavior on x { enabled: !home.reducedMotion; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                Behavior on y { enabled: !home.reducedMotion; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+            }
             Column {
                 id: homeColumn
                 onYChanged: home.glassTick++
                 x: home.gutter
                 width: home.width - 2 * home.gutter
-                y: Math.max(home.topInset + 80 * home.u,
-                            home.height - home.dockArea - height)
+                readonly property real naturalY: Math.max(home.topInset + 80 * home.u,
+                                                          home.height - home.dockArea - height)
+                // Edición: la columna queda fija (el saludo no sube ni se corta al reordenar).
+                y: home.editMode && home.editColumnY >= 0 ? home.editColumnY : naturalY
                 spacing: 0
 
                 // Área reservada de dos líneas: el cambio de frase no mueve la cuadrícula.
@@ -878,9 +1066,15 @@ Item {
                         font.family: home.fontFamily
                         font.pixelSize: 29 * home.u
                         lineHeight: 1.08
-                        wrapMode: Text.WordWrap
-                        maximumLineCount: 2
-                        elide: Text.ElideRight
+                        wrapMode: home.editMode ? Text.NoWrap : Text.WordWrap
+                        // Edición: una sola línea que se ajusta al ancho, sin cortarse.
+                        maximumLineCount: home.editMode ? 1 : 2
+                        // Nunca «…»: el texto reduce su tamaño (mín. 16 u) dentro de sus 2 líneas reservadas.
+                        height: home.editMode ? implicitHeight : greetingArea.height
+                        verticalAlignment: Text.AlignBottom
+                        fontSizeMode: home.editMode ? Text.HorizontalFit : Text.Fit
+                        minimumPixelSize: (home.editMode ? 14 : 16) * home.u
+                        elide: Text.ElideNone
                         textFormat: Text.PlainText
                         style: Text.Raised
                         styleColor: Qt.rgba(0, 0, 0, 0.18)
@@ -916,6 +1110,7 @@ Item {
                     Repeater {
                         model: homeModel
                         delegate: Tile {
+                            id: homeTile
                             ui: home
                             cardKey: model.key
                             modelIndex: index
@@ -927,7 +1122,10 @@ Item {
                             subtitle: home.subtitleFor(model)
                             enabledTile: home.itemAvailable(model)
                             comingSoon: home.isComingSoon(model.kind)
-                            onActivated: home.activateItem(model)
+                            onActivated: {
+                                if (home.itemAvailable(model)) home.heroLaunch(homeTile)   // «Extrema»: zoom hero
+                                home.activateItem(model)
+                            }
                         }
                     }
 
@@ -937,6 +1135,7 @@ Item {
 
         // Notificaciones (arriba a la derecha)
         GlassCircle {
+            id: settingsCircle
             ui: home
             x: home.width - width - home.gutter
             y: home.topInset + 12 * home.u
@@ -944,57 +1143,154 @@ Item {
             glyph: 0xE059
             accessibleName: "Notificaciones y recordatorios"
             visible: home.page === "home"
-            onActivated: home.navigate("settings")
+            onActivated: { home.heroLaunch(settingsCircle); home.navigate("settings") }
         }
 
-        // ------------------------------------------------- Páginas básicas
-        PageFrame {
+        // Configuración (incluye la cuenta; Perfil ya no es una página aparte) (diseño claro aprobado con auras de estado).
+        Settings {                                     // QtCore: preferencias de seguridad
+            id: securityPrefs
+            category: "security"
+            property bool biometricUnlock: false
+        }
+        Loader {                                       // espacio del servidor (InGe Drive), sólo con Configuración abierta
+            id: storageProbe
+            active: settingsApp.shown
+            sourceComponent: Component { MobileBackend.NothingDocuments { Component.onCompleted: navigate("home") } }
+        }
+        AppSettings.SettingsApp {
+            id: settingsApp
+            anchors.fill: parent
             ui: home
-            shown: home.page === "profile"
-            title: "Perfil"
-            Column {
-                width: parent.width
-                spacing: 12 * home.u
-                Text {
-                    width: parent.width
-                    text: home.authReady && auth.logged
-                          ? AccountText.displayPersonName(auth.fullName.length > 0 ? auth.fullName
-                                : (auth.nombre + " " + auth.apellido), "", true) : ""
-                    visible: text.length > 0
-                    color: "white"; font.family: home.fontFamily; font.pixelSize: 21 * home.u
-                    wrapMode: Text.WordWrap
-                }
-                Text {
-                    width: parent.width
-                    text: home.authReady && auth.logged ? AccountText.displayEmailExact(auth.email, "") : ""
-                    color: Qt.rgba(1, 1, 1, 0.78); font.family: home.fontFamily; font.pixelSize: 16 * home.u
-                    wrapMode: Text.WrapAnywhere
-                }
-                Item { width: 1; height: 8 * home.u }
-                ActionButton { ui: home; width: parent.width; label: "Cerrar sesión"; onActivated: home.signOutRequested() }
+            readonly property bool shown: home.page === "settings"
+            opacity: shown ? 1 : 0
+            scale: shown ? 1 : 1.045
+            visible: opacity > 0
+            Behavior on opacity { OpacityAnimator { duration: home.reducedMotion ? 0 : 460; easing.type: Easing.OutCubic } }
+            Behavior on scale { ScaleAnimator { duration: home.reducedMotion ? 0 : 640; easing.type: Easing.OutQuint } }
+            backgroundSource: home.photo.source
+            userName: home.authReady && auth.logged
+                      ? AccountText.displayPersonName(auth.fullName.length > 0 ? auth.fullName : (auth.nombre + " " + auth.apellido), "", true) : ""
+            userEmail: home.authReady && auth.logged ? String(auth.email || "") : ""
+            avatarSource: home.authReady && auth.logged ? String(auth.avatarUrl || "") : ""
+            // Sin nombre/apellido en Auth: se separa el nombre completo del perfil.
+            readonly property var nameParts: home.authReady ? String(auth.fullName || "").trim().split(/\s+/) : []
+            firstName: home.authReady ? (String(auth.nombre || "").length ? String(auth.nombre) : (nameParts[0] || "")) : ""
+            lastName: home.authReady ? (String(auth.apellido || "").length ? String(auth.apellido) : nameParts.slice(1).join(" ")) : ""
+            userPhone: home.authReady ? String(auth.phone || "") : ""
+            userPosition: home.authReady ? String(auth.position || "") : ""
+            userArea: home.authReady ? String(auth.area || "") : ""
+            sessions: home.authReady ? (auth.activeSessions || []) : []
+            sessionsBusy: home.authReady && auth.sessionsBusy
+            savedAccounts: home.authReady ? (auth.savedAccounts || []) : []
+            currentAccountId: home.authReady ? String(auth.currentAccountId || "") : ""
+            onSessionsRefreshRequested: if (home.authReady && auth.logged) auth.refreshActiveSessions()
+            onSessionRevokeRequested: function(sessionId) { securityNotice = "Cerrando sesión…"; auth.revokeSession(sessionId) }
+            onSignOutOthersRequested: { securityNotice = "Cerrando las otras sesiones…"; auth.signOutOtherSessions() }
+            onAccountSwitchRequested: function(accountId) { auth.switchToSavedAccount(accountId) }
+            onAddAccountRequested: home.signOutRequested()      // al login; las cuentas guardadas se conservan
+            onAvatarChosen: function(file) { accountNotice = "Subiendo foto…"; auth.updateUserAvatar(file) }
+            onProfileSaveRequested: function(nombre, apellido, phone) {
+                if (!nombre.length) { accountNotice = "Escribe tu nombre."; return }
+                accountNotice = ""
+                profileSaving = true
+                auth.updateUserProfile(nombre, apellido, phone)
+            }
+            appVersion: Qt.application.version
+            reduceMotion: appearancePrefs.reduceMotion
+            liquidGlass: appearancePrefs.liquidGlass
+            theme: appearancePrefs.theme
+            onReduceMotionToggled: function(value) { appearancePrefs.reduceMotion = value }
+            onLiquidGlassToggled: function(value) { appearancePrefs.liquidGlass = value }
+            onThemeSelected: function(key) { appearancePrefs.theme = key }
+            skin: appearancePrefs.skin
+            effectiveSkin: home.appSkin
+            halloweenScares: appearancePrefs.halloweenScares
+            halloweenSound: appearancePrefs.halloweenSound
+            onHalloweenScaresToggled: function(value) { appearancePrefs.halloweenScares = value }
+            onHalloweenSoundToggled: function(value) { appearancePrefs.halloweenSound = value }
+            onSkinSelected: function(key) { appearancePrefs.skin = key }
+            syncMode: renditionsLoader.item && renditionsLoader.item.syncMode !== undefined ? renditionsLoader.item.syncMode : "unknown"
+            syncText: syncMode === "synced" ? "Al día" : syncMode === "error" ? "Con errores" : syncMode === "offline" ? "Sin conexión"
+                    : syncMode === "attention" ? "Revisar" : syncMode === "syncing" ? "Sincronizando" : ""
+            notificationsText: store.remindersEnabled ? "Activadas" : "Desactivadas"
+            renditionsSync: syncMode
+            renditionsPending: renditionsLoader.item && renditionsLoader.item.pendingCount !== undefined ? renditionsLoader.item.pendingCount : 0
+            calicatasSync: calicatasEditor.item && calicatasEditor.item.healthAuraMode !== undefined ? calicatasEditor.item.healthAuraMode : "unknown"
+            syncBusy: !!renditionsLoader.item && renditionsLoader.item.phase !== undefined
+                      && (renditionsLoader.item.phase === "PUSHING" || renditionsLoader.item.phase === "PULLING")
+            mfaEnabled: home.authReady && auth.mfaEnabled === true
+            onMfaEnrollRequested: { securityNotice = "Preparando…"; auth.enrollTotp() }
+            onMfaConfirmRequested: function(factorId, code) {
+                if (code.length < 6) { securityNotice = "Escribe los 6 dígitos del código."; return }
+                securityNotice = "Verificando…"
+                auth.confirmTotpEnrollment(factorId, code)
+            }
+            onMfaDisableRequested: { securityNotice = "Desactivando…"; auth.disableTotp() }
+            onSyncNowRequested: {
+                if (renditionsLoader.item && renditionsLoader.item.synchronize) renditionsLoader.item.synchronize(true)
+                CalicataCloud.refreshProjects()
+            }
+            biometricAvailable: typeof biometric !== "undefined" && biometric !== null && biometric.available
+            biometricBusy: typeof biometric !== "undefined" && biometric !== null && biometric.busy
+            biometricEnabled: securityPrefs.biometricUnlock
+            storageStats: storageProbe.item ? storageProbe.item.stats : ({})
+            storageBusy: storageProbe.item ? storageProbe.item.busy : false
+            storageError: storageProbe.item ? String(storageProbe.item.error || "") : ""
+            onShownChanged: if (shown && typeof biometric !== "undefined" && biometric) biometric.refresh()
+            onCloseRequested: home.page = "home"
+            onSignOutRequested: home.signOutRequested()
+            onNotificationsToggled: store.remindersEnabled = !store.remindersEnabled
+            onStorageRefreshRequested: if (storageProbe.item) storageProbe.item.refresh()
+            onPasswordResetRequested: {
+                if (!home.authReady || !String(auth.email || "").length) return
+                home.passwordResetPending = true
+                securityNotice = "Enviando enlace…"
+                auth.requestPasswordReset(String(auth.email))
+            }
+            // Activar exige confirmar con la huella o el rostro; desactivar es directo.
+            onBiometricToggled: function(value) {
+                securityNotice = ""
+                if (!value) { securityPrefs.biometricUnlock = false; return }
+                home.biometricEnrollPending = true
+                biometric.authenticate()
             }
         }
-        PageFrame {
-            ui: home
-            shown: home.page === "settings"
-            title: "Ajustes"
-            Column {
-                width: parent.width
-                spacing: 12 * home.u
-                GlassRow {
-                    ui: home
-                    width: parent.width
-                    title: "Recordatorios"
-                    subtitle: store.remindersEnabled ? "Activados" : "Desactivados"
-                    trailing: store.remindersEnabled ? "ON" : "OFF"
-                    onActivated: store.remindersEnabled = !store.remindersEnabled
-                }
-                Text {
-                    width: parent.width
-                    text: "Un aviso al día como máximo (nunca entre 21:00 y 8:00), solo cuando tus calicatas tienen cambios pendientes de sincronizar. Android puede pedir permiso para mostrar notificaciones."
-                    color: Qt.rgba(1, 1, 1, 0.72); font.family: home.fontFamily; font.pixelSize: 14 * home.u
-                    wrapMode: Text.WordWrap
-                }
+        Connections {
+            target: typeof biometric !== "undefined" ? biometric : null
+            ignoreUnknownSignals: true
+            function onFinished(ok) {
+                if (!home.biometricEnrollPending) return
+                home.biometricEnrollPending = false
+                securityPrefs.biometricUnlock = ok
+                settingsApp.securityNotice = ok ? "Listo: podrás desbloquear InGe+ con tu huella o rostro."
+                                                : "No se activó: la verificación no se completó."
+            }
+        }
+        // El aviso de envío solo aparece cuando el servidor lo confirma.
+        Connections {
+            target: auth
+            ignoreUnknownSignals: true
+            function onProfileUpdatedOk() { settingsApp.profileSaving = false; settingsApp.accountNotice = "Cambios guardados." }
+            function onProfileUpdatedFail(message) { settingsApp.profileSaving = false; settingsApp.accountNotice = "No se guardó: " + message }
+            function onProfileAvatarSynced() { settingsApp.accountNotice = "Foto de perfil actualizada." }
+            function onProfileAvatarSyncWarning(message) { settingsApp.accountNotice = message }
+            function onSessionsActionOk(message) { settingsApp.securityNotice = message }
+            function onMfaEnrollReady(factorId, qrImage, secret, uri) {
+                settingsApp.securityNotice = ""
+                settingsApp.mfaEnrollment = { factorId: factorId, qr: qrImage, secret: secret, uri: uri }
+            }
+            function onMfaOk(message) { settingsApp.mfaEnrollment = null; settingsApp.securityNotice = message }
+            function onMfaFail(message) { settingsApp.securityNotice = message }
+            function onSessionsActionFail(message) { settingsApp.securityNotice = message }
+            function onPasswordResetRequestedOk(email) {
+                if (!home.passwordResetPending) return
+                home.passwordResetPending = false
+                settingsApp.securityNotice = "Te enviamos un enlace para cambiar tu contraseña a " + email + "."
+            }
+            function onPasswordResetRequestedFail(message) {
+                if (!home.passwordResetPending) return
+                home.passwordResetPending = false
+                settingsApp.securityNotice = "No se pudo enviar el enlace: " + message
             }
         }
         Loader {
@@ -1002,6 +1298,9 @@ Item {
             anchors.fill: parent
             active: home.page === "earth" && home.visible
             visible: active
+            // Entrada con fundido (antes aparecía de golpe sobre el Home).
+            opacity: active && status === Loader.Ready ? 1 : 0
+            Behavior on opacity { OpacityAnimator { duration: home.reducedMotion ? 0 : 280; easing.type: Easing.OutCubic } }
             sourceComponent: Component {
                 RetroplasmaEarthView {
                     controller: EarthNative
@@ -1051,6 +1350,7 @@ Item {
                     dockMenuVisible: dockMenuBox.visible
                     haptics: typeof FlowHaptics !== "undefined" ? FlowHaptics : null
                     dockAnchor: dock
+                    touchLayer: touchMenuHost                  // menús 3D Touch sobre el desenfoque
                     flow: CoreFlowModule.InGeCoreFlow          // motor único (geometría del teclado)
                     onRequestBack: home.page = "home"
                     onRequestOpenDrive: home.navigate("drive")
@@ -1204,20 +1504,34 @@ Item {
         onActiveChanged: if (active && status === Loader.Null) load()
         Component.onCompleted: if (active && status === Loader.Null) load()
         function load() {
+            home.calicatasMark("LOADER_START")
             setSource(Qt.resolvedUrl("pages/CalicatasEditorPage.qml"), {
                 auth: (typeof auth !== "undefined" ? auth : null),
                 flowMotionEnabled: !home.reducedMotion,
                 flowReduceMotion: home.reducedMotion,
-                gpsEnabled: false
+                gpsEnabled: false,
+                // Estado de Calicatas: mismo `ui` y anclaje de Dock que Rendiciones.
+                ui: home,
+                dockAnchor: dock
             })
         }
         onStatusChanged: {
             if (status === Loader.Ready) {
+                home.calicatasMark("LOADER_READY")
                 home.calicatasEditorEverLoaded = true
+                item.darkMode = Qt.binding(function() { return home.darkTheme })
                 item.forceActiveFocus()
+                if (home.calicatasEnterPendingFrom.length && home.page === "calicatas") {
+                    var from = home.calicatasEnterPendingFrom
+                    home.calicatasEnterPendingFrom = ""
+                    Qt.callLater(function() { home.runSubAppTransition(true, from, "calicatas") })
+                }
             } else if (status === Loader.Error) {
                 console.error("INGE_CALICATAS_EDITOR_LOAD_ERROR pages/CalicatasEditorPage.qml")
-                home.page = "home"
+                home.calicatasEnterPendingFrom = ""
+                // Diferido: el error llega dentro de onActiveChanged -> setSource; cambiar
+                // page ahí reevalúa `active` en plena notificación (binding loop).
+                Qt.callLater(function() { home.page = "home" })
                 home.notify("No se pudo abrir el editor de Calicatas. Revisa el registro de la aplicación.")
             }
         }
@@ -1247,10 +1561,26 @@ Item {
     // Home con desplazamiento corto y opacidad; al volver, sale y el Home se
     // recupera. El editor no se destruye: su estado y borradores se conservan.
     property real subAppProgress: 0
+    property string calicatasEnterPendingFrom: ""      // primera apertura: espera al Loader listo
+    // Marcas de apertura de Calicatas: ms desde INGE_CALICATAS_ENTER_REQUEST.
+    property double calicatasEnterAt: 0
+    property bool calicatasAwaitFirstFrame: false
+    function calicatasMark(eventName) {
+        console.info("INGE_CALICATAS_" + eventName + " t=" + (calicatasEnterAt > 0 ? Date.now() - calicatasEnterAt : -1))
+    }
+    Connections {
+        target: home.Window.window
+        enabled: home.calicatasAwaitFirstFrame
+        ignoreUnknownSignals: true
+        function onFrameSwapped() { home.calicatasAwaitFirstFrame = false; home.calicatasMark("FIRST_VISIBLE") }
+    }
     property string previousPage: "home"
+    property bool biometricEnrollPending: false
+    property bool passwordResetPending: false
     readonly property var subAppPages: ["calicatas"]
     function runSubAppTransition(entering, from, to) {
         console.info("INGE_NAV_TRANSITION_START from=" + from + " to=" + to)
+        if (entering && to === "calicatas") { home.calicatasMark("ANIMATION_START"); home.calicatasAwaitFirstFrame = true }
         subAppEnter.stop()
         subAppExit.stop()
         if (reducedMotion) {
@@ -1264,6 +1594,7 @@ Item {
     }
     function finishSubAppTransition(entering) {
         console.info("INGE_NAV_TRANSITION_END page=" + page)
+        if (entering && page === "calicatas") home.calicatasMark("ANIMATION_END")
         if (entering && calicatasEditor.item)
             calicatasEditor.item.forceActiveFocus()   // ya habilitado al terminar
         else if (!entering)
@@ -1289,8 +1620,15 @@ Item {
             console.info("INGE_NAV_FROM " + from + " INGE_NAV_TO " + home.page)
             var wasSub = home.subAppPages.indexOf(from) >= 0
             var isSub = home.subAppPages.indexOf(home.page) >= 0
-            if (isSub && !wasSub)
-                home.runSubAppTransition(true, from, home.page)
+            if (isSub && !wasSub) {
+                home.calicatasEnterAt = Date.now()
+                home.calicatasMark("ENTER_REQUEST loaded=" + (calicatasEditor.status === Loader.Ready))
+                // Como Rendiciones: la entrada empieza con la página ya cargada. La
+                // primera carga del editor es síncrona; animar antes la dejaría
+                // saltar al final en el primer fotograma visible.
+                if (calicatasEditor.status === Loader.Ready) home.runSubAppTransition(true, from, home.page)
+                else home.calicatasEnterPendingFrom = from
+            }
             else if (wasSub && !isSub)
                 home.runSubAppTransition(false, from, home.page)
             else if (home.page === "home")
@@ -1435,7 +1773,29 @@ Item {
     readonly property bool dockForeground: page === "calicatas" && subAppProgress >= 0.999
                                            && calicatasEditor.status === Loader.Ready
     readonly property int dockGeneration: dockCtx ? dockCtx.generation : 0
+    // Contexto temporal (InGeCoreFlow.dockOverride, p. ej. mapa de Ubicación): el
+    // Dock real muestra sus acciones (en vertical si lo pide) hasta que vuelve a null.
+    readonly property var dockOverride: CoreFlowModule.InGeCoreFlow.dockOverride || null
+    readonly property bool dockVertical: dockOverride !== null && dockOverride.vertical === true
+                                         && page === "calicatas"
+    // Únicamente para el contexto vertical del mapa: icono y etiqueta
+    // como la referencia aprobada. El Dock horizontal conserva sus medidas.
+    // Contexto del mapa: cápsula estilizada, no el Dock horizontal.
+    // Ancho 60u (antes 76u) y celdas más compactas con icono+etiqueta.
+    readonly property real dockVCellWidth: 60 * u
+    readonly property real dockVCellHeight: 65 * u
+    // Al entrar o salir del contexto temporal, el Dock se rehace EXACTO desde su
+    // contexto (sin pulsación ni menú colgados de la otra disposición).
+    onDockOverrideChanged: {
+        dockPath = []
+        // No destruir los delegados durante el tap. El onReleased/onClicked
+        // debe finalizar primero; onDockPressActiveChanged actualizará slots.
+        if (!dockPressActive)
+            dockDisplayedSlots = dockSlots
+    }
     readonly property var dockActions: {
+        if (dockOverride && page === "calicatas")
+            return (dockOverride.actions || []).filter(function(a) { return a.visible !== false })
         if (!dockCtx || dockCtx.ownerId !== dockOwner)
             return []
         return (dockCtx.actions || []).filter(function(a) { return a.visible !== false })
@@ -1452,7 +1812,6 @@ Item {
     readonly property var homeDockPreset: [
         { key: "home", glyph: 0xE0F5, page: "home", name: "Inicio" },
         { key: "addTools", glyph: 0xE173, name: "Agregar herramientas" },
-        { key: "profile", glyph: 0xE19F, page: "profile", name: "Perfil" },
         { key: "settings", glyph: 0xE154, page: "settings", name: "Ajustes" }
     ]
     readonly property string dockOwner: page === "earth" ? "earth" : (page === "rendiciones" ? "rendiciones" : "calicatas")
@@ -1512,8 +1871,37 @@ Item {
               enabled: dockSecondary.length > 0, branch: true, rotate: 0, action: dockMoreNode }
         ]
     }
-    readonly property real dockCellWidth: dockSlots.length >= 4 ? (232 * u - 3) / 4 : 76 * u
-    readonly property real dockIconSize: dockSlots.length >= 4 ? 26 * u : 30 * u
+    // No cambiar el modelo del Repeater durante un press: incluso asignarle
+    // un snapshot idéntico puede recrear el delegado y perder onClicked.
+    // Las acciones reales siguen validándose en dockDispatch (incluido Deep Press).
+    property bool dockPressActive: false
+    // Sin binding: QML no debe recomputar este modelo durante una pulsación,
+    // porque destruiría el delegado MouseArea antes de recibir onClicked.
+    property var dockDisplayedSlots: []
+    onDockSlotsChanged: if (!dockPressActive) dockDisplayedSlots = dockSlots
+    onDockPressActiveChanged: if (!dockPressActive) dockDisplayedSlots = dockSlots
+    function dockFinishPress() { dockPressActive = false }
+    // Layout contextual amplio: solo Android tablet o plegable DESPLEGADO.
+    // El lado menor del display >= 600 dp es el mismo umbral de la ficha
+    // Calicatas. Se mide en Screen, no en el viewport que reduce el teclado;
+    // al plegarse la pantalla vuelve automáticamente al dock de teléfono.
+    readonly property bool expandedContextDock: Qt.platform.os === "android"
+        && Screen.width > 0 && Screen.height > 0
+        && Math.min(Screen.width, Screen.height) >= 600
+        && dockMode === "subapp"
+    // Compacto y centrado: el vidrio ya no sobresale de los márgenes
+    // de la barra de referencia. Limitar el ancho también en multiventana.
+    readonly property real expandedDockGroupWidth: Math.min(420 * u, Math.max(0, width - 2 * gutter))
+    readonly property real expandedDockPlusGap: 12 * u
+    readonly property real expandedDockPlusWidth: 62 * u
+    readonly property real dockIconSize: expandedContextDock ? 32 * u
+        : dockDisplayedSlots.length >= 4 ? 36 * u : 42 * u
+    readonly property real dockCellWidth: expandedContextDock
+        ? (expandedDockGroupWidth - expandedDockPlusWidth - expandedDockPlusGap - 16 * u
+           - Math.max(0, dockDisplayedSlots.length - 1)) / Math.max(1, dockDisplayedSlots.length)
+        : dockIconSize + 20 * u
+    readonly property real dockCapsuleWidth: Math.max(1, dockDisplayedSlots.length) * dockCellWidth
+                                             + Math.max(0, dockDisplayedSlots.length - 1) + 16 * u
     onDockModeChanged: {
         dockPath = []
         console.info("INGE_DOCK_PRESET " + dockMode)
@@ -1619,9 +2007,12 @@ Item {
         // Navegación de Nuevo gasto: arrow-left, arrow-right, home, log-out, circle-x, list, refresh-cw.
         "renditions.arrowBack": 0xE048, "renditions.forward": 0xE049, "renditions.home": 0xE0F5,
         "renditions.logout": 0xE10E, "renditions.cancel": 0xE084, "renditions.list": 0xE106,
-        "renditions.recover": 0xE145
+        "renditions.recover": 0xE145,
+        // Rendición abierta: buscar (search), información (info), actividad (clock).
+        "renditions.search": 0xE151, "renditions.info": 0xE0F9, "renditions.activity": 0xE087
     })
     function dockGlyph(action) {
+        if (action.glyph !== undefined) return action.glyph   // contexto temporal: glifo explícito
         var id = String(action.id || "")
         if (id === "tabs") return 0xE0D7                 // folder
         if (id === "information") return 0xE0F9          // info
@@ -1672,12 +2063,48 @@ Item {
         dockHoverIndex = -1
         dockHaptic("selection")
     }
-    function dockDispatch(action, generation) {
+    function dockActiveDetailId() {
+        var subapp = renditionsLoader.item
+        return page === "rendiciones" && subapp && subapp.detailPage
+               ? String(subapp.detailPage.localId || "") : ""
+    }
+    function dockDispatch(action, generation, pressedOwner, pressedContext, pressedDetailId) {
+        if (dockOverride && page === "calicatas") { // mapa fullscreen: el Dock real
+            if (typeof dockOverride.command !== "function") {
+                console.warn("INGE_CALICATA_MAP_DOCK_ERROR reason=missing_override_handler action=" + action.id)
+                dockHaptic("error")
+                return
+            }
+            console.info("INGE_CALICATA_MAP_DOCK_DISPATCH action=" + action.id
+                         + " command=" + String(action.command || ""))
+            dockOverride.command(String(action.id))
+            dockHaptic("success")
+            return
+        }
         if (!dockRouter || !dockCtx) {
             console.warn("INGE_DOCK_INTEGRATION_ERROR router-unavailable action=" + action.id)
             notify("Error de integración del dock: acción no disponible.")
             dockHaptic("error")
             return
+        }
+        // La ficha puede republicar sus acciones entre press/release (gastos cargados,
+        // permisos, sincronización). Sólo un tapCommand conserva su toque si sigue
+        // siendo la MISMA acción habilitada en el MISMO contexto activo.
+        // No se aplica al Deep Press ni a saltos entre páginas/propietarios.
+        if (action.tapCommand === true && generation !== dockGeneration
+                && pressedOwner !== undefined && pressedContext !== undefined
+                && !dockCtx.transitionPending
+                && dockCtx.ownerId === pressedOwner && dockCtx.contextId === pressedContext
+                && (pressedContext !== "rendiciones/detail"
+                    || (pressedDetailId && pressedDetailId === dockActiveDetailId()))) {
+            for (var i = 0; i < dockActions.length; ++i) {
+                var live = dockActions[i]
+                if (live.id === action.id && live.command === action.command
+                        && live.enabled !== false && live.visible !== false) {
+                    generation = dockGeneration
+                    break
+                }
+            }
         }
         var accepted = dockRouter.dispatch(String(action.id), generation)
         dockHaptic(accepted ? "success" : "error")
@@ -1692,7 +2119,7 @@ Item {
     }
     // Toque normal: con subfunciones abre el Quick Bubble (descubrible sin
     // Deep Press); sin subfunciones ejecuta el comando.
-    function dockSlotTap(slot, pressGeneration, anchorItem) {
+    function dockSlotTap(slot, pressGeneration, anchorItem, pressedOwner, pressedContext, pressedDetailId) {
         if (!slot.action) {
             if (!consumeEditTap()) {
                 if (slot.key === "addTools") openAdd()
@@ -1716,7 +2143,7 @@ Item {
             if (pressGeneration === dockGeneration)
                 dockOpenMenu(slot.key, anchorItem, false)
         } else if (a.command && String(a.command).length > 0) {
-            dockDispatch(a, pressGeneration)
+            dockDispatch(a, pressGeneration, pressedOwner, pressedContext, pressedDetailId)
         }
     }
     // Deep Press (380 ms): subfunciones, o la propia acción si no tiene. Nunca
@@ -1779,8 +2206,9 @@ Item {
         dockPath = []
         dockDispatch(entry, generation)
     }
-    readonly property real dockMenuHeaderHeight: 44 * u
-    readonly property real dockMenuRowHeight: 52 * u
+    // Menús 3D Touch compactos (estilo iOS): filas finas, cabecera corta.
+    readonly property real dockMenuHeaderHeight: 34 * u
+    readonly property real dockMenuRowHeight: 44 * u
 
     property real dockSwapFade: 1
     SequentialAnimation {
@@ -1805,19 +2233,31 @@ Item {
     //     superficies (dockGlass* abajo); el color sólo varía con el fondo real.
     //  3. RENDIMIENTO (GraphicsCore.deviceTier, automático): la óptica es la
     //     misma en todas las gamas; sólo baja la resolución de la captura
-    //     (1/3 alta y media, 1/5 baja, 1/7 ultra baja). El esmerilado lo hace
-    //     el shader (5 muestras): sin pasadas de blur ni capturas por botón.
-    //     La captura se detiene con el Dock oculto o la app en segundo plano.
-    //  4. RESPALDO ÚNICO (DockGlassFallback): sólo mientras la fuente de una
+    //     (completa HIGH, 1/2 MEDIUM_HIGH, 1/3 media, 1/5 baja, 1/7 ultra baja).
+    //     El esmerilado lo hace el shader (5 muestras sobre mipmaps): sin pasadas
+    //     de blur. HIGH y MEDIUM_HIGH capturan en vivo también en transiciones
+    //     y con el menú abierto; la captura se detiene con el Dock oculto o la
+    //     app en segundo plano.
+    //  4. RESPALDO ÚNICO (DockGlassPanel/GlassSurface): en LOW o mientras la fuente de una
     //     subapp aún no está lista; cristal neutro claro, igual en todas.
     readonly property bool dockLowCostGlass: GraphicsCore.deviceTier === "LOW"
                                              || GraphicsCore.deviceTier === "ULTRA_LOW"
+    // Gama alta: el vidrio sigue en vivo durante el paso Home -> mapa, las
+    // transiciones de subapp y con el menú abierto. En LOW la captura se congela.
+    readonly property bool dockLiveGlass: GraphicsCore.deviceTier === "HIGH"
+                                          || GraphicsCore.deviceTier === "MEDIUM_HIGH"
+    // Mientras el mapa o Rendiciones entran sobre el Home se captura homeContent
+    // (los contiene a ambos): el vidrio ve la mezcla real del fundido.
+    readonly property bool dockBackdropBlending: dockLiveGlass && homeContent.visible
+        && ((page === "earth" && (earthNativeLoader.status !== Loader.Ready || earthNativeLoader.opacity < 0.999))
+            || (renditionsProgress > 0.001 && renditionsProgress < 0.999))
     // Calicatas (subAppProgress) conserva su transición; ya no gobierna el material.
     readonly property bool subAppGlassActive: subAppProgress > 0.001
     // Home y sus páginas: el contenido REAL del Home (foto con su degradado de
     // legibilidad, tarjetas y saludo), no sólo la foto desenfocada. Si
     // homeContent está oculto (desenfoque del panel Agregar), se usa la foto.
-    readonly property Item dockBackdropSource: page === "calicatas" && calicatasEditor.status === Loader.Ready ? calicatasEditor
+    readonly property Item dockBackdropSource: dockBackdropBlending ? homeContent
+                                             : page === "calicatas" && calicatasEditor.status === Loader.Ready ? calicatasEditor
                                              : page === "earth" && earthNativeLoader.status === Loader.Ready && earthNativeLoader.item ? earthNativeLoader.item.glassBackdropItem
                                              : page === "rendiciones" && renditionsLoader.status === Loader.Ready ? renditionsLoader
                                              : page !== "calicatas" && page !== "earth" && page !== "rendiciones" && homeContent.visible
@@ -1832,24 +2272,50 @@ Item {
     // Preset óptico ÚNICO de la cápsula, el botón InGe IA y el Quick Bubble.
     // Cristal BLANCO transparente: tinte blanco de opacidad muy baja (la
     // transparencia la da el muestreo del fondo real), sin velo oscuro.
-    readonly property color dockGlassTint: Qt.rgba(1, 1, 1, 0.12)
-    readonly property real dockGlassRefraction: 6 * u        // lente en el borde
-    readonly property real dockGlassSpecular: 0.55           // filo y brillo superior
-    readonly property real dockGlassBevel: 14 * u            // zona curva del borde
+    // Legibilidad ÚNICA del Dock compartido (cápsula, InGe IA y Quick Bubble en
+    // Home, Calicatas, Rendiciones, InGeDrive y Earth): el cristal blanco puro no
+    // separaba los glifos blancos de fondos claros ni de fotos con detalle. Un
+    // velo azul marino corporativo bajo (#151A30 al 22 %) da contraste en fondos
+    // claros y apenas cambia los oscuros; sigue siendo vidrio con refracción.
+    // Halloween: velo morado leve. RStyle.glass(0.98) era casi opaco (blanco en
+    // claro, morado al 74 % en oscuro) y la lente lo mezclaba encima del fondo.
+    readonly property color dockGlassTint: appSkin === "ingenieros" ? Qt.rgba(1,0.65,0.82,0.08) : appSkin === "halloween" ? Qt.rgba(107 / 255, 47 / 255, 160 / 255, 0.16) : Qt.rgba(0, 0, 0, 0)   // vidrio transparente
+    readonly property real dockGlassRefraction: dockLowCostGlass || reducedMotion ? 0 : 21 * u   // refractPx adaptativo (58 dp)
+    readonly property real dockGlassSpecular: 1.8            // >= 0,95 activa la lente; filo grueso como 15.png
+    readonly property real dockGlassBevel: 17 * u            // bisel adaptativo: 0,3 × 58 dp
     readonly property real dockGlassContrast: 0              // sin «smoked»: era la película gris
-    readonly property color dockGlassEdge: Qt.rgba(1, 1, 1, 0.55)       // bisel luminoso blanco
-    readonly property real dockGlassShadowAlpha: 0.14                   // sombra exterior suave
+    readonly property color dockGlassEdge: appSkin === "halloween" ? Qt.rgba(1, 150 / 255, 50 / 255, 0.40) : darkTheme ? Qt.rgba(1, 1, 1, 0.22) : Qt.rgba(1, 1, 1, 0.55)       // bisel luminoso blanco
+    readonly property real dockGlassShadowAlpha: 0.22                   // separación del fondo
     // Legibilidad sin oscurecer el cristal: contorno muy fino de los glifos y
     // textos blancos del Dock (se dibuja con el propio texto, sin pasadas GPU).
-    readonly property color dockGlyphOutline: Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.50)
+    readonly property color dockGlyphOutline: Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.95)   // legibilidad con tinte al 9 %
     readonly property color dockSeparatorColor: Qt.rgba(130 / 255, 140 / 255, 160 / 255, 0.55)
-    readonly property real dockGlassFrost: 2.5 * u           // esmerilado homogéneo
+    // Difuminado leve (2 u) que oculta el mosaico de la captura reducida; en LOW, 0
+    // (sin mipmaps ni esmerilado). No toca refracción, filo ni tinte.
+    readonly property real dockGlassFrost: dockLowCostGlass ? 0 : 2 * u
     readonly property var dockGlassUi: dockBackdropSource !== null ? dockBackdrop : home
     // Material Liquid Glass de las tarjetas de una subapp (lo publica la subapp: su fondo vivo).
     property var cardGlassUi: null
+    // Liquid Glass OFICIAL para toda la app (GlassSurface.material): el preset del
+    // Dock. Claro = Dock; oscuro = tinte negro sutil (12 %). LOW = respaldo neutro.
+    readonly property QtObject liquidGlassMaterial: QtObject {
+        readonly property color tint: home.darkTheme && home.appSkin !== "halloween" && home.appSkin !== "ingenieros" ? Qt.rgba(0, 0, 0, 0.12) : home.dockGlassTint
+        readonly property color edge: home.dockGlassEdge
+        readonly property real refraction: home.dockGlassRefraction
+        readonly property real specular: home.dockGlassSpecular
+        readonly property real bevel: home.dockGlassBevel
+        readonly property real contrast: home.dockGlassContrast
+        readonly property real frost: home.dockGlassFrost
+        readonly property real shadowAlpha: home.dockGlassShadowAlpha
+        readonly property bool fallback: home.dockLowCostGlass
+        readonly property color fallbackEdge: home.darkTheme ? Qt.rgba(1, 1, 1, 0.16) : Qt.rgba(1, 1, 1, 0.45)
+        readonly property color fallbackTop: home.darkTheme ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(1, 1, 1, 0.34)
+        readonly property color fallbackMid: home.darkTheme ? Qt.rgba(1, 1, 1, 0.06) : Qt.rgba(1, 1, 1, 0.18)
+        readonly property color fallbackBottom: home.darkTheme ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(1, 1, 1, 0.24)
+    }
     Item {
         id: dockBackdrop
-        readonly property real band: Math.min(home.height, home.dockArea + 440 * home.u)
+        readonly property real band: home.dockVertical ? home.height : Math.min(home.height, home.dockArea + 440 * home.u)
         x: 0
         y: home.height - band
         width: home.width
@@ -1861,9 +2327,12 @@ Item {
         ShaderEffectSource {
             id: dockBackdropCapture
             readonly property bool captureAllowed: home.dockBackdropSource !== null && home.visible
-                && (dock.visible || iaButton.visible) && Qt.application.state === Qt.ApplicationActive
-                && !dockMenuBox.visible && !Qt.inputMethod.visible && !Qt.inputMethod.animating
-                && !(home.renditionsProgress > 0.001 && home.renditionsProgress < 0.999)
+                && dock.visible && Qt.application.state === Qt.ApplicationActive
+                && (home.dockLiveGlass || !dockMenuBox.visible) && !Qt.inputMethod.visible && !Qt.inputMethod.animating
+                && (home.dockLiveGlass || !(home.renditionsProgress > 0.001 && home.renditionsProgress < 0.999))
+                // Calicatas: en vivo durante lista <-> mapa en HIGH/MEDIUM_HIGH; congelada en LOW.
+                && (home.dockLiveGlass || home.page !== "calicatas" || !calicatasEditor.item
+                    || calicatasEditor.item.homeSliding !== true)
                 && !((home.page === "rendiciones" || home.renditionsProgress > 0.001)
                      && renditionsLoader.item && renditionsLoader.item.renderCaptureBlocked === true)
             onSourceItemChanged: {
@@ -1881,29 +2350,22 @@ Item {
             hideSource: false
             visible: false
             smooth: true
-            readonly property real divisor: GraphicsCore.deviceTier === "ULTRA_LOW" ? 7
+            // Mipmaps: el shader esmerila leyendo un nivel reducido (sin mosaico).
+            mipmap: !home.dockLowCostGlass
+            // HIGH captura a resolución completa; LOW y ULTRA_LOW, versión ligera.
+            readonly property real divisor: GraphicsCore.deviceTier === "HIGH" ? 1
+                                          : GraphicsCore.deviceTier === "MEDIUM_HIGH" ? 2
+                                          : GraphicsCore.deviceTier === "ULTRA_LOW" ? 7
                                           : home.dockLowCostGlass ? 5 : 3
             textureSize: Qt.size(Math.max(1, Math.round(width / divisor)), Math.max(1, Math.round(height / divisor)))
         }
     }
 
-    // Respaldo ÚNICO del material (todas las pantallas): sólo mientras la
-    // fuente de una subapp aún no está lista. Cristal neutro claro, nunca un
-    // color propio de la subapp.
-    component DockGlassFallback: Rectangle {
-        anchors.fill: parent
-        radius: parent ? parent.radius : 0
-        visible: home.dockGlassFallback
-        border.width: 1
-        border.color: Qt.rgba(1, 1, 1, 0.45)
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.34) }
-            GradientStop { position: 0.5; color: Qt.rgba(1, 1, 1, 0.18) }
-            GradientStop { position: 1.0; color: Qt.rgba(1, 1, 1, 0.24) }
-        }
-    }
 
-    // Tocar fuera cierra el menú sin ejecutar nada.
+    // Dock contextual = superposición sobre la interfaz que lo invocó.
+    // Sin scrim ni fondo opaco a pantalla completa: el DockGlassPanel
+    // refracta directamente el contenido activo capturado por dockBackdrop.
+    // El toque exterior sigue cerrando el Quick Bubble sin ejecutar acciones.
     MouseArea {
         z: 61
         anchors.fill: parent
@@ -1913,55 +2375,60 @@ Item {
     // Quick Bubble: subfunciones de la herramienta, sobre el dock.
     Rectangle {
         id: dockMenuBox
+        Image {
+            visible: home.appSkin === "halloween"
+            anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 8 * home.u
+            width: 24 * home.u; height: width; z: 2
+            source: visible ? "qrc:/images/halloween/bat.svg" : ""; sourceSize: Qt.size(48, 48)
+            enabled: false; opacity: 0.7
+        }
         z: 65
         readonly property bool open: dock.visible && home.dockMode === "subapp" && home.dockMenu !== null
         property real shown: open ? 1 : 0
         Behavior on shown {
             NumberAnimation {
-                duration: home.reducedMotion ? 0 : (dockMenuBox.open ? 260 : 160)
-                easing.type: dockMenuBox.open ? Easing.OutBack : Easing.InCubic
+                // Hero (vista emparejada cápsula -> panel): .standard y optimizedDurationTo
+                // con el desplazamiento + cambio de tamaño reales.
+                duration: home.reducedMotion ? 0
+                          : home.heroMotion ? home.heroMotion.duration(Math.abs(dockMenuBox.targetW - dock.width)
+                                                                       + Math.abs(dockMenuBox.targetH - dock.height) + dockMenuBox.dockLift)
+                          : (dockMenuBox.open ? 260 : 160)
+                easing.type: home.heroMotion ? Easing.BezierSpline : dockMenuBox.open ? Easing.OutBack : Easing.InCubic
+                easing.bezierCurve: home.heroMotion ? home.heroMotion.standard : []
                 easing.overshoot: 1.15                // asentamiento elástico moderado
             }
         }
         visible: shown > 0.01
-        opacity: Math.min(1, shown)
-        transform: Scale {
-            origin.x: Math.max(0, Math.min(dockMenuBox.width, home.dockMenuAnchorX - dockMenuBox.x))
-            origin.y: dockMenuBox.height + 10 * home.u
-            xScale: 0.82 + 0.18 * dockMenuBox.shown
-            yScale: 0.82 + 0.18 * dockMenuBox.shown
-        }
+        // Desvanecimiento solo al final del cierre; el vidrio se estira desde la cápsula.
+        opacity: Math.min(1, shown * 2.5)
         onShownChanged: home.glassTick++
-        width: Math.min(312 * home.u, home.width - 2 * home.gutter)
-        height: Math.max(0, Math.min(dockMenuColumn.implicitHeight + 12 * home.u,
-                                     dock.y - home.topInset - 20 * home.u))
-        x: Math.max(home.gutter, Math.min(home.width - home.gutter - width, home.dockMenuAnchorX - width / 2))
-        y: dock.y - height - 10 * home.u
-        radius: 20 * home.u
+        // Panel final: nace de la cápsula y se eleva por encima del Dock (sin franja
+        // inferior reservada: el 3D Touch sobre el Dock sigue sin elegir nada).
+        readonly property real dockLift: dock.height + 8 * home.u
+        readonly property real targetW: Math.min(312 * home.u, home.width - 2 * home.gutter)
+        readonly property real targetH: Math.max(0, Math.min(dockMenuColumn.implicitHeight + 12 * home.u,
+                                                             dock.y - 8 * home.u - home.topInset - 20 * home.u))
+        readonly property real targetX: Math.max(home.gutter, Math.min(home.width - home.gutter - targetW, home.dockMenuAnchorX - targetW / 2))
+        readonly property real morph: Math.max(0, Math.min(1.06, shown))
+        width: dock.width + (targetW - dock.width) * morph
+        height: dock.height + (targetH - dock.height) * morph
+        x: dock.x + (targetX - dock.x) * morph
+        y: dock.y + dock.height - height - dockLift * Math.min(1, morph)
+        radius: dock.height / 2 + (20 * home.u - dock.height / 2) * Math.min(1, morph)
         color: "transparent"
         onXChanged: home.glassTick++
         onYChanged: home.glassTick++
-        GlassSurface {
-            ui: home.dockGlassUi
-            radius: dockMenuBox.radius
-            margin: 10 * home.u
-            // The menu needs its own text contrast over the captured page.
-            // The capsule and IA button retain the shared Dock material.
-            tint: Qt.rgba(21 / 255, 26 / 255, 48 / 255, home.darkTheme ? 0.86 : 0.62)
-            refraction: home.dockGlassRefraction
-            specular: home.dockGlassSpecular
-            bevel: home.dockGlassBevel
-            contrast: home.dockGlassContrast
-            frost: home.dockGlassFrost
-            edge: home.dockGlassEdge
-            shadowAlpha: home.dockGlassShadowAlpha
-            opacity: home.dockGlassFallback ? 0 : 1
-        }
-        DockGlassFallback {}
+        DockGlassPanel { glassUi: home.dockGlassUi; radius: dockMenuBox.radius; u: home.u; tint: home.dockGlassTint; lowFallback: false
+                         reducedMotion: home.reducedMotion; gel: 4 * Math.min(1, dockMenuBox.shown) * (1 - Math.min(1, dockMenuBox.shown)) }   // «Extrema»: gel
         MouseArea { anchors.fill: parent }
         Flickable {
             anchors.fill: parent
             clip: true
+            // La lista aparece cuando el vidrio ya se estiró; al cerrar se desenfoca
+            // (sin blur en tier LOW: solo desvanecimiento).
+            opacity: Math.max(0, Math.min(1, (dockMenuBox.shown - 0.45) / 0.55))
+            layer.enabled: !home.dockLowCostGlass && !home.reducedMotion && dockMenuBox.shown > 0.02 && dockMenuBox.shown < 0.98
+            layer.effect: MultiEffect { blurEnabled: true; blurMax: 24; blur: Math.max(0, 1 - dockMenuBox.shown) }
             contentWidth: width
             contentHeight: dockMenuColumn.implicitHeight + 12 * home.u
             interactive: contentHeight > height
@@ -2061,7 +2528,7 @@ Item {
         z: 40
         anchors.fill: parent
         color: home.navy
-        opacity: 0.42 * home.overlayLevel
+        opacity: (home.optionsSheetOpen ? 0.12 : 0.42) * home.overlayLevel
         visible: opacity > 0.001
         MouseArea {
             anchors.fill: parent
@@ -2203,12 +2670,11 @@ Item {
         onXChanged: home.glassTick++
         onYChanged: home.glassTick++
         MouseArea { anchors.fill: parent }          // no cierra al tocar dentro
-        GlassSurface {
-            ui: home
-            radius: 26 * home.u
-            margin: 12 * home.u
-            tint: Qt.rgba(28 / 255, 45 / 255, 80 / 255, 0.62)
-        }
+        // Vidrio del Dock (preset único; en LOW, su respaldo) con el velo de legibilidad
+        // del Dock (#151A30 al 22 %) para los textos blancos.
+        DockGlassPanel { glassUi: home; radius: 26 * home.u; u: home.u; tint: home.dockGlassTint
+                         reducedMotion: home.reducedMotion; gel: 4 * Math.min(1, home.sheetGrow) * (1 - Math.min(1, home.sheetGrow)) }
+        Rectangle { anchors.fill: parent; radius: parent.radius; color: Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.22) }
         Flickable {
             anchors.fill: parent
             clip: true
@@ -2362,10 +2828,10 @@ Item {
         id: blur
         anchors.fill: homeContent
         source: homeContent
-        blurEnabled: true
-        blurMax: 48
-        blur: Math.max(home.blurAmount, 0.3 * home.overlayLevel)
-        visible: home.blurAmount > 0.001 || home.overlayLevel > 0.001
+        blurEnabled: home.liquidGlass
+        blurMax: 64
+        blur: Math.max(home.blurAmount, home.overlayBlurLevel)   // 3D Touch: desenfoque marcado
+        visible: home.blurAmount > 0.001 || home.overlayBlurLevel > 0.001
     }
     property real blurAmount: 0
     property real glowAmount: 0
@@ -2434,14 +2900,15 @@ Item {
 
     Rectangle {
         id: addSheet
+        z: home.subAppProgress > 0.001 ? 66 : 0          // sobre la subapp y su Dock
         visible: home.addOpen
         x: 10 * home.u
         width: home.width - 20 * home.u
         y: home.topInset + 8 * home.u + (1 - home.panelProgress) * 60 * home.u
         height: home.height - y - home.dockArea + 6 * home.u
         radius: 30 * home.u
-        opacity: home.panelProgress
-        scale: 0.92 + 0.08 * home.panelProgress
+        opacity: Math.min(1, home.panelProgress * 1.4)
+        scale: 0.55 + 0.45 * home.panelProgress
         transformOrigin: Item.Bottom
         color: "transparent"
         onYChanged: home.glassTick++
@@ -2470,7 +2937,7 @@ Item {
     readonly property real gutter: 18 * u
     readonly property real gap: 12 * u
     readonly property real topInset: 36 * u          // barra de estado (edge-to-edge)
-    readonly property real dockHeight: 58 * u
+    readonly property real dockHeight: (expandedContextDock ? 58 : 64) * u // Compacto solo en tablet/plegable abierto
     readonly property real dockBottom: 22 * u        // flota sobre el borde inferior
     readonly property real dockArea: dockHeight + dockBottom + 22 * u
 
@@ -2478,49 +2945,179 @@ Item {
     // Diseño aprobado del Home V2 (cápsula de 232 dp, celdas, separadores,
     // glifos Lucide, GlassSurface). Cada subapp aporta solo su preset.
     // Solo iconos: los nombres viven en el menú y en la accesibilidad.
+    // ---- «Extrema»: el mosaico tocado crece con su vidrio hasta la pantalla (Hero,
+    // vista emparejada: .standard + optimizedDurationTo) y se funde en la app; al
+    // volver, el vidrio se encoge hacia su mosaico.
+    Item {
+        id: heroZoom
+        z: 63
+        enabled: false
+        property real t: 0                       // 0 = mosaico, 1 = pantalla completa
+        property real fade: 0
+        visible: fade > 0.001
+        opacity: fade
+        x: home.heroOrigin.x * (1 - t)
+        y: home.heroOrigin.y * (1 - t)
+        width: home.heroOrigin.width + (home.width - home.heroOrigin.width) * t
+        height: home.heroOrigin.height + (home.height - home.heroOrigin.height) * t
+        readonly property real radius: home.heroOriginRadius * (1 - t)
+        readonly property int travel: home.heroCurves.duration(home.heroOrigin.x + home.heroOrigin.y
+                                                               + (home.width - home.heroOrigin.width)
+                                                               + (home.height - home.heroOrigin.height))
+        onXChanged: home.glassTick++
+        onWidthChanged: home.glassTick++
+        DockGlassPanel { glassUi: home; radius: heroZoom.radius; u: home.u; tint: home.dockGlassTint; lowFallback: false
+                         reducedMotion: home.reducedMotion; gel: 4 * heroZoom.t * (1 - heroZoom.t) }
+        function run(opening) {
+            heroOpen.stop(); heroClose.stop()
+            if (opening) heroOpen.start(); else heroClose.start()
+        }
+        SequentialAnimation {
+            id: heroOpen
+            ScriptAction { script: { heroZoom.t = 0; heroZoom.fade = 1 } }
+            NumberAnimation { target: heroZoom; property: "t"; to: 1; duration: heroZoom.travel
+                              easing.type: Easing.BezierSpline; easing.bezierCurve: home.heroCurves.standard }
+            NumberAnimation { target: heroZoom; property: "fade"; to: 0; duration: 180
+                              easing.type: Easing.BezierSpline; easing.bezierCurve: home.heroCurves.acceleration }
+        }
+        SequentialAnimation {
+            id: heroClose
+            ScriptAction { script: { heroZoom.t = 1; heroZoom.fade = 1 } }
+            NumberAnimation { target: heroZoom; property: "t"; to: 0; duration: heroZoom.travel
+                              easing.type: Easing.BezierSpline; easing.bezierCurve: home.heroCurves.standard }
+            NumberAnimation { target: heroZoom; property: "fade"; to: 0; duration: 160
+                              easing.type: Easing.BezierSpline; easing.bezierCurve: home.heroCurves.acceleration }
+        }
+    }
     Rectangle {
         id: dock
         z: home.subAppProgress > 0.001 ? 64 : 0     // también sobre la subapp
         readonly property bool hiddenForInput: home.dockMode === "subapp"
             && (Qt.inputMethod.visible
                 || (calicatasEditor.item !== null && calicatasEditor.item.dockSuppressed === true))
-        property real shown: hiddenForInput ? 0 : 1
-        Behavior on shown { NumberAnimation { duration: home.reducedMotion ? 0 : 280; easing.type: Easing.OutCubic } }
+        property real shown: hiddenForInput || home.touchFocusActive || home.page === "settings" ? 0 : 1
+        // Hero .slide(.up): deceleration y duración por distancia (28 u).
+        Behavior on shown { NumberAnimation { duration: home.reducedMotion ? 0 : home.heroMotion ? home.heroMotion.duration(28 * home.u) : 280
+                                              easing.type: home.heroMotion ? Easing.BezierSpline : Easing.OutCubic
+                                              easing.bezierCurve: home.heroMotion ? home.heroMotion.deceleration : [] } }
         visible: shown > 0.01
-        opacity: shown
-        width: 232 * home.u
-        height: home.dockHeight
-        x: iaButton.x - 24 * home.u - width
-        y: home.height - home.dockBottom - height + (1 - shown) * 28 * home.u
-        radius: height / 2
+        // Al abrir «+» la cápsula se funde en el panel (video de referencia).
+        opacity: shown * (1 - 0.85 * home.panelProgress)
+        // Vertical (contexto temporal): columna a la derecha, centrada en altura.
+        width: home.dockVertical ? home.dockVCellWidth + 4 * home.u : home.dockCapsuleWidth
+        height: home.dockVertical ? Math.max(1, home.dockDisplayedSlots.length) * home.dockVCellHeight + 8 * home.u
+                                  : home.dockHeight
+        // Tablet / plegable abierto: cápsula + botón + forman un grupo centrado,
+        // con el ancho de la referencia. En teléfono: geometría original.
+        x: home.dockVertical ? home.width - width - 8 * home.u            // pegado al borde derecho
+           : home.expandedContextDock
+           ? (home.width - home.expandedDockGroupWidth) / 2
+           : plusButton.x - 24 * home.u - width
+        y: home.dockVertical ? Math.round((home.height - height) / 2)       // centrado en altura
+           : home.height - home.dockBottom - height + (1 - shown) * 28 * home.u
+        radius: Math.min(width, height) / 2
         color: "transparent"
         onYChanged: home.glassTick++
-        GlassSurface {
-            ui: home.dockGlassUi
-            radius: dock.height / 2
-            margin: 10 * home.u
-            tint: home.dockGlassTint
-            refraction: home.dockGlassRefraction
-            specular: home.dockGlassSpecular
-            bevel: home.dockGlassBevel
-            contrast: home.dockGlassContrast
-            frost: home.dockGlassFrost
-            edge: home.dockGlassEdge
-            shadowAlpha: home.dockGlassShadowAlpha
-            opacity: home.dockGlassFallback ? 0 : 1
+        DockGlassPanel { id: dockLiquidGlass; glassUi: home.dockGlassUi; radius: dock.radius; u: home.u; tint: home.dockGlassTint; lowFallback: false
+                         reducedMotion: home.reducedMotion; liquidTouch: true }   // «Extrema»: gotas
+        // ---- Píldora líquida (home.liquidPill): una sola lente que viaja. El borde
+        // delantero llega en 220 ms y el trasero en 380 ms (se estira sobre ambas
+        // pestañas); al llegar, squash vertical 0,92 -> 1 y el icono se tiñe de azul.
+        property Item pillOwner: null
+        property real pillLeft: 0
+        property real pillRight: 0
+        property int pillDir: 1
+        property bool pillAnimate: false
+        property bool pillArrived: true
+        property real pillSquash: 1
+        Behavior on pillLeft { enabled: dock.pillAnimate
+            NumberAnimation { duration: dock.pillDir > 0 ? 380 : 220
+                              easing.type: home.heroMotion ? Easing.BezierSpline : Easing.OutCubic
+                              easing.bezierCurve: home.heroMotion ? home.heroMotion.deceleration : [] } }
+        Behavior on pillRight { enabled: dock.pillAnimate
+            NumberAnimation { duration: dock.pillDir > 0 ? 220 : 380
+                              easing.type: home.heroMotion ? Easing.BezierSpline : Easing.OutCubic
+                              easing.bezierCurve: home.heroMotion ? home.heroMotion.deceleration : [] } }
+        function pillTo(cell) {
+            if (!home.liquidPill || !cell) return
+            var p = cell.mapToItem(dock, 3 * home.u, 0)
+            var l = p.x, r = p.x + cell.width - 6 * home.u
+            var travel = !!pillOwner && pillOwner !== cell && Math.abs(l - pillLeft) > 1
+            pillDir = l >= pillLeft ? 1 : -1
+            pillAnimate = travel
+            pillOwner = cell
+            pillLeft = l; pillRight = r
+            pillAnimate = false
+            if (!travel) return
+            pillArrived = false
+            pillArrival.restart()
+            pillDrops.edge = 0; pillDrops.restart()
         }
-        DockGlassFallback {}
+        // Diferido: si la nueva pestaña se activa en el mismo cambio, la píldora viaja.
+        function pillRelease(cell) {
+            if (pillOwner !== cell) return
+            Qt.callLater(function() { if (dock.pillOwner === cell && !(cell && cell.pillCell)) dock.pillOwner = null })
+        }
+        SequentialAnimation {
+            id: pillArrival
+            PauseAnimation { duration: 300 }
+            NumberAnimation { target: dock; property: "pillSquash"; to: 0.92; duration: 80; easing.type: Easing.OutQuad }
+            ScriptAction { script: dock.pillArrived = true }
+            NumberAnimation { target: dock; property: "pillSquash"; to: 1; duration: 260; easing.type: Easing.OutBack; easing.overshoot: 2.0 }
+        }
+        Timer {   // «Extrema»: gotas en el borde que viaja (spawnDrop no hace nada fuera de Extrema)
+            id: pillDrops
+            property int edge: 0
+            interval: 70; repeat: true
+            onTriggered: {
+                if (++edge > 3) { stop(); return }
+                var x = dock.pillDir > 0 ? dockPill.x + dockPill.width : dockPill.x
+                dockLiquidGlass.spawnDrop(x, dock.height / 2, dock.pillDir * 160 * home.u, 0)
+            }
+        }
+        Rectangle {
+            id: dockPill
+            visible: home.liquidPill && dock.pillOwner !== null && !home.dockVertical
+            opacity: dockRow.opacity
+            x: dock.pillLeft
+            width: Math.max(0, dock.pillRight - dock.pillLeft)
+            height: home.dockHeight - 10 * home.u
+            y: (dock.height - height) / 2
+            radius: height / 2
+            color: Qt.rgba(1, 1, 1, 0.18)        // misma lente interior que la píldora por celda
+            border.width: 1
+            border.color: Qt.rgba(1, 1, 1, 0.42)
+            transform: Scale { origin.x: dockPill.width / 2; origin.y: dockPill.height / 2; yScale: dock.pillSquash }
+        }
+        Kawaii.KawaiiDockDecoration {
+            anchors.fill: parent; z: 4
+            active: home.appSkin === "ingenieros"
+            controller: home.seasonalController
+            vertical: home.dockVertical
+            u: home.u
+        }
+        Image {
+            visible: home.appSkin === "halloween"
+            anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 5 * home.u
+            width: 28 * home.u; height: width
+            source: visible ? "qrc:/images/halloween/web.svg" : ""; sourceSize: Qt.size(56, 56); opacity: 0.65
+        }
         MouseArea { anchors.fill: parent; enabled: home.dockMode !== "home" }   // no atraviesa al editor
-        Row {
+        Grid {                                   // fila (Dock) o columna (contexto vertical)
+            id: dockRow
             anchors.centerIn: parent
-            opacity: home.dockSwapFade
+            columns: home.dockVertical ? 1 : Math.max(1, home.dockDisplayedSlots.length)
+            opacity: home.dockSwapFade * (1 - Math.min(1, dockMenuBox.shown))   // reaparecen al cerrar el panel
+            onXChanged: if (dock.pillOwner) dock.pillTo(dock.pillOwner)
+            onWidthChanged: if (dock.pillOwner) dock.pillTo(dock.pillOwner)
             Repeater {
-                model: home.dockSlots
+                model: home.dockDisplayedSlots
                 delegate: Row {
                     required property var modelData
                     required property int index
+                    onXChanged: if (dockCell.active) dock.pillTo(dockCell)
                     Rectangle {   // separador
-                        visible: index > 0
+                        visible: index > 0 && !home.dockVertical
                         width: 1; height: 26 * home.u
                         anchors.verticalCenter: parent.verticalCenter
                         color: home.dockSeparatorColor
@@ -2531,9 +3128,13 @@ Item {
                                                        ? home.page === modelData.page
                                                        : (modelData.selected === true
                                                           || (home.dockPath.length > 0 && home.dockPath[0] === modelData.key))
-                        width: home.dockCellWidth
-                        height: home.dockHeight
+                        width: home.dockVertical ? home.dockVCellWidth : home.dockCellWidth
+                        height: home.dockVertical ? home.dockVCellHeight : home.dockHeight
                         opacity: modelData.enabled === false ? 0.4 : 1
+                        readonly property bool pillCell: active && modelData.more !== true
+                        onPillCellChanged: pillCell ? dock.pillTo(dockCell) : dock.pillRelease(dockCell)
+                        Component.onCompleted: if (pillCell) dock.pillTo(dockCell)
+                        Component.onDestruction: dock.pillRelease(dockCell)
                         // Deep Press: el icono se hunde progresivamente durante 380 ms
                         // y se recupera con un rebote moderado al reconocerse o soltar.
                         property real press: 0
@@ -2549,35 +3150,94 @@ Item {
                             duration: home.reducedMotion ? 0 : 280
                             easing.type: Easing.OutBack; easing.overshoot: 2.2
                         }
+                        Rectangle {   // indicador activo: píldora de vidrio más oscura
+                            z: -2
+                            visible: dockCell.pillCell && (!home.liquidPill || home.dockVertical)   // perfil líquido: dockPill
+                            anchors.centerIn: parent
+                            width: parent.width - 6 * home.u
+                            height: home.dockVertical ? parent.height - 6 * home.u : home.dockHeight - 10 * home.u
+                            radius: home.dockVertical ? 12 * home.u : height / 2
+                            // Un realce verde suave, más fino, sobre el vidrio esmerilado.
+                            color: home.dockVertical ? Qt.rgba(76 / 255, 175 / 255, 80 / 255, 0.20) : Qt.rgba(1, 1, 1, 0.18)
+                            border.width: 1
+                            border.color: home.dockVertical ? Qt.rgba(76 / 255, 175 / 255, 80 / 255, 0.26)
+                                                             : Qt.rgba(1, 1, 1, 0.42)
+                        }
                         Rectangle {   // realce de la herramienta pulsada / abierta
                             z: -1
                             anchors.centerIn: parent
-                            width: Math.min(parent.width, parent.height) - 8 * home.u
+                            // Círculo de presión (referencia): 0,8 del Dock; se va en 160 ms
+                            // al soltar o al abrir el panel.
+                            width: Math.min(parent.width, home.dockHeight * 0.8)
                             height: width
                             radius: width / 2
-                            color: "white"
-                            opacity: Math.max(0.16 * dockCell.press,
+                            color: home.darkTheme ? "white" : "#1C2D50"
+                            opacity: Math.max(dockCellTap.pressed && !dockMenuBox.open ? (home.darkTheme ? 0.18 : 0.10) : 0,
                                               home.dockPath.length > 0 && home.dockPath[0] === modelData.key ? 0.14 : 0)
+                            Behavior on opacity { NumberAnimation { duration: home.reducedMotion ? 0 : 160; easing.type: Easing.OutCubic } }
                         }
                         Text {
                             visible: modelData.more !== true
                             anchors.centerIn: parent
                             text: String.fromCharCode(modelData.glyph)
                             rotation: modelData.rotate || 0
+                            anchors.verticalCenterOffset: home.dockVertical ? -10 * home.u : 0
                             font.family: home.iconFamily
-                            font.pixelSize: home.dockIconSize
-                            color: Qt.rgba(1, 1, 1, dockCell.active ? 1.0 : 0.82)
+                            font.pixelSize: home.dockVertical ? 20 * home.u : home.dockIconSize
+                            // Perfil líquido: el icono activo se tiñe de azul al llegar la píldora.
+                            color: home.liquidPill && dockCell.pillCell && dock.pillArrived && dock.pillOwner === dockCell
+                                   ? "#0A84FF" : Qt.rgba(1, 1, 1, dockCell.active ? 1.0 : 0.92)
+                            Behavior on color { enabled: home.liquidPill; ColorAnimation { duration: 180 } }
                             style: Text.Outline; styleColor: home.dockGlyphOutline
                         }
+                        // En el mapa la barra derecha muestra cuatro iconos
+                        // con sus etiquetas. En cualquier Dock horizontal este
+                        // elemento no ocupa espacio ni modifica la geometría.
+                        Text {
+                            visible: home.dockVertical && modelData.more !== true
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 6 * home.u
+                            width: parent.width - 6 * home.u
+                            height: 24 * home.u
+                            text: String(modelData.name || "")
+                            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                            maximumLineCount: 2
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.pixelSize: 9 * home.u
+                            font.weight: dockCell.active ? Font.DemiBold : Font.Normal
+                            color: home.darkTheme ? "white" : "#152129"
+                            elide: Text.ElideRight
+                        }
+                        Image {
+                            visible: home.appSkin === "ingenieros" && dockCell.active
+                            anchors.right: parent.right; y: -5*home.u
+                            width: 19*home.u; height: 17*home.u
+                            source: visible ? "qrc:/images/kawaii/helmet.svg" : ""
+                            sourceSize: Qt.size(48,40)
+                            enabled: false
+                        }
+                        Image {
+                            visible: home.appSkin === "halloween" && dockCell.active
+                            anchors.horizontalCenter: parent.horizontalCenter; y: -15 * home.u
+                            width: 32 * home.u; height: width; rotation: -12
+                            source: visible ? "qrc:/images/halloween/hat.svg" : ""; sourceSize: Qt.size(64, 64)
+                        }
+                        Image {
+                            visible: home.appSkin === "halloween" && modelData.more === true
+                            anchors.centerIn: parent; width: 28 * home.u; height: width
+                            source: visible ? "qrc:/images/halloween/bat.svg" : ""; sourceSize: Qt.size(64, 64)
+                        }
                         Row {   // "Más herramientas"
-                            visible: modelData.more === true
+                            visible: modelData.more === true && home.appSkin !== "halloween"
                             anchors.centerIn: parent
                             spacing: 4 * home.u
                             Repeater {
                                 model: 3
                                 Rectangle {
                                     width: 5 * home.u; height: width; radius: width / 2
-                                    color: Qt.rgba(1, 1, 1, dockCell.active ? 1.0 : 0.82)
+                                    color: Qt.rgba(1, 1, 1, dockCell.active ? 1.0 : 0.92)
                                     border.width: 1; border.color: home.dockGlyphOutline
                                 }
                             }
@@ -2593,6 +3253,9 @@ Item {
                         MouseArea {
                             id: dockCellTap
                             property int pressGeneration: -1
+                            property string pressOwner: ""
+                            property string pressContext: ""
+                            property string pressDetailId: ""
                             property bool held: false
                             property real startX: 0
                             property real startY: 0
@@ -2601,6 +3264,10 @@ Item {
                             preventStealing: held
                             onPressed: function(mouse) {
                                 pressGeneration = home.dockGeneration
+                                pressOwner = home.dockCtx ? home.dockCtx.ownerId : ""
+                                pressContext = home.dockCtx ? home.dockCtx.contextId : ""
+                                pressDetailId = home.dockActiveDetailId()
+                                home.dockPressActive = true
                                 held = false
                                 startX = mouse.x
                                 startY = mouse.y
@@ -2621,19 +3288,23 @@ Item {
                                 pressOut.restart()
                                 held = home.dockSlotHold(modelData, pressGeneration, dockCell)
                             }
-                            onClicked: home.dockSlotTap(modelData, pressGeneration, dockCell)
+                            onClicked: home.dockSlotTap(modelData, pressGeneration, dockCell, pressOwner, pressContext, pressDetailId)
                             onReleased: {
                                 pressIn.stop()
                                 pressOut.restart()
                                 if (held)
                                     home.dockReleaseHover()
                                 held = false
+                                // onClicked se emite al soltar: actualizar el modelo
+                                // antes destruiría el delegado que aún debe despachar.
+                                Qt.callLater(home.dockFinishPress)
                             }
                             onCanceled: {
                                 pressIn.stop()
                                 pressOut.restart()
                                 held = false
                                 home.dockHoverIndex = -1
+                                home.dockFinishPress()
                             }
                         }
                         Accessible.role: Accessible.Button
@@ -2645,57 +3316,51 @@ Item {
         }
     }
 
-    // Botón InGe IA (punto de entrada; el servicio está deshabilitado hoy).
-    property string iaStatus: ""
+    // Botón «+» (donde estaba InGe IA): abre/cierra el panel de herramientas del
+    // Home (AddToolPanel). Gira a «×» con el mismo panelProgress de openAdd/closeAdd.
     Rectangle {
-        id: iaButton
-        z: home.subAppProgress > 0.001 ? 64 : 0   // permanente en todas las subapps
-        width: 68 * home.u
+        id: plusButton
+        objectName: "dockPlusButton"
+        z: dock.z
+        width: home.expandedContextDock ? home.expandedDockPlusWidth : 68 * home.u
         height: width
         radius: width / 2
-        x: home.width - home.gutter - width
+        x: home.expandedContextDock
+           ? dock.x + dock.width + home.expandedDockPlusGap
+           : home.width - home.gutter - width
         y: dock.y + (dock.height - height) / 2
         color: "transparent"
-        GlassSurface {
-            ui: home.dockGlassUi; radius: iaButton.width / 2; margin: 10 * home.u; tint: home.dockGlassTint
-            refraction: home.dockGlassRefraction; specular: home.dockGlassSpecular; bevel: home.dockGlassBevel
-            contrast: home.dockGlassContrast; frost: home.dockGlassFrost
-            edge: home.dockGlassEdge; shadowAlpha: home.dockGlassShadowAlpha
-            opacity: home.dockGlassFallback ? 0 : 1
-        }
-        DockGlassFallback {}
-        Column {
+        opacity: home.dockVertical ? 0 : dock.shown       // Dock único; el contexto vertical no lleva «+»
+        visible: opacity > 0.01
+        scale: plusTap.pressed ? 0.94 : 1 + 0.06 * home.panelProgress
+        Behavior on scale { NumberAnimation { duration: home.reducedMotion ? 0 : 140; easing.type: Easing.OutCubic } }
+        DockGlassPanel { glassUi: home.dockGlassUi; radius: plusButton.width / 2; u: home.u; tint: home.dockGlassTint; lowFallback: false
+                         reducedMotion: home.reducedMotion; liquidTouch: true }   // «Extrema»: gotas
+        Text {
             anchors.centerIn: parent
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: String.fromCharCode(0xE412)
-                font.family: home.iconFamily
-                font.pixelSize: 28 * home.u
-                color: "white"
-                style: Text.Outline; styleColor: home.dockGlyphOutline
-            }
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "InGe IA"
-                font.family: home.fontFamily
-                font.pixelSize: 11 * home.u
-                color: "white"
-                style: Text.Outline; styleColor: home.dockGlyphOutline
-            }
+            text: "+"
+            rotation: 45 * home.panelProgress           // + → ×
+            font.family: home.fontFamily
+            font.pixelSize: 38 * home.u
+            font.weight: Font.Light
+            color: "white"
+            style: Text.Outline; styleColor: home.dockGlyphOutline
         }
         MouseArea {
+            id: plusTap
             anchors.fill: parent
             onClicked: {
                 if (home.consumeEditTap())
                     return
-                // InGe IA GLOBAL: la misma hoja y la misma conversación en todas las
-                // pantallas; el contexto y las herramientas los aporta el módulo activo.
-                assistantSheet.show()
+                if (home.addOpen) home.closeAdd(); else home.openAdd()
             }
         }
         Accessible.role: Accessible.Button
-        Accessible.name: "InGe IA"
+        Accessible.name: home.addOpen ? "Cerrar herramientas" : "Agregar herramientas"
     }
+
+    // Aviso breve (notify); el botón dedicado InGe IA se retiró del Dock (2026-11-02).
+    property string iaStatus: ""
     Rectangle {
         visible: home.iaStatus.length > 0
         z: 70                                   // también sobre el editor de Calicatas
@@ -2761,8 +3426,9 @@ Item {
         }
         // Al soltar, la tarjeta se asienta en su lugar en vez de saltar.
         property bool settling: false
-        property real dragOffsetX: dragging ? ui.dragDx : 0
-        property real dragOffsetY: dragging ? ui.dragDy : 0
+        // Sigue al dedo desde su hueco ACTUAL y nunca sale de la cuadrícula.
+        property real dragOffsetX: dragging && parent ? Math.max(-x, Math.min(parent.width - width - x, ui.dragPoint.x - ui.dragGrab.x - x)) : 0
+        property real dragOffsetY: dragging && parent ? Math.max(-y, Math.min(parent.height - height - y, ui.dragPoint.y - ui.dragGrab.y - y)) : 0
         Behavior on dragOffsetX { enabled: tile.settling; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
         Behavior on dragOffsetY { enabled: tile.settling; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
         Timer { id: settleTimer; interval: 260; onTriggered: tile.settling = false }
@@ -2808,7 +3474,20 @@ Item {
         property real pop: 1
         property real lift: dragging ? 1 : 0
         Behavior on lift { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-        opacity: Math.max(0, Math.min(1, pop)) * (enabledTile ? 1 : 0.55) * (tap.pressed && !dragging ? 0.9 : 1)
+        // «Extrema»: entrada en cascada (opacidad + desplazamiento, 30 ms por mosaico, Hero deceleration).
+        property real cascade: 1
+        Connections {
+            target: tile.ui
+            function onCascadeRequested() { if (tile.ui.extremeMotion && tile.cardKey.length > 0) cascadeIn.restart() }
+        }
+        SequentialAnimation {
+            id: cascadeIn
+            ScriptAction { script: tile.cascade = 0 }
+            PauseAnimation { duration: Math.max(0, tile.modelIndex) * 30 }
+            NumberAnimation { target: tile; property: "cascade"; to: 1; duration: tile.ui.heroCurves.duration(18 * tile.ui.u)
+                              easing.type: Easing.BezierSpline; easing.bezierCurve: tile.ui.heroCurves.deceleration }
+        }
+        opacity: cascade * Math.max(0, Math.min(1, pop)) * (enabledTile ? 1 : 0.55) * (tap.pressed && !dragging ? 0.9 : 1)
                  * (cardKey.length > 0 && ui.liftKey === cardKey ? 0 : 1)   // la representa liftGhost
         z: dragging ? 10 : 0
         scale: (0.72 + 0.28 * pop) * (1 + 0.04 * lift) * (1 - 0.03 * press)
@@ -2816,20 +3495,18 @@ Item {
         onXChanged: ui.glassTick++                  // reacomodo animado: el cristal acompaña
         onYChanged: ui.glassTick++
         transform: [
-            Translate { x: tile.dragOffsetX; y: tile.dragOffsetY + tile.bob * tile.jiggleAmp * tile.ui.u },
+            Translate { x: tile.dragOffsetX; y: tile.dragOffsetY + tile.bob * tile.jiggleAmp * tile.ui.u + (1 - tile.cascade) * 18 * tile.ui.u },
             Rotation { origin.x: tile.width / 2; origin.y: tile.height / 2; angle: tile.wobble * tile.jiggleAmp }
         ]
-        border.width: primary ? 1 : 0
-        border.color: Qt.rgba(1, 1, 1, 0.28)
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: tile.primary ? Qt.tint(tile.ui.brandBlue, Qt.rgba(1, 1, 1, 0.10)) : "transparent" }
-            GradientStop { position: 1.0; color: tile.primary ? tile.ui.brandBlue : "transparent" }
-        }
-        GlassSurface {
-            ui: tile.ui
-            visible: !tile.primary && tile.ui.glassTexture !== null
+        // Vidrio EXACTO del Dock (preset único, sin tinte), también en Calicatas;
+        // textos e iconos blancos con el contorno del Dock (dockGlyphOutline).
+        color: "transparent"
+        DockGlassPanel { glassUi: tile.ui; radius: tile.radius; u: tile.ui.u; tint: tile.ui.dockGlassTint; lowFallback: false }
+        Rectangle {                                 // «Extrema»: realce del vidrio al pulsar (escala 0,97 ya existente)
+            anchors.fill: parent
             radius: tile.radius
-            margin: 10 * tile.ui.u
+            visible: tile.ui.extremeMotion && tile.press > 0.01
+            color: Qt.rgba(1, 1, 1, 0.14 * tile.press)
         }
 
         // Presentación centrada: solo icono o solo nombre.
@@ -2845,6 +3522,7 @@ Item {
                 font.family: tile.ui.iconFamily
                 font.pixelSize: (tile.compact ? 34 : 44) * tile.ui.u
                 color: "white"
+                style: Text.Outline; styleColor: tile.ui.dockGlyphOutline
             }
             Text {
                 visible: tile.showName
@@ -2852,9 +3530,23 @@ Item {
                 horizontalAlignment: Text.AlignHCenter
                 text: tile.title
                 color: "white"
+                style: Text.Outline; styleColor: tile.ui.dockGlyphOutline
                 font.family: tile.ui.fontFamily
                 font.weight: Font.Medium
                 font.pixelSize: (tile.compact ? 20 : 22) * tile.ui.u
+                fontSizeMode: Text.HorizontalFit             // nombre completo («InGe Drive»): reduce antes de cortar
+                minimumPixelSize: 14 * tile.ui.u
+                elide: Text.ElideRight
+            }
+            Text {   // «Solo icono» en edición: rótulo corto para distinguir fichas con el mismo icono
+                visible: tile.ui.editMode === true && tile.presentation === "icon" && tile.cardKey.length > 0
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                text: tile.title
+                color: Qt.rgba(1, 1, 1, 0.92)
+                style: Text.Outline; styleColor: tile.ui.dockGlyphOutline
+                font.family: tile.ui.fontFamily
+                font.pixelSize: 12 * tile.ui.u
                 elide: Text.ElideRight
             }
         }
@@ -2869,6 +3561,7 @@ Item {
             font.family: tile.ui.iconFamily
             font.pixelSize: (tile.compact ? 34 : 36) * tile.ui.u
             color: "white"
+            style: Text.Outline; styleColor: tile.ui.dockGlyphOutline
         }
         Column {
             visible: !tile.centered
@@ -2880,9 +3573,12 @@ Item {
                 width: parent.width
                 text: tile.title
                 color: "white"
+                style: Text.Outline; styleColor: tile.ui.dockGlyphOutline
                 font.family: tile.ui.fontFamily
                 font.weight: Font.Medium
                 font.pixelSize: (tile.compact ? 20 : 22) * tile.ui.u
+                fontSizeMode: Text.HorizontalFit             // nombre completo («InGe Drive»): reduce antes de cortar
+                minimumPixelSize: 14 * tile.ui.u
                 elide: Text.ElideRight
             }
             Text {
@@ -2890,6 +3586,7 @@ Item {
                 visible: tile.showDescription && tile.subtitle.length > 0
                 text: tile.subtitle
                 color: Qt.rgba(1, 1, 1, 0.78)
+                style: Text.Outline; styleColor: tile.ui.dockGlyphOutline
                 font.family: tile.ui.fontFamily
                 font.pixelSize: 14.5 * tile.ui.u
                 wrapMode: Text.WordWrap
@@ -2963,13 +3660,14 @@ Item {
         // Modo edición: control discreto para quitar la tarjeta.
         Rectangle {
             id: removeBadge
-            z: 3
+            z: 5                                    // sobre el contenido y la zona táctil de la ficha
             opacity: tile.ui.editMode === true && tile.cardKey.length > 0 && !tile.dragging ? 1 : 0
             visible: opacity > 0.01
-            Behavior on opacity { NumberAnimation { duration: 180 } }
-            x: -8 * tile.ui.u
-            y: -8 * tile.ui.u
-            width: 26 * tile.ui.u
+            Behavior on opacity { NumberAnimation { duration: tile.ui.reducedMotion ? 0 : 180 } }
+            // Dentro de la esquina superior derecha de SU ficha (libre de icono y texto): no invade la vecina.
+            x: tile.width - width - 7 * tile.ui.u
+            y: 7 * tile.ui.u
+            width: 24 * tile.ui.u
             height: width
             radius: width / 2
             color: Qt.rgba(21 / 255, 26 / 255, 48 / 255, 0.88)
@@ -2982,9 +3680,9 @@ Item {
                 font.pixelSize: 15 * tile.ui.u
                 color: "white"
             }
-            MouseArea {
+            MouseArea {                             // zona táctil propia (38 u), dentro de la ficha
                 anchors.fill: parent
-                anchors.margins: -9 * tile.ui.u
+                anchors.margins: -7 * tile.ui.u
                 enabled: removeBadge.opacity > 0.5
                 onPressed: tile.ui.editTapGuard = true
                 onClicked: tile.removeCard()
@@ -3287,5 +3985,54 @@ Item {
                     && renditionsLoader.item.assistantOpen(index, proposal, assistantController))
                 assistantSheet.close()
         }
+    }
+
+    // ================================================ 3D Touch (foco global)
+    // Al abrir el menú de una caja de Rendiciones: toda la pantalla se desenfoca
+    // (también encabezado, Dock e InGe IA, que además se ocultan), la caja
+    // presionada se muestra nítida y elevada, y el menú se aloja encima.
+    readonly property Item renditionsTouchTile: page === "rendiciones" && renditionsLoader.item
+                                                && renditionsLoader.item.touchFocusItem !== undefined
+                                                ? renditionsLoader.item.touchFocusItem : null
+    readonly property bool touchFocusActive: renditionsTouchTile !== null
+                                             || (menuKey.length > 0 && overlayLevel > 0.01)
+    Item {
+        id: touchFocusLayer
+        objectName: "touchFocusLayer"
+        anchors.fill: parent
+        z: 66
+        property real level: home.renditionsTouchTile !== null ? 1 : 0
+        Behavior on level { NumberAnimation { duration: home.reducedMotion ? 0 : (touchFocusLayer.level < 0.5 ? 240 : 180); easing.type: Easing.OutCubic } }
+        visible: level > 0.01 && renditionsLoader.visible
+        MultiEffect {
+            anchors.fill: parent
+            source: renditionsLoader
+            autoPaddingEnabled: false
+            blurEnabled: home.liquidGlass
+            blurMax: 64
+            blur: 0.9 * touchFocusLayer.level
+            saturation: -0.15 * touchFocusLayer.level
+        }
+        Rectangle { anchors.fill: parent; color: "#0A1020"; opacity: 0.22 * touchFocusLayer.level }
+        MouseArea { anchors.fill: parent }          // el contenido desenfocado no recibe toques
+        ShaderEffectSource {                         // copia viva y nítida de la caja presionada
+            id: liftedTile
+            readonly property Item tile: home.renditionsTouchTile
+            readonly property point origin: tile ? tile.mapToItem(touchFocusLayer, 0, 0) : Qt.point(0, 0)
+            sourceItem: tile
+            live: true
+            visible: tile !== null
+            x: origin.x; y: origin.y
+            width: tile ? tile.width : 0
+            height: tile ? tile.height : 0
+            scale: 1 + 0.04 * touchFocusLayer.level
+            opacity: touchFocusLayer.level
+        }
+    }
+    Item {                                           // anfitrión de los menús 3D Touch de las subapps
+        id: touchMenuHost
+        objectName: "touchMenuHost"
+        anchors.fill: parent
+        z: 67
     }
 }

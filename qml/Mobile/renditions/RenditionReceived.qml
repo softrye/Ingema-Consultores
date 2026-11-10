@@ -1,6 +1,6 @@
 import QtQuick
-import QtQuick.Controls
 import "RStyle.js" as S
+import "../components" as Components
 
 // Rendición recibida: versión inmutable confirmada (receivedQuery por
 // renditionId + versionId + versionNumber + hash), recepción administrativa
@@ -10,6 +10,7 @@ Item {
     id: page
     property var app
     property var row: ({})
+    readonly property bool isRenditionReceived: true
     readonly property var ui: app.ui
     readonly property var ctl: app.ctl
     readonly property string title: S.renditionDisplayName(S.text_(row, "displayName", "display_name"), S.text_(row, "visible_code"))
@@ -109,7 +110,7 @@ Item {
                  "receivedExport:" + format, function(ok, result, code, message) {
             if (!ok) { page.app.toast(page.app.errorText(code, message), "error"); return }
             var path = String(result.output || "")
-            page.app.toast("Archivo generado: " + path, "success")
+            // Sin aviso con la ruta interna: la hoja de compartir ya confirma el archivo.
             if (typeof excelExporter !== "undefined" && excelExporter && path.length)
                 excelExporter.openExportedFile(path, true)
         })
@@ -146,6 +147,26 @@ Item {
                           + "   ·   " + (page.row.expense_count || 0) + " gastos"
                     color: S.text
                     font.family: page.ui.fontFamily; font.pixelSize: 16 * page.ui.u
+                }
+                Row {
+                    visible: (page.app.livePeers || []).length > 0
+                    spacing: 8 * page.ui.u
+                    Components.PresenceAvatars {
+                        anchors.verticalCenter: parent.verticalCenter
+                        members: page.app.livePeers || []
+                        size: 26 * page.ui.u
+                        rim: S.background
+                        fontFamily: page.ui.fontFamily
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Math.max(0, column.width - 114 * page.ui.u)
+                        wrapMode: Text.WordWrap
+                        text: (page.app.livePeers || []).length === 1
+                              ? "Otra persona tiene abierta esta rendición"
+                              : (page.app.livePeers || []).length + " personas tienen abierta esta rendición"
+                        color: S.muted; font.family: page.ui.fontFamily; font.pixelSize: 11 * page.ui.u
+                    }
                 }
                 Text {
                     width: parent.width

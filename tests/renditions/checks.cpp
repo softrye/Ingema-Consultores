@@ -1,4 +1,5 @@
 #include "src/cpp/renditionlocalstore.h"
+#include "src/cpp/renditioncontract.h"
 #include "src/cpp/renditionvalidation.h"
 #include "src/cpp/renditionsnapshotexporter.h"
 #include "xlsxdocument.h"
@@ -174,6 +175,24 @@ int main(int argc, char **argv) {
  check(deleteReopened.expensesFor(dl).isEmpty(),"stale pull cannot resurrect deleted expense");
  check(deleteReopened.removeDraft(dl),"draft tombstone staged");
  check(deleteReopened.pendingOperations().first().toMap().value("kind")=="rendition_delete","draft uses delete RPC");
+ // A list row's content permission must not authorize or veto owner draft deletion.
+ // The server's delete RPC remains the authority for ownership and version history.
+ for (bool explicitDenial : {false, true}) {
+  RenditionLocalStore listDeletes(QUuid::createUuid().toString());
+  QVariantMap target{{"id",rid},{"row_version",7},{"status","BORRADOR"}};
+  if (explicitDenial) target.insert("can_edit_content",false);
+  listDeletes.mergeRemoteRenditions({target,QVariantMap{{"id",eid},{"row_version",9},{"status","BORRADOR"},{"can_edit_content",true}}});
+  const auto targetLocal=listDeletes.renditions().at(0).toMap().value("localId").toString();
+  const auto otherLocal=listDeletes.renditions().at(1).toMap().value("localId").toString();
+  check(!RenditionContract::canEditWorkingCopy(listDeletes.rendition(targetLocal)),"delete does not grant content edit permission");
+  check(listDeletes.removeDraft(targetLocal),"list deletion accepts absent or false content permission");
+  const auto pending=listDeletes.pendingOperations();
+  check(pending.size()==1,"list deletion queues one operation");
+  const auto queued=pending.first().toMap();
+  check(queued.value("kind")=="rendition_delete" && queued.value("aggregateLocalId")==targetLocal
+        && queued.value("remoteId")==rid && queued.value("expectedRowVersion").toLongLong()==7,"delete preserves target identity and CAS");
+  check(!listDeletes.rendition(otherLocal).value("archived").toBool(),"list deletion leaves other rendition untouched");
+ }
  // Modern working copy: authorization may allow OBSERVADO while its prior version remains immutable.
  RenditionLocalStore observed(QUuid::createUuid().toString());
  QVariantMap working{{"id",rid},{"row_version",4},{"status","OBSERVADO"},{"can_edit_content",true},{"current_version_id","immutable-version"},{"period_start","2026-09-01"},{"period_end","2026-09-30"},{"project_ids",QVariantList{"p1"}},{"primary_project_id","p1"}};
@@ -204,8 +223,9 @@ int main(int argc, char **argv) {
  QFile pdf("artifacts/rendition-v1.pdf"); check(pdf.open(QIODevice::ReadOnly)&&pdf.read(5)=="%PDF-","valid PDF bytes");
  check(RenditionSnapshotExporter::write(model,"xlsx","artifacts/rendition-v1.xlsx",&error),"XLSX write");
  QXlsx::Document xlsx("artifacts/rendition-v1.xlsx"); check(xlsx.load(),"XLSX readable");
- check(xlsx.selectSheet("Gastos")&&xlsx.read(2,1).toString()==model.code&&xlsx.read(2,13).toDouble()==20,"XLSX snapshot values");
- check(xlsx.selectSheet("Versión")&&xlsx.read(13,2).toString()=="500.00"&&xlsx.read(15,2).toString()=="3.437000","XLSX exact frozen financial text");
+ // Formato de la Web: Detalle_Gastos (fila 5, monto en J) y Versión (RDC en B6).
+ check(xlsx.selectSheet("Detalle_Gastos")&&xlsx.read(5,1).toInt()==1&&xlsx.read(5,10).toDouble()==20,"XLSX snapshot values");
+ check(xlsx.selectSheet("Versión")&&xlsx.read(6,2).toString()==model.code&&xlsx.selectSheet("Resumen")&&xlsx.selectSheet("Evidencias"),"XLSX web layout sheets");
  // A definitive validation rejection can be corrected; a lost reply cannot.
  const auto repairScope = QUuid::createUuid().toString();
  RenditionLocalStore repairStore(repairScope);

@@ -22,7 +22,7 @@ void RenditionRepository::accessReceivedAttachment(const QString &, const QStrin
 void RenditionRepository::listRenditions(int, const QString &, const QString &) { record(QStringLiteral("listRenditions")); }
 void RenditionRepository::getRendition(const QString &id) { record(QStringLiteral("getRendition"), {{QStringLiteral("id"), id}}); }
 void RenditionRepository::listProjects() { record(QStringLiteral("listProjects")); }
-void RenditionRepository::createRendition(const QString &requestId, const QString &, const QString &, const QVariantList &, const QString &, const QString &)
+void RenditionRepository::createRendition(const QString &requestId, const QString &, const QString &, const QVariantList &, const QString &, const QString &, const QString &)
 { record(QStringLiteral("createRendition"), {{QStringLiteral("requestId"), requestId}}); }
 void RenditionRepository::editRendition(const QString &id, qint64 version, const QString &, const QString &, const QVariantList &, const QString &, const QString &, qint64)
 { record(QStringLiteral("editRendition"), {{QStringLiteral("id"), id}, {QStringLiteral("version"), version}}); }
@@ -46,6 +46,10 @@ void RenditionRepository::updateExpense(const QString &expenseId, const QString 
 void RenditionRepository::deleteExpense(const QString &, const QString &expenseId, qint64, qint64)
 { record(QStringLiteral("deleteExpense"), {{QStringLiteral("expenseId"), expenseId}}); }
 void RenditionRepository::deleteDraft(const QString &, qint64) {}
+void RenditionRepository::trashDraft(const QString &id, qint64 version, const QString &requestId)
+{ record(QStringLiteral("trashDraft"), {{QStringLiteral("id"),id},{QStringLiteral("version"),version},{QStringLiteral("requestId"),requestId}}); }
+void RenditionRepository::archiveRendition(const QString &id, qint64 version, const QString &requestId)
+{ record(QStringLiteral("archiveRendition"), {{QStringLiteral("id"),id},{QStringLiteral("version"),version},{QStringLiteral("requestId"),requestId}}); }
 void RenditionRepository::listVersions(const QString &) {}
 void RenditionRepository::presentRendition(const QString &, qint64, const QString &) {}
 void RenditionRepository::reserveAttachment(const QString &, const QString &, const QString &requestId, const QString &, const QString &, qint64, const QString &, const QString &)

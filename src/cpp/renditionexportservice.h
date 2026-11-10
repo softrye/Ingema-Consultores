@@ -65,7 +65,7 @@ public:
         if(provider!="SUPABASE" && provider!="GOOGLE_DRIVE") return false;
         if(!displayFileName.isEmpty() && (!validPath(displayFileName)
             || QFileInfo(displayFileName).fileName()!=displayFileName)) return false;
-        if(provider=="GOOGLE_DRIVE" && !path.endsWith(".xlsx",Qt::CaseInsensitive)) return false;
+        if(provider=="GOOGLE_DRIVE" && !path.endsWith(".xlsx",Qt::CaseInsensitive) && !path.endsWith(".pdf",Qt::CaseInsensitive)) return false;
         if(!selectAccount() || QUuid(project).isNull() || !validPath(logicalPath)) return false;
         if(!calicataId.isEmpty() && QUuid(calicataId).isNull()) return false;
         const bool calicataExport=logicalPath.startsWith("Calicatas/exports/");

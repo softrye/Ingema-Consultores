@@ -23,7 +23,7 @@ let passed = 0;
 const check = (name, f) => { f(); passed++; console.log("PASS", name); };
 
 check("export images are bounded before decode and reused across all Excel sheets", () => {
-    const fill = exporter.slice(exporter.indexOf("bool fillOfficialCalicataTemplate("), exporter.indexOf("bool copyOfficialTemplate("));
+    const fill = exporter.slice(exporter.indexOf("bool fillOfficialCalicataTemplate("), exporter.indexOf('#include "calicatawebpagedexcel.inc"'));
     const excel = exporter.slice(exporter.indexOf("QString AndroidCalicataExporter::exportStateToXlsx"), exporter.indexOf("QString AndroidCalicataExporter::exportGenericWorkbookToXlsx"));
     assert.ok(!fill.includes("reportImageAt("), "sheet filling must not decode images");
     assert.ok(excel.includes("ReportImages reportImages;") && excel.includes("prepareReportImages(state, resourcesBasePathFromState(state), &reportImages, &fillError)"));
@@ -32,14 +32,16 @@ check("export images are bounded before decode and reused across all Excel sheet
     assert.ok(exporter.includes("cache.constFind(source)") && exporter.includes("cache.constFind(embeddedKey)"));
     assert.ok(!exporter.includes("QImage::fromData(QByteArray::fromBase64"), "embedded resources use the same bounded reader");
 });
-check("PDF finalization is atomic and surfaces pagination/write failures", () => {
-    const pdf = exporter.slice(exporter.indexOf("QString AndroidCalicataExporter::exportCalicataToPdf"), exporter.indexOf("bool AndroidCalicataExporter::publishCalicataPdf"));
+check("PDF finalization is atomic and uses the same paginated Web grid as XLSX", () => {
+    const pdf = read("calicatawebpagedpdf.inc");
+    const xlsx = read("calicatawebpagedexcel.inc");
     assert.ok(pdf.includes("QSaveFile output(outPath)") && pdf.includes("QPdfWriter pdf(&output)"));
-    assert.ok(pdf.includes("if (!pdf.newPage())") && pdf.includes("const bool painted = p.end()"));
+    assert.ok(pdf.includes("if(index>0 && !pdf.newPage())") && pdf.includes("painter.end()"));
     assert.ok(pdf.includes("!output.commit()") && !pdf.includes("QFile::remove(outPath)"));
-    assert.ok(pdf.includes("const int tableWidth = W - 2 * M") && pdf.includes("columns[i].second ="), "all laboratory columns fit inside the page");
-    assert.ok(pdf.includes("QTextLayout layout(") && pdf.includes("line.draw(&p,"), "long observations paginate by text line");
-    assert.ok(!pdf.includes("an oversized cell is clipped"), "oversized strata cannot silently lose content");
+    assert.ok(pdf.includes("QPageSize(QPageSize::A3)") && pdf.includes("QPageLayout::Landscape"));
+    assert.ok(pdf.includes("CalicataExportPages::paginate") && xlsx.includes("const CalicataExportPages::Page &page"));
+    assert.ok(pdf.includes("for(int row=22;row<=81;++row)") && xlsx.includes("for (int row=22;row<=81;++row)"));
+    assert.ok(pdf.includes("paintWebCalicataPdfPage(") && pdf.includes("page.fragments"));
 });
 check("QXlsx shares encoded image media across repeated sheet anchors", () => {
     const workbook = read("thirdparty/QXlsx/source/xlsxworkbook.cpp");
@@ -188,8 +190,8 @@ check("Android: Abrir = ACTION_VIEW directo (sin chooser); Compartir = ACTION_SE
     assert.ok(paths.includes('<files-path name="inge_drive_mirrors" path="inge-drive/" />'), "export dir served by FileProvider");
     assert.ok(/QStandardPaths::AppDataLocation[\s\S]{0,300}"\/inge-drive\/"/.test(exporter), "export dir under files/inge-drive");
 });
-// Proportional-depth behavior is exercised by proportional-depth.cjs and
-// the production XLSX regression in checks.cpp; paging is no longer the contract.
+// Depth pagination is shared by Android's XLSX and PDF and follows the Web's
+// 60 x 0.05 m rows; the legacy proportional renderer remains regression-tested.
 check("PDF: same resources as the ficha (embedded photos/logos, default logos) and complete header", () => {
     // Fuente única de imágenes (Excel y PDF): embebida, misma resolución que la ficha
     // (carpeta de la ficha + base de recursos), logos por defecto, logo quitado = error.
@@ -200,18 +202,25 @@ check("PDF: same resources as the ficha (embedded photos/logos, default logos) a
     assert.ok(img.includes("imagePathFromState(state, key, sourceJsonPathFromState(state), photoIndex)") && img.includes("resolveImageSource(stored, QString(), resourcesBase)"));
     assert.ok(/if \(stored\.isEmpty\(\)\)\s*\n\s*return result;\s*\/\/ hueco vacío/.test(img), "empty photo slot = blank, not an error");
     assert.ok(img.includes("No se encuentra el archivo de %1"), "unreadable registered image is a named error");
-    const pdf = exporter.slice(exporter.indexOf("QString AndroidCalicataExporter::exportCalicataToPdf"), exporter.indexOf("bool AndroidCalicataExporter::publishCalicataPdf"));
-    assert.ok(pdf.indexOf("prepareReportImages(state, resourcesBase, &reportImages, &imageError)") >= 0 && pdf.indexOf("prepareReportImages(") < pdf.indexOf("QPdfWriter pdf("), "images checked before the file is created");
-    assert.ok(/setLastError\(imageError\);\s*\n\s*return \{\};/.test(pdf));
-    assert.ok(pdf.includes("const QImage &photo = reportImages[i + 1];") && pdf.includes("drawImage(reportImages[0]"));
-    assert.ok(pdf.includes('QStringLiteral("Página %1").arg(pageNumber)') && pdf.includes("drawFooter();\n    const bool painted = p.end();"), "page numbers + running header");
-    assert.ok(pdf.includes('waterTable = QStringLiteral("No encontrado")'));
-    const fill = exporter.slice(exporter.indexOf("bool fillOfficialCalicataTemplate("), exporter.indexOf("bool copyOfficialTemplate("));
-    assert.ok(fill.includes("QImage &image = reportImages[slot]") && !fill.includes("las tres fotografías requeridas"));
+    const pdf = read("calicatawebpagedpdf.inc");
+    const xlsx = read("calicatawebpagedexcel.inc");
+    assert.ok(pdf.includes("prepareReportImages(state,resourcesBase,&images,error)") &&
+              pdf.indexOf("prepareReportImages(") < pdf.indexOf("QSaveFile output("),
+              "images checked before any output is created");
+    assert.ok(pdf.includes("images[0]") && pdf.includes("images[1]") &&
+              pdf.includes("images[i+2]"), "both logos and all three photos are shared");
+    assert.ok(xlsx.includes("images[0]") && xlsx.includes("images[1]") &&
+              xlsx.includes("images[i+2]"), "same image slots in Excel");
+    assert.ok(pdf.includes('QStringLiteral("HOJA")') &&
+              pdf.includes('QString::number(page.number)') && pdf.includes('QString::number(page.count)'));
+    assert.ok(pdf.includes("groundwater_depth_m") && xlsx.includes("groundwater_depth_m"));
+    assert.ok(pdf.includes("webConsistencyIndex(row)") && xlsx.includes("webConsistencyIndex(row)"));
+    assert.ok(pdf.includes("canonicalPk(header)") && pdf.includes("utm_x") &&
+              pdf.includes("fecha_inicio"), "Web page preserves source header fields");
+    assert.ok(pdf.includes('"Zona de ejecución","Interior de calicata","Acopios"'));
     // El usuario ve el motivo real del fallo (Excel y PDF).
-    assert.ok(form.includes('var reason = String(ExcelExporter.lastError || "")') && read("qml/Mobile/pages/CalicatasEditorPage.qml").includes("String(ExcelExporter.lastError || \"\") : \"\""));
-    assert.ok(pdf.includes("Largo × ancho (m)") && pdf.includes('"datum"') && pdf.includes('{"depth_m", "final_depth_m"}'));
-    assert.ok(pdf.includes('QStringLiteral("Zona de ejecución"), QStringLiteral("Interior de calicata"), QStringLiteral("Acopios")'));
+    assert.ok(form.includes('var reason = String(ExcelExporter.lastError || "")') &&
+              read("qml/Mobile/pages/CalicatasEditorPage.qml").includes("String(ExcelExporter.lastError || \"\") : \"\""));
 });
 
 // ---------------------------------------------------------------- Bloque 3: Liquid Glass optimizado

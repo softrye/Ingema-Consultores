@@ -26,6 +26,10 @@ Rectangle {
         font.weight: button.primary ? Font.DemiBold : Font.Normal
     }
     radius: 14 * ui.u
+    // Respuesta táctil: se hunde levemente al presionar.
+    scale: tap.pressed && tap.enabled ? 0.96 : 1
+    Behavior on scale { enabled: button.ui && button.ui.reducedMotion !== true
+                        NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
     color: primary ? (tap.pressed ? Qt.darker(S.accent, 1.2) : S.accent)
                    : S.ink(tap.pressed ? 0.12 : 0.05)
     border.width: primary ? 0 : 1

@@ -82,8 +82,9 @@ test('canonical strata, samples and lab RPCs are wired', () => {
 test('stratum depths obey canonical 0.05m contract', () => {
   assert.ok(cloud.includes('depth / 0.05'));
   assert.ok(cloud.includes('Los límites de estrato deben usar pasos de 0.05 m'));
-  assert.ok(rules.includes('to / 0.05'));
-  assert.ok(rules.includes('Hasta debe avanzar en pasos de 0.05 m.'));
+  // Web fieldContract.ts parseCalicataDepthInput: centímetros enteros múltiplos de 5.
+  assert.ok(rules.includes('centimeters % 5 !== 0'));
+  assert.ok(rules.includes('Hasta debe usar incrementos exactos de 0.05 m.'));
 });
 
 test('smart document is materialized after canonical data sync', () => {

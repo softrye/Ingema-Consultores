@@ -53,9 +53,11 @@ Item {
         : (selected && selectedSource === gpsSourceLabel) ? "fixed"
         : gpsError.length > 0 ? "error" : "idle"
 
-    // Mapa Cesium (WebView nativo de InGe Earth sobre `mapHost`).
-    readonly property bool mapSupported: Qt.platform.os === "android"
-        && typeof GraphicsCore !== "undefined" && GraphicsCore.earthAvailable
+    // Motor único Qt Location (topo) que ya utiliza el Home de Calicatas.
+    // GraphicsCore.earthAvailable puede ser undefined: nunca asignarlo a bool.
+    readonly property bool mapSupported: true
+    readonly property bool cesiumSupported: Qt.platform.os === "android"
+        && typeof GraphicsCore !== "undefined" && GraphicsCore.earthAvailable === true
     // Tarjeta de la ficha (no interactiva): resumen estático del punto; tocarla
     // abre el selector a pantalla completa, único lugar donde vive el mapa.
     readonly property bool previewMode: !interactive
@@ -77,12 +79,11 @@ Item {
     }
 
     function _pushMapPoint(kind, fly) {
-        if (!root._mapOpen || !root.selected) return
-        GraphicsCore.setEarthPickerPoint(JSON.stringify({
-            kind: kind, selected: true, fly: fly !== false,
-            latitude: root.selectedLat, longitude: root.selectedLon,
-            accuracy: isFinite(root.selectedAccuracy) ? root.selectedAccuracy : -1
-        }))
+        if (!root.selected || !root.validPoint(root.selectedLat, root.selectedLon)) return
+        // El marcador se deriva del punto seleccionado; para GPS/centrar,
+        // actualizar la cámara del mismo motor topo que usa Calicatas Home.
+        if (topoPicker && topoPicker.mapReady && fly !== false)
+            topoPicker.centerOn(root.selectedLat, root.selectedLon, 15)
     }
 
     function selectCoordinate(lat, lon, alt, accuracy, source, keepCamera) {
@@ -170,7 +171,7 @@ Item {
     // Toque en el mapa Cesium: candidato elegido a mano (sin altitud: la cota
     // del terreno se resuelve al confirmar, como en la ficha).
     function _onMapPointSelected(lat, lon) {
-        if (!root._mapOpen || !validPoint(lat, lon)) return
+        if (!root.mapSupported || !validPoint(lat, lon)) return
         if (awaitingGps) _stopGpsSearch()
         gpsError = ""
         selectCoordinate(lat, lon, NaN, NaN, mapSourceLabel, true)
@@ -178,42 +179,26 @@ Item {
         console.info("INGE_LOCATION_MAP_POINT selected=true")
     }
 
-    // ---- WebView del selector: apertura, geometría y cierre ----
-    function _hostRect() {
-        if (!mapHost.visible || mapHost.width < 8 || mapHost.height < 8 || !root.Window.window)
-            return null
-        var p = mapHost.mapToGlobal(0, 0)
-        var dpr = Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
-        return [Math.round(p.x * dpr), Math.round(p.y * dpr),
-                Math.round(mapHost.width * dpr), Math.round(mapHost.height * dpr)]
-    }
+    // ---- Motor topo de Calicatas: mismo QML/Plugin/cache del mapa Home. ----
     function _syncMap() {
-        if (!root.mapSupported) return
-        var wanted = root.pageActive && root.interactive && root.visible
+        var wanted = root.pageActive && root.interactive && root.visible && !root.mapSuspended
         if (!wanted) { root._closeMap(); return }
-        var r = root._hostRect()
-        if (!r) return
-        if (!root._mapOpen) {
-            var options = { hasPoint: root.selected, latitude: root.selected ? root.selectedLat : 0,
-                            longitude: root.selected ? root.selectedLon : 0,
-                            mapType: String(GraphicsCore.earthPickerMapType || "DEFAULT") }
-            root._openedWithPoint = root.selected
-            root._mapOpen = GraphicsCore.openEarthPicker(JSON.stringify(options), r[0], r[1], r[2], r[3])
-            root.mapState = root._mapOpen ? "OPENING" : "ERROR_HOST"
-            root._lastRect = r
-            if (root._mapOpen) console.info("INGE_LOCATION_MAP_OPEN engine=cesium hasPoint=" + options.hasPoint)
+        if (!topoPicker.mapReady) {
+            root.mapState = topoPicker.mapError.length ? "ERROR_TILES" : "LOADING_ENGINE"
             return
         }
-        if (r[0] !== root._lastRect[0] || r[1] !== root._lastRect[1]
-                || r[2] !== root._lastRect[2] || r[3] !== root._lastRect[3]) {
-            root._lastRect = r
-            GraphicsCore.updateEarthPickerRect(r[0], r[1], r[2], r[3])
+        if (!root._mapOpen) {
+            root._openedWithPoint = root.selected
+            root._mapOpen = true
+            console.info("INGE_LOCATION_MAP_OPEN engine=topo hasPoint=" + root.selected)
+            if (root.selected && root.validPoint(root.selectedLat, root.selectedLon))
+                topoPicker.centerOn(root.selectedLat, root.selectedLon, 15)
         }
+        root.mapState = "READY"
     }
     function _closeMap() {
         if (!root._mapOpen) return
         root._mapOpen = false
-        GraphicsCore.closeEarthPicker()
         root.mapState = "CLOSED"
         console.info("INGE_LOCATION_MAP_CLOSED")
     }
@@ -223,12 +208,10 @@ Item {
         geometryWatch.restart()
     }
 
-    onMapSuspendedChanged: if (root._mapOpen) GraphicsCore.setEarthPickerSuspended(root.mapSuspended)
+    onMapSuspendedChanged: geometryWatch.restart()
     onPageActiveChanged: geometryWatch.restart()
     onVisibleChanged: geometryWatch.restart()
 
-    // La geometría global no tiene notificador (animación de apertura del
-    // popup): se vigila brevemente tras cada cambio, sin sondeo permanente.
     Timer {
         id: geometryWatch
         interval: 90
@@ -238,22 +221,6 @@ Item {
         onTriggered: {
             root._syncMap()
             if (++ticks >= 10) stop()
-        }
-    }
-
-    Connections {
-        target: typeof GraphicsCore !== "undefined" ? GraphicsCore : null
-        ignoreUnknownSignals: true
-        function onEarthPickerPointSelected(latitude, longitude) { root._onMapPointSelected(latitude, longitude) }
-        function onEarthPickerStateChanged(state) {
-            if (!root._mapOpen && state !== "CLOSED") return
-            root.mapState = String(state)
-            if (root.mapState.indexOf("ERROR") === 0) {
-                root._mapOpen = false
-                console.warn("INGE_LOCATION_MAP_ERROR state=" + root.mapState)
-            } else if (root.mapState === "READY" && root.selected) {
-                root._pushMapPoint(root.selectedSource === root.gpsSourceLabel ? "gps" : "chosen", !root._openedWithPoint)
-            }
         }
     }
 
@@ -315,6 +282,25 @@ Item {
                 anchors.fill: parent
                 color: root.darkMode ? "#0A1828" : "#E5EEF7"
             }
+            // Reusar el motor Qt Location/OpenTopoMap que ya funciona en el Home.
+            // Sin un segundo WebView ni dependencia de GraphicsCore.earthAvailable.
+            CalicatasTopoMap {
+                id: topoPicker
+                anchors.fill: parent
+                visible: root.interactive && root.pageActive && root.visible && !root.mapSuspended
+                active: visible
+                controlsVisible: false
+                topoLayer: true
+                markers: root.selected && root.validPoint(root.selectedLat, root.selectedLon)
+                    ? [{ key: "picker-point", lat: root.selectedLat, lon: root.selectedLon,
+                         code: "Punto elegido", status: "BORRADOR" }] : []
+                onMapReadyChanged: root._syncMap()
+                onMapErrorChanged: root._syncMap()
+                onBackgroundTapped: function(lat, lon) { root._onMapPointSelected(lat, lon) }
+                onMarkerTapped: function(marker) {
+                    if (marker) root._onMapPointSelected(marker.lat, marker.lon)
+                }
+            }
             // Vista previa cartográfica liviana (tarjeta de la ficha): mosaico 3×3 de
             // teselas OSM —la misma base sin claves del selector Cesium— centrado en
             // la coordenada guardada, con su marcador. Sin WebView ni segundo motor;
@@ -338,14 +324,14 @@ Item {
                 // Mismo servidor de teselas que InGe Earth (DEFAULT_MAP_URL); si
                 // no está configurado, OpenStreetMap con identificación de la app.
                 readonly property string tileTemplate: {
-                    var url = root.mapSupported ? String(GraphicsCore.earthBaseMapUrl() || "") : ""
+                    var url = root.cesiumSupported ? String(GraphicsCore.earthBaseMapUrl() || "") : ""
                     if (!url.length) return "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
                     return /\{z\}/i.test(url) ? url : url.replace(/\/+$/, "") + "/{z}/{x}/{y}.png"
                 }
                 readonly property bool osmTiles: tileTemplate.indexOf("tile.openstreetmap.org") >= 0
                 // Satélite: miniatura capturada por Cesium al cerrar el selector,
                 // válida solo para esta coordenada (si cambió, se usa el mapa).
-                readonly property bool satelliteSnapshot: root.mapSupported && hasPoint
+                readonly property bool satelliteSnapshot: root.cesiumSupported && hasPoint
                     && String(GraphicsCore.earthPickerMapType) === "SATELLITE"
                     && String(GraphicsCore.earthPickerSnapshotUrl).length > 1024
                     && Math.abs(GraphicsCore.earthPickerSnapshotLatitude - root.selectedLat) < 1e-6
@@ -404,7 +390,7 @@ Item {
                     anchors.margins: 6
                     visible: previewMap.readyTiles > 0
                     text: previewMap.satelliteSnapshot ? "Satélite · Cesium ion"
-                          : root.mapSupported && String(GraphicsCore.earthPickerMapType) === "SATELLITE"
+                          : root.cesiumSupported && String(GraphicsCore.earthPickerMapType) === "SATELLITE"
                             ? "Mapa · captura satelital pendiente (abre el mapa)"
                           : previewMap.osmTiles ? "© OpenStreetMap" : "© Proveedor del mapa base de InGe Earth"
                     font.pixelSize: 10
@@ -444,7 +430,7 @@ Item {
                     font.pixelSize: 14
                     text: !root.mapSupported ? "El mapa de InGe Earth está disponible en Android. Usa Mi ubicación o edita las coordenadas UTM en la ficha."
                           : root.mapState === "ERROR_EARTH_ACTIVE" ? "InGe Earth está abierto en otra pantalla. Ciérralo y vuelve a intentarlo."
-                          : "No se pudo abrir el mapa de InGe Earth."
+                          : "No se pudo cargar el mapa topográfico."
                 }
                 Button {
                     Layout.alignment: Qt.AlignHCenter
@@ -538,7 +524,7 @@ Item {
 
     Component.onCompleted: {
         if (root.interactive)
-            console.info("INGE_LOCATION_PICKER_OPEN engine=" + (root.mapSupported ? "cesium" : "none"))
+            console.info("INGE_LOCATION_PICKER_OPEN engine=topo")
         // El host fija el punto de la ficha con Qt.callLater: la apertura del
         // mapa espera a la geometría y a ese candidato inicial.
         geometryWatch.restart()

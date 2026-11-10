@@ -62,7 +62,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: review.darkMode ? "#151A30" : "#FFFFFF"
+        color: review.darkMode ? "#0A0A0A" : "#FFFFFF"
     }
 
     // ---------------------------------------------------------------- componentes
@@ -76,9 +76,9 @@ Item {
         Rectangle {
             anchors.fill: parent
             radius: card.cardRadius
-            color: Mobile.InGeCoreFlow.darkMode ? "#171D29" : "#FFFFFF"
+            color: review.darkMode ? "#16233F" : "#FFFFFF"
             border.width: 1
-            border.color: Mobile.InGeCoreFlow.darkMode ? "#3A4456" : "#D5DBE3"
+            border.color: review.darkMode ? Qt.rgba(1, 1, 1, 0.10) : "#D5DBE3"
         }
         ColumnLayout {
             id: cardBody

@@ -15,6 +15,9 @@ Rectangle {
     implicitWidth: chipText.implicitWidth + 28 * ui.u
     radius: height / 2
     color: selected ? S.accent : S.ink(tap.pressed ? 0.16 : 0.07)
+    Behavior on color { ColorAnimation { duration: 160 } }
+    scale: tap.pressed ? 0.95 : 1
+    Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
     border.width: 1
     border.color: selected ? "transparent" : S.border
     opacity: enabledChip ? 1 : 0.45

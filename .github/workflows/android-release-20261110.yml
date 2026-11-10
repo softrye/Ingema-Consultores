@@ -1,0 +1,28 @@
+name: InGe+ Android | Código fuente 2026-11-10
+
+on:
+  push:
+    tags:
+      - 'android-2026.11.10-source'
+
+permissions:
+  contents: write
+
+jobs:
+  publicacion-fuentes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Publicar release de fuente sin compilar Android
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "InGe+ Android | Código fuente | 10-11-2026 (QA pendiente)" \
+            --notes-file "docs/CHANGELOG_ANDROID_20261110.md" \
+            --prerelease \
+            --target "${GITHUB_SHA}"

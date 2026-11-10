@@ -38,7 +38,8 @@ public:
     Q_INVOKABLE QString exportGenericWorkbookToXlsx(const QVariantMap &state, const QString &fileBaseName = QString());
     QString exportRenditionToXlsx(const QVariantMap &state, const QString &fileBaseName = QString());
     QString exportRenditionToPdf(const QVariantMap &state, const QString &fileBaseName = QString());
-    QString exportReceivedSnapshot(const QVariantMap &received, const QString &format);
+    QString exportReceivedSnapshot(const QVariantMap &received, const QString &format,
+                                   const QString &destination = QStringLiteral("inge"));   // phone | inge | google
 
 signals:
     void calicataPublished(const QString &documentId);
@@ -46,6 +47,8 @@ signals:
     void calicataPublishFailed(const QString &documentId, const QString &message);
     void lastErrorChanged();
     void exportResultChanged();
+    // Fin real de la subida a Google Drive de exportReceivedSnapshot (éxito o error).
+    void driveExportFinished(const QString &fileName, bool ok, const QString &error);
 
 private:
     void setLastError(const QString &error);

@@ -34,12 +34,19 @@ Item {
         typeof CoreRemote !== "undefined" && CoreRemote !== null && CoreRemote.online === true
     property bool _coreReviewRetryPending: false
     property bool _derivingLab: false
+    // Only the two editing sheets share the Dock's optical background.
+    // Fields use translucent legibility coatings, not extra shaders/captures.
+    readonly property bool editorGlassActive: prfStratumPopup.visible
+        || (stratumSheet.visible && root.labSheetActive)
+    readonly property color editorReadableMuted: root.editorGlassActive
+        ? (root.darkMode ? "#D4DAE4" : "#435168") : root.cMuted
 
     // Passive AFK activity tracking for the optional visual-only Kawaii profile gag.
     property double kawaiiLastInteractionAt: Date.now()
     onVisibleChanged: kawaiiLastInteractionAt = Date.now()
     PointHandler {
-        enabled: root.flow && root.flow.appSkin === "ingenieros" && root.flow.extremeMotion
+        enabled: root.flow && root.flow.appSkin === "ingenieros"
+            && root.flow.motionAllowed && !root.flow.powerSaveMode
         target: null
         onActiveChanged: if (active) root.kawaiiLastInteractionAt = Date.now()
     }
@@ -244,7 +251,7 @@ Item {
         root.labInfosAll = list
     }
     // labInfo puede vaciar una revisión pendiente: salir del turno del binding.
-    on_CortesRevisionChanged: Qt.callLater(root._rebuildLabInfos)
+    on_CortesRevisionChanged: { Qt.callLater(root._rebuildLabInfos); Qt.callLater(root._rebuildPrfStats) }
     readonly property int labPendingCount: root.labInfosAll.filter(function(x) { return x && x.pending }).length
     readonly property int labDataCount: root.labInfosAll.filter(function(x) { return x && (x.hasSample || x.hasTests) }).length
     readonly property var labStrataEntries: root.labInfosAll.map(function(x, i) {
@@ -879,7 +886,8 @@ Item {
 
     // The six stages project the existing document. Historical section IDs
     // remain valid for review links.
-    property int stageIndex: 0
+    property int stageIndex: 1
+    // La etapa 0 «Datos generales» ya no existe (DIOS): cualquier camino que la pida cae en Identidad.
     // Read-only flag for CalicataUbicacionView to avoid camera recenter during
     // fullscreen manual edits and gestures.
     readonly property bool ubicacionMapOpen: ubicacionMap.open
@@ -903,6 +911,7 @@ Item {
     // "Timers cannot have negative intervals" que emite QtLocation al crear cada Map).
     property bool _locationMapWarm: false
     onStageIndexChanged: {
+        if (stageIndex < 1) { stageIndex = 1; return }   // la etapa 0 ya no existe
         fichaStatusTimer.restart()
         if (stageIndex === 1) {
             _locationMapWarm = true
@@ -949,7 +958,7 @@ Item {
             return (reviewCorrectionActive || stageIndex >= sectionNavigation.length - 1)
                 ? -1 : stageIndex + 1
         if (reviewCorrectionActive) return sectionNavigation.length - 1
-        return stageIndex > 0 ? stageIndex - 1 : -1
+        return stageIndex > 1 ? stageIndex - 1 : -1
     }
 
     function _applySwipeOffset(dx) {
@@ -1458,8 +1467,20 @@ Item {
     }
 
     // Resumen del perfil (espesores por grupo) a partir de los intervalos válidos.
-    readonly property var prfStats: {
-        root._cortesRevision
+    // Imperativo (no binding): labProjection puede vaciar la revisión pendiente mientras
+    // se evalúa -> «Binding loop detected for property prfStats» (cientos de veces por
+    // toque en el A12). Se recalcula al subir _cortesRevision, fuera del turno del binding.
+    property var prfStats: ({ anthropicCount: 0, anthropicThickness: 0, total: 0,
+                              coarse: 0, silt: 0, clay: 0, organic: 0, classified: 0 })
+    property bool _prfStatsBuilding: false
+    function _rebuildPrfStats() {
+        if (root._prfStatsBuilding) return
+        root._prfStatsBuilding = true
+        var result = root._computePrfStats()
+        root._prfStatsBuilding = false
+        root.prfStats = result
+    }
+    function _computePrfStats() {
         var stats = { anthropicCount: 0, anthropicThickness: 0, total: 0,
                       coarse: 0, silt: 0, clay: 0, organic: 0, classified: 0 }
         for (var i = 0; i < cortesModel.count; ++i) {
@@ -1586,9 +1607,9 @@ Item {
         if (!commitPendingField()) return false
         if (reviewCorrectionActive)
             return finishReviewCorrection()
-        if (stageIndex <= 0) return false
+        if (stageIndex <= 1) return false
         root._scheduleFlush(Date.now())
-        var previousStage = Math.max(0, stageIndex - 1)
+        var previousStage = Math.max(1, stageIndex - 1)
         stageIndex = previousStage
         sectionNavCurrent = sectionNavigation[previousStage].n
         identityEditing = false
@@ -1630,6 +1651,7 @@ Item {
         if (infoDlg.opened) { infoDlg.close(); return true }
         if (projectPickerPopup.opened) { projectPickerPopup.close(); return true }
         if (identityPopup.opened) { identityPopup.close(); return true }
+        if (identityNamePopup.opened) { identityNamePopup.close(); return true }
         if (root.labSheetActive && prfStratumPopup.visible) { root.closeLabDetail(); return true }
         if (stratumSheet.opened) { finishStratum(false); return true }
         if (!commitPendingField()) return true
@@ -1772,6 +1794,19 @@ Item {
         return -1
     }
 
+    // Estado de relleno de las 4 cajas de Identidad (aura verde / amarilla / roja).
+    readonly property var identityStatus: {
+        var h = root.doc ? root.doc.header : ({})
+        var has = function(v) { return String(v === undefined || v === null ? "" : v).trim().length > 0 }
+        var req = [has(txtCodigo.text), has(h.description), has(txtSupervisor.text), has(root.roadSideValue),
+                   has(txtPk.text), has(h.fecha_inicio)]
+        var n = req.filter(function(x) { return x }).length
+        var person = n === 0 ? "empty" : (n === req.length ? "ok" : "partial")
+        var folder = has(h.projectId) ? "ok" : "empty"
+        var machine = has(txtMaquina.text) ? "ok" : "empty"
+        var logos = (root.hasLogoMtc && root.hasLogoProyecto) ? "ok" : ((root.hasLogoMtc || root.hasLogoProyecto) ? "partial" : "empty")
+        return [person, folder, machine, logos]
+    }
     function sectionVisible(number) {
         switch (number) {
         case 1: return stageIndex === 0 && !identityEditing
@@ -1918,8 +1953,8 @@ Item {
         dismissInputForNavigation()
         if (sectionNumber === 6) { identityPopup.open(); return }
 
-        stageIndex = position
-        sectionNavCurrent = sectionNavigation[position].n
+        stageIndex = Math.max(1, position)
+        sectionNavCurrent = sectionNavigation[stageIndex].n
         identityEditing = false
         reviewNotesEditing = sectionNumber === 8
 
@@ -3573,6 +3608,7 @@ Item {
             wrapMode: Text.WordWrap
         }
         background: CalicataSurface {
+            editorGlass: root.editorGlassActive
             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
             radius: tf.fieldRadius
             focused: tf.activeFocus
@@ -3580,7 +3616,7 @@ Item {
             enabledLook: tf.enabled
         }
         color: root.cText
-        placeholderTextColor: root.cMuted
+        placeholderTextColor: root.editorReadableMuted
     }
 
     // TextArea enlazado al mismo modelo oculto usado por la serialización.
@@ -3615,13 +3651,14 @@ Item {
         }
 
         background: CalicataSurface {
+            editorGlass: root.editorGlassActive
             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
             radius: ta.fieldRadius
             focused: ta.activeFocus
             enabledLook: ta.enabled
         }
         color: root.cText
-        placeholderTextColor: root.cMuted
+        placeholderTextColor: root.editorReadableMuted
     }
 
     // A stage body has no collapsed state. Its controls stay instantiated so
@@ -3727,6 +3764,7 @@ Item {
         id: logoHistoryStrip
         property string target: ""
         property bool expanded: false
+        property bool showToggle: true
         readonly property var rows: root._logoVersionRows(target)
         readonly property int rowHeight: root.dp(56)
         spacing: root.dp(6)
@@ -3734,6 +3772,7 @@ Item {
 
         Button {
             id: logoHistoryToggle
+            visible: logoHistoryStrip.showToggle
             Layout.fillWidth: true
             Layout.preferredHeight: root.dp(44)
             padding: root.dp(10)
@@ -4136,7 +4175,10 @@ Item {
         Layout.preferredWidth: implicitWidth
         Layout.preferredHeight: implicitHeight
         radius: root.dp(8)
-        color: chip.current ? root.cGenBlueSoft : "transparent"
+        color: chip.current ? root.cGenBlueSoft
+               : root.editorGlassActive
+                 ? (root.darkMode ? Qt.rgba(0.14, 0.18, 0.29, 0.42) : Qt.rgba(1, 1, 1, 0.38))
+                 : "transparent"
         border.width: 1
         border.color: chip.current ? root.cGenBlue : root.cBorder
         scale: chipTap.pressed ? 0.96 : 1
@@ -4515,6 +4557,7 @@ Item {
 
     component GenDialogHeader: RowLayout {
         id: genDialogHeader
+        FontLoader { id: genHeaderFont; source: "qrc:/InGe/Mobile/fonts/Figtree-Bold.ttf" }
         property string title: ""
         property string subtitle: ""
         property string badgeText: ""          // "3D Touch" en los selectores de General
@@ -4528,6 +4571,7 @@ Item {
                 Layout.fillWidth: true
                 text: genDialogHeader.title
                 color: root.cText
+                font.family: genHeaderFont.status === FontLoader.Ready ? genHeaderFont.name : ""
                 font.pixelSize: root.sp(18)
                 font.bold: true
                 elide: Text.ElideRight
@@ -4587,6 +4631,7 @@ Item {
         scale: genBtn.down ? 0.985 : 1
         Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
         background: CalicataSurface {
+            editorGlass: root.editorGlassActive
             dark: root.darkMode
             accent: genBtn.accent
             radius: root.dp(12)
@@ -4634,9 +4679,14 @@ Item {
         scale: 1
         background: Rectangle {
             radius: root.dp(8)
-            color: footerButton.primary ? root.cGenBlue : footerButton.soft
-                   ? (root.darkMode ? "#38252A" : "#FFF1F0")
-                   : (root.darkMode ? "#28313E" : "#EEF1F5")
+            color: footerButton.primary ? root.cGenBlue
+                   : root.editorGlassActive
+                     ? (root.darkMode ? Qt.rgba(0.14, 0.18, 0.29, 0.52) : Qt.rgba(1, 1, 1, 0.48))
+                   : footerButton.soft
+                     ? (root.darkMode ? "#38252A" : "#FFF1F0")
+                     : (root.darkMode ? "#28313E" : "#EEF1F5")
+            border.width: root.editorGlassActive && !footerButton.primary ? 1 : 0
+            border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.34) : Qt.rgba(1, 1, 1, 0.80)
             opacity: !footerButton.enabled ? 0.4 : footerButton.down ? 0.75 : 1
         }
         contentItem: Text {
@@ -4879,7 +4929,8 @@ Item {
         return null
     }
     readonly property bool genGlassLive: root.visible && root.genAuraBackdrop !== null
-                                         && (root.stageIndex === 0 || !fichaSheetGlass.fallbackOn)
+                                         && (root.stageIndex === 0 || identityNamePopup.opened || popFechaPicker.opened || projectPickerPopup.opened || machinePickerPopup.opened || identityPopup.opened || photoViewer.opened || (root.photoEditorItem && root.photoEditorItem.opened) || !fichaSheetGlass.fallbackOn)
+    readonly property var photoEditorGlassUi: genGlassUi
     readonly property real genGlassDivisor: GraphicsCore.deviceTier === "HIGH" ? 1 : 2
     ShaderEffectSource {
         id: genAuraCapture
@@ -4952,7 +5003,7 @@ Item {
                 Text {
                     Layout.fillWidth: true
                     text: prfCard.title.toUpperCase()
-                    color: root.cMuted
+                    color: root.editorReadableMuted
                     font.pixelSize: root.sp(12)
                     font.weight: Font.Bold
                     font.letterSpacing: 1.4
@@ -5003,7 +5054,7 @@ Item {
                 Text {
                     Layout.fillWidth: true
                     text: prfSub.title.toUpperCase()
-                    color: root.cMuted
+                    color: root.editorReadableMuted
                     font.pixelSize: root.sp(12)
                     font.weight: Font.Bold
                     font.letterSpacing: 1.4
@@ -5096,7 +5147,7 @@ Item {
             Layout.alignment: Qt.AlignVCenter
             visible: prfPickField.label.length > 0
             text: prfPickField.label
-            color: root.cMuted
+            color: root.editorReadableMuted
             font.pixelSize: root.fsLabel
             wrapMode: Text.WordWrap
         }
@@ -5106,7 +5157,7 @@ Item {
             radius: root.dp(10)
             color: "transparent"
             CalicataSurface {
-                dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
+            editorGlass: root.editorGlassActive; dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
                 anchors.fill: parent
                 radius: parent.radius
                 pressed: prfPickField.pressed
@@ -5182,7 +5233,7 @@ Item {
         Text {
             Layout.fillWidth: true
             text: prfInput.label
-            color: root.cMuted
+            color: root.editorReadableMuted
             font.pixelSize: root.fsLabel
             elide: Text.ElideRight
         }
@@ -5212,6 +5263,7 @@ Item {
         Accessible.name: prfSegment.label
         Accessible.checked: prfSegment.isOn
         CalicataSurface {
+            editorGlass: root.editorGlassActive
             dark: root.darkMode
             accent: prfSegment.accent
             anchors.fill: parent
@@ -5264,7 +5316,8 @@ Item {
             Layout.preferredHeight: root.dp(24)
             radius: height / 2
             color: "transparent"
-            CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: prfSwitch.isOn ? "primary" : "glass" }
+            CalicataSurface {
+            editorGlass: root.editorGlassActive; dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: prfSwitch.isOn ? "primary" : "glass" }
             Rectangle {
                 width: parent.height - root.dp(6)
                 height: width
@@ -5301,7 +5354,8 @@ Item {
             Layout.preferredHeight: root.dp(18)
             radius: root.dp(5)
             color: "transparent"
-            CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: prfCheck.isOn ? "primary" : "glass" }
+            CalicataSurface {
+            editorGlass: root.editorGlassActive; dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius; tone: prfCheck.isOn ? "primary" : "glass" }
             Text {
                 anchors.centerIn: parent
                 visible: prfCheck.isOn
@@ -5335,6 +5389,7 @@ Item {
         Accessible.name: prfChip.label
         Accessible.checked: prfChip.isOn
         CalicataSurface {
+            editorGlass: root.editorGlassActive
             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
             anchors.fill: parent
             radius: prfChip.radius
@@ -5370,6 +5425,7 @@ Item {
         focusPolicy: Qt.NoFocus
         Accessible.name: prfTool.text
         background: CalicataSurface {
+            editorGlass: root.editorGlassActive
             dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
             radius: prfTool.iconOnly ? height / 2 : root.dp(12)
             tone: prfTool.primaryTone || prfTool.checked ? "tinted" : "glass"
@@ -5426,7 +5482,8 @@ Item {
                         : prfArea.naturalHeight
         radius: root.dp(12)
         color: "transparent"
-        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: prfArea.radius; focused: prfAreaEdit.activeFocus }
+        CalicataSurface {
+            editorGlass: root.editorGlassActive; dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: prfArea.radius; focused: prfAreaEdit.activeFocus }
         TextArea {
             id: prfAreaEdit
             anchors.left: parent.left
@@ -5436,7 +5493,7 @@ Item {
             anchors.margins: root.dp(10)
             wrapMode: TextEdit.Wrap
             placeholderText: prfArea.placeholder
-            placeholderTextColor: root.cMuted
+            placeholderTextColor: root.editorReadableMuted
             color: root.cText
             font.pixelSize: root.fsLabel + 1
             padding: 0
@@ -5605,7 +5662,7 @@ Item {
         Text {
             Layout.fillWidth: true
             text: readOnlyField.fieldLabel
-            color: root.cMuted
+            color: root.editorReadableMuted
             font.pixelSize: root.fsLabel
             elide: Text.ElideRight
         }
@@ -5622,7 +5679,8 @@ Item {
             color: "transparent"
             clip: true
 
-            CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
+            CalicataSurface {
+            editorGlass: root.editorGlassActive; dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
 
             Text {
                 id: fieldValue
@@ -5911,6 +5969,10 @@ Item {
 
     function _applyProjectSelection(project) {
         if (!root.doc || !project) return
+        if (project.writable === false || String(project.status || "") === "ARCHIVADO") {
+            root.showInfo("Proyecto archivado", "No admite nuevas calicatas ni sincronización. Selecciona un proyecto activo; el borrador local se conserva.")
+            return
+        }
         var selection = {
             projectId: String(project.id || ""),
             projectCode: String(project.code || ""),
@@ -5933,7 +5995,25 @@ Item {
 
     GenPopup {
         id: projectPickerPopup
+        background: Item {
+            MobileGlass.DockGlassPanel {
+                glassUi: genGlassUi
+                radius: root.dp(28)
+                u: root.uiScale
+                reducedMotion: root.flowReduceMotion
+                lowFallback: false
+            }
+            // Velo de legibilidad: el vidrio conserva el brillo, pero el rellenado se lee siempre.
+            Rectangle {
+                anchors.fill: parent
+                radius: root.dp(28)
+                color: root.darkMode ? Qt.rgba(0.04, 0.06, 0.11, 0.70) : Qt.rgba(1, 1, 1, 0.74)
+                border.width: 1
+                border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(1, 1, 1, 0.6)
+            }
+        }
         preferredWidth: root.dp(520)
+        preferredHeight: root.dp(96) + Math.max(1, Math.min(CalicataCloud.projects.length, 6)) * root.dp(64)
         onAboutToShow: {
             projectSearchField.text = ""
             root._pendingProjectId = root.doc ? String(root.doc.header.projectId || "") : ""
@@ -5944,11 +6024,11 @@ Item {
             spacing: root.dp(12)
             GenDialogHeader {
                 title: "Seleccionar carpeta"
-                badgeText: "3D Touch"
                 onCloseRequested: projectPickerPopup.close()
             }
             GenSearchField {
                 id: projectSearchField
+                visible: false          // sin barra de búsqueda (DIOS)
                 placeholderText: "Buscar carpeta…"
             }
             Text {
@@ -5970,11 +6050,16 @@ Item {
                     width: ListView.view.width
                     title: String(modelData.name || "") || String(modelData.code || "")
                     detail: String(modelData.code || "")
+                        + (modelData.writable === false ? " · Archivado (solo lectura)" : "")
                     iconName: "calgen.project"
+                    enabled: modelData.writable !== false
+                    opacity: enabled ? 1 : 0.6
                     selected: String(modelData.id || "") === root._pendingProjectId
                     onPicked: {
+                        // Sin botones Cancelar/Seleccionar: tocar la carpeta la aplica al instante.
                         root._pendingProjectId = String(modelData.id || "")
                         root._pendingProject = modelData
+                        root._applyProjectSelection(modelData)
                     }
                 }
             }
@@ -5991,20 +6076,6 @@ Item {
                 text: "Ningún proyecto coincide con la búsqueda."
                 color: root.cMuted
                 wrapMode: Text.WordWrap
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: root.dp(10)
-                GenDialogButton {
-                    text: "Cancelar"
-                    onClicked: projectPickerPopup.close()
-                }
-                GenDialogButton {
-                    text: "Seleccionar"
-                    primary: true
-                    enabled: root._pendingProject !== null
-                    onClicked: root._applyProjectSelection(root._pendingProject)
-                }
             }
         }
     }
@@ -6066,6 +6137,23 @@ Item {
 
     GenPopup {
         id: machinePickerPopup
+        background: Item {
+            MobileGlass.DockGlassPanel {
+                glassUi: genGlassUi
+                radius: root.dp(28)
+                u: root.uiScale
+                reducedMotion: root.flowReduceMotion
+                lowFallback: false
+            }
+            // Velo de legibilidad: el vidrio conserva el brillo, pero el rellenado se lee siempre.
+            Rectangle {
+                anchors.fill: parent
+                radius: root.dp(28)
+                color: root.darkMode ? Qt.rgba(0.04, 0.06, 0.11, 0.70) : Qt.rgba(1, 1, 1, 0.74)
+                border.width: 1
+                border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(1, 1, 1, 0.6)
+            }
+        }
         preferredHeight: root.dp(640)
         onAboutToShow: {
             machineSearchField.text = ""
@@ -6076,11 +6164,11 @@ Item {
             spacing: root.dp(12)
             GenDialogHeader {
                 title: "Seleccionar maquinaria"
-                badgeText: "3D Touch"
                 onCloseRequested: machinePickerPopup.close()
             }
             GenSearchField {
                 id: machineSearchField
+                visible: false          // sin barra de búsqueda (DIOS); la lista es corta
                 placeholderText: "Buscar maquinaria…"
             }
             ListView {
@@ -6206,7 +6294,11 @@ Item {
         property int direction: 0
         property string pairSnapshot: ""
         property string moveDescription: ""
-        readonly property int rowIndex: { var revision=root._cortesRevision; return root.stratumIndexForKeys(localKey,remoteKey) }
+        property int rowIndex: -1
+        function refreshRowIndex() { rowIndex = root.stratumIndexForKeys(localKey, remoteKey) }
+        onLocalKeyChanged: Qt.callLater(refreshRowIndex)
+        onRemoteKeyChanged: Qt.callLater(refreshRowIndex)
+        Connections { target: root; function on_CortesRevisionChanged() { profileActionsPopup.refreshRowIndex() } }
         function openFor(index) {
             if (index<0 || index>=cortesModel.count || !root.commitPendingField()) return
             var row=root.corteToPlainObject(cortesModel.get(index))
@@ -6671,8 +6763,13 @@ Item {
                 Layout.preferredHeight: root.dp(42)
                 radius: root.dp(10)
                 readonly property bool active: (index === 1) === editorTabs.laboratory
-                color: active ? root.cGenBlue : root.cSurface
-                border.color: root.cBorder
+                color: active ? root.cGenBlue
+                       : root.editorGlassActive
+                         ? (root.darkMode ? Qt.rgba(0.14, 0.18, 0.29, 0.44) : Qt.rgba(1, 1, 1, 0.42))
+                         : root.cSurface
+                border.color: active ? root.cGenBlue : root.editorGlassActive
+                                  ? (root.darkMode ? Qt.rgba(1, 1, 1, 0.30) : Qt.rgba(1, 1, 1, 0.75))
+                                  : root.cBorder
                 Accessible.role: Accessible.PageTab
                 Accessible.name: modelData.name
                 Components.FlowIcon {
@@ -7076,8 +7173,8 @@ Item {
                                                     minimumValue: isFinite(prfEditorCard.fromDepth) ? prfEditorCard.fromDepth : 0
                                                     maximumValue: isFinite(prfEditorCard.toDepth) ? prfEditorCard.toDepth : root.depthMaxM
                                                     placeholderText: "Desde"
-                                                    modelText: Rules.sampleIntervalValue(prfEditorCard.s, "muestra_desde")
-                                                    onCommit: function(t) { return root.commitSampleInterval(prfEditorCard.idx, "muestra_desde", t) }
+                                                    modelText: isFinite(prfEditorCard.fromDepth) ? prfEditorCard.fromDepth.toFixed(2) : ""   // la muestra abarca el estrato; no se edita aquí
+                                                    enabled: false
                                                 }
                                             }
                                             PrfLabeledInput {
@@ -7088,8 +7185,8 @@ Item {
                                                     minimumValue: isFinite(prfEditorCard.fromDepth) ? prfEditorCard.fromDepth : 0
                                                     maximumValue: isFinite(prfEditorCard.toDepth) ? prfEditorCard.toDepth : root.depthMaxM
                                                     placeholderText: "Hasta"
-                                                    modelText: Rules.sampleIntervalValue(prfEditorCard.s, "muestra_hasta")
-                                                    onCommit: function(t) { return root.commitSampleInterval(prfEditorCard.idx, "muestra_hasta", t) }
+                                                    modelText: isFinite(prfEditorCard.toDepth) ? prfEditorCard.toDepth.toFixed(2) : ""   // la muestra abarca el estrato; no se edita aquí
+                                                    enabled: false
                                                 }
                                             }
                                         }
@@ -7343,7 +7440,7 @@ Item {
                                 Text { text: "Laboratorio / procedencia"; color: root.cText; font.bold: true; font.pixelSize: root.fsLabel }
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    Text { Layout.fillWidth: true; text: "Fecha de ensayo"; color: root.cMuted; font.pixelSize: root.fsLabel }
+                                    Text { Layout.fillWidth: true; text: "Fecha de ensayo"; color: root.editorReadableMuted; font.pixelSize: root.fsLabel }
                                     BoundTextField {
                                         Layout.preferredWidth: root.dp(150)
                                         placeholderText: "AAAA-MM-DD"
@@ -7353,7 +7450,7 @@ Item {
                                 }
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    Text { Layout.fillWidth: true; text: "Laboratorio"; color: root.cMuted; font.pixelSize: root.fsLabel }
+                                    Text { Layout.fillWidth: true; text: "Laboratorio"; color: root.editorReadableMuted; font.pixelSize: root.fsLabel }
                                     BoundTextField {
                                         Layout.preferredWidth: root.dp(190)
                                         placeholderText: "Nombre"
@@ -7675,6 +7772,7 @@ Item {
     }
 
     Component.onCompleted: {
+        Qt.callLater(root._rebuildPrfStats)
         root._updateLayoutSize()
         _ready = true
         ensureDocsRoots()
@@ -8579,9 +8677,9 @@ Item {
             var savedStage = Number(view.stage || 0)
             if (Number(view.stageSchema || 0) === 2) {
                 // La etapa de laboratorio retirada vuelve a Perfil; fotos y revisión conservan su destino.
-                stageIndex = savedStage === 3 ? 2 : Math.max(0, Math.min(4, savedStage > 3 ? savedStage - 1 : savedStage))
+                stageIndex = savedStage === 3 ? 2 : Math.max(1, Math.min(4, savedStage > 3 ? savedStage - 1 : savedStage))
             } else {
-                stageIndex = Math.max(0, Math.min(4, savedStage))
+                stageIndex = Math.max(1, Math.min(4, savedStage))
             }
             sectionNavCurrent = sectionNavigation[stageIndex].n
             selectedStratum = Math.min(Number(view.selectedStratum === undefined ? -1 : view.selectedStratum), cortesModel.count - 1)
@@ -9168,8 +9266,9 @@ Item {
 
         if (identityPopup.opened) identityPopup.close()
         if (stratumSheet.opened) stratumSheet.close()
-        stageIndex = 0
-        sectionNavCurrent = 1
+        // La etapa 0 «Datos generales» está oculta (DIOS): la ficha abre en la etapa 1.
+        stageIndex = 1
+        sectionNavCurrent = (sectionNavigation && sectionNavigation.length > 1) ? sectionNavigation[1].n : 2
         selectedStratum = -1
         profileMode = "overview"
         identityEditing = false
@@ -10007,8 +10106,8 @@ Item {
         id: resourcesPicker
         parent: Overlay.overlay
         modal: true
-        title: "Elegir logo (Recursos)"
-        standardButtons: Dialog.Ok | Dialog.Cancel
+        title: "Elegir logo"
+        standardButtons: Dialog.NoButton
         palette.windowText: root.cText
         palette.text: root.cText
         palette.buttonText: root.cText
@@ -10016,14 +10115,39 @@ Item {
         palette.button: root.cSurfaceAlt
         palette.highlight: root.cAccent
         Overlay.modal: GenScrim { popupItem: resourcesPicker }
-        background: GenPopupSurface { popupItem: resourcesPicker}
-        header: GenDialogTitle { text: resourcesPicker.title }
-        footer: GenDialogButtonBox { standardButtons: resourcesPicker.standardButtons }
+        background: Item {
+            MobileGlass.DockGlassPanel {
+                glassUi: genGlassUi
+                radius: root.dp(28)
+                u: root.uiScale
+                reducedMotion: root.flowReduceMotion
+                lowFallback: false
+            }
+            Rectangle {
+                anchors.fill: parent
+                radius: root.dp(28)
+                color: root.darkMode ? Qt.rgba(0.04, 0.06, 0.11, 0.70) : Qt.rgba(1, 1, 1, 0.74)
+                border.width: 1
+                border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(1, 1, 1, 0.6)
+            }
+        }
+        header: Item {
+            implicitHeight: root.dp(64)
+            GenDialogHeader {
+                anchors.fill: parent
+                anchors.margins: root.dp(16)
+                anchors.bottomMargin: 0
+                title: resourcesPicker.title
+                onCloseRequested: resourcesPicker.close()
+            }
+        }
+        footer: null
 
-        padding: 12
+        padding: root.dp(16)
+        topPadding: root.dp(6)
 
         width:  Math.min(460, parent ? parent.width * 0.94 : 460)
-        height: Math.min(640, parent ? parent.height * 0.90 : 640)
+        height: Math.min(root.dp(560), parent ? parent.height * 0.86 : root.dp(560))
         x: parent ? Math.max(8, Math.round((parent.width  - width)  / 2)) : 0
         y: parent ? Math.max(8, Math.round((parent.height - height) / 2)) : 0
 
@@ -10040,6 +10164,9 @@ Item {
         property string libraryMessage: ""
         property string requestDocId: ""
         property string requestScope: ""
+        property string previewNode: ""
+        property string previewPath: ""
+        property bool previewShown: false
 
         function loadLibrary(parentId) {
             libraryParentId = parentId
@@ -10057,8 +10184,9 @@ Item {
                         || parentId !== resourcesPicker.libraryParentId) return
                 resourcesPicker.librarySpaceId = spaceId
                 resourcesPicker.libraryRows = items || []
+                console.info("INGE_LOGO_LIBRARY rows=" + (items ? items.length : 0) + " error=" + (error ? "yes" : "no"))
                 resourcesPicker.libraryMessage = error.length ? error
-                    : (items.length ? "10_RECURSOS · confirma para descargar y publicar la imagen elegida."
+                    : (items.length ? ""
                                     : "Esta carpeta no contiene imágenes disponibles.")
             }
         }
@@ -10082,12 +10210,14 @@ Item {
         }
 
         contentItem: ColumnLayout {
+            id: pickerCol
             spacing: 10
 
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: root.cMuted
+                visible: text.length > 0
                 text: resourcesPicker.libraryMode ? resourcesPicker.libraryMessage
                       : (docsCtl.resourcesPath && docsCtl.resourcesPath.length)
                       ? ("Selecciona un logo dentro de:\n" + root._prettyFromUserRoot(docsCtl.resourcesPath))
@@ -10096,123 +10226,173 @@ Item {
 
             RowLayout {
                 Layout.fillWidth: true
-                GenDialogButton {
-                    text: "Dispositivo"
-                    Accessible.name: "Elegir una imagen de los archivos del dispositivo"
-                    Layout.fillWidth: true
-                    onClicked: {
-                        var target = resourcesPicker.pickTarget
-                        resourcesPicker.close()
-                        root._beginLogoRequest(target, true)
-                    }
-                }
-                GenDialogButton {
-                    text: resourcesPicker.libraryMode ? "Recursos locales" : "10_RECURSOS"
-                    onClicked: {
-                        resourcesPicker.libraryMode = !resourcesPicker.libraryMode
-                        resourcesPicker.selectedFileName = ""
-                        resourcesPicker.selectedUrl = ""
-                        resourcesPicker.selectedCloudEntry = null
-                        if (resourcesPicker.libraryMode) resourcesPicker.loadLibrary("")
-                    }
-                }
-            }
-            GenDialogButton {
-                visible: resourcesPicker.libraryMode && resourcesPicker.libraryParents.length > 0
-                text: "Carpeta anterior"
-                onClicked: {
-                    var parents = resourcesPicker.libraryParents.slice()
-                    var parentId = parents.pop()
-                    resourcesPicker.libraryParents = parents
-                    resourcesPicker.loadLibrary(parentId)
-                }
-            }
-
-            ListView {
-                id: resList
-                Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(root.dp(180), resourcesPicker.height * 0.28)
-                clip: true
-                model: resourcesPicker.libraryMode ? resourcesPicker.libraryRows : resModel
-                currentIndex: -1
-
-                delegate: Item {
-                    readonly property var cloudItem: resourcesPicker.libraryMode ? modelData : null
-                    width: resList.width
-                    height: 44
-
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: 10
-                        color: (index === resList.currentIndex)
-                               ? (root.flow ? root.flow.theme.selected : root.cSurfaceAlt)
-                               : "transparent"
-                    }
-
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.left: parent.left
-                        anchors.leftMargin: 10
-                        anchors.right: parent.right
-                        anchors.rightMargin: 10
-                        text: parent.cloudItem ? (parent.cloudItem.node_type === "FOLDER" ? "› " : "") + parent.cloudItem.name : fileName
-                        elide: Text.ElideRight
-                        color: root.cText
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: {
-                            if (resourcesPicker.libraryMode) {
-                                var item = parent.cloudItem
-                                if (item.node_type === "FOLDER") {
-                                    resourcesPicker.libraryParents = resourcesPicker.libraryParents.concat([resourcesPicker.libraryParentId])
-                                    resourcesPicker.loadLibrary(item.id)
-                                    return
-                                }
-                                resList.currentIndex = index
-                                resourcesPicker.selectedCloudEntry = item
-                                resourcesPicker.selectedFileName = item.name
-                                resourcesPicker.selectedUrl = ""
-                                return
+                spacing: root.dp(8)
+                Repeater {
+                    model: [ { label: "Dispositivo", cloud: false }, { label: "Archivos InGe+", cloud: true } ]
+                    delegate: Rectangle {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: root.dp(44)
+                        radius: height / 2
+                        readonly property bool on: modelData.cloud
+                        color: on ? (root.darkMode ? "#FFFFFF" : "#0B0B0B") : (root.darkMode ? Qt.rgba(1, 1, 1, 0.08) : "#F4F4F4")
+                        Text {
+                            anchors.centerIn: parent
+                            text: modelData.label
+                            color: parent.on ? (root.darkMode ? "#0B0B0B" : "#FFFFFF") : root.cText
+                            font.family: pickerFig.status === FontLoader.Ready ? pickerFig.name : ""
+                            font.weight: Font.Medium
+                            font.pixelSize: root.sp(14)
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            enabled: !parent.on
+                            onClicked: {
+                                var target = resourcesPicker.pickTarget
+                                resourcesPicker.close()
+                                root._beginLogoRequest(target, true)
                             }
-                            resList.currentIndex = index
-                            resourcesPicker.selectedFileName = fileName
-                            resourcesPicker.selectedUrl = fileUrl   // ✅ role correcto
                         }
                     }
                 }
             }
 
+            // Volver a la carpeta anterior (la biblioteca empieza en 10_RECURSOS).
             Rectangle {
+                visible: resourcesPicker.libraryParents.length > 0
+                Layout.preferredHeight: root.dp(34)
+                Layout.preferredWidth: backText.implicitWidth + root.dp(28)
+                radius: height / 2
+                color: root.darkMode ? Qt.rgba(1, 1, 1, 0.08) : "#F4F4F4"
+                Text {
+                    id: backText
+                    anchors.centerIn: parent
+                    text: "‹  Carpeta anterior"
+                    color: root.cText
+                    font.pixelSize: root.sp(13)
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        var parents = resourcesPicker.libraryParents.slice()
+                        var parentId = parents.pop()
+                        resourcesPicker.libraryParents = parents
+                        resourcesPicker.loadLibrary(parentId)
+                    }
+                }
+            }
+
+            GridView {
+                id: resGrid
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                radius: 12
-                color: "transparent"
-                CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
-
-                ColumnLayout {
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                cellWidth: Math.floor(width / 3)
+                cellHeight: cellWidth + root.dp(30)
+                model: resourcesPicker.libraryRows
+                delegate: Item {
+                    required property var modelData
+                    readonly property bool isFolder: modelData.node_type === "FOLDER"
+                    width: resGrid.cellWidth
+                    height: resGrid.cellHeight
+                    Rectangle {
+                        id: tileBox
+                        anchors.top: parent.top
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: parent.width - root.dp(12)
+                        height: width
+                        radius: width * 0.30
+                        color: tileTap.pressed ? (root.darkMode ? Qt.rgba(1, 1, 1, 0.16) : "#EBEBEB")
+                                               : (root.darkMode ? Qt.rgba(1, 1, 1, 0.08) : "#F4F4F4")
+                        Text {
+                            anchors.centerIn: parent
+                            text: String.fromCharCode(isFolder ? 57559 : 57590)
+                            font.family: genLogoLucide2.status === FontLoader.Ready ? genLogoLucide2.name : ""
+                            font.pixelSize: Math.round(parent.width * 0.38)
+                            color: root.cText
+                        }
+                    }
+                    Text {
+                        anchors.top: tileBox.bottom
+                        anchors.topMargin: root.dp(4)
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.leftMargin: root.dp(6)
+                        anchors.rightMargin: root.dp(6)
+                        horizontalAlignment: Text.AlignHCenter
+                        text: modelData.name
+                        elide: Text.ElideMiddle
+                        color: root.cText
+                        font.pixelSize: root.sp(11.5)
+                    }
+                    MouseArea {
+                        id: tileTap
+                        anchors.fill: parent
+                        // 3D Touch: mantener pulsado una imagen muestra su vista previa; al soltar se oculta.
+                        onPressAndHold: {
+                            if (isFolder) return
+                            resourcesPicker.previewNode = String(modelData.id || "")
+                            resourcesPicker.previewPath = ""
+                            resourcesPicker.previewShown = true
+                            CalicataCloud.previewLibraryLogo(root.doc, resourcesPicker.librarySpaceId, resourcesPicker.previewNode,
+                                                             String(docsCtl.resourcesPath || ""))
+                        }
+                        onReleased: resourcesPicker.previewShown = false
+                        onCanceled: resourcesPicker.previewShown = false
+                        onClicked: {
+                            if (isFolder) {
+                                resourcesPicker.libraryParents = resourcesPicker.libraryParents.concat([resourcesPicker.libraryParentId])
+                                resourcesPicker.loadLibrary(modelData.id)
+                                return
+                            }
+                            // Tocar una imagen la elige y aplica al instante (sin vista previa ni botones).
+                            resourcesPicker.selectedCloudEntry = modelData
+                            resourcesPicker.selectedFileName = modelData.name
+                            resourcesPicker.selectedUrl = ""
+                            resourcesPicker.accept()
+                        }
+                    }
+                }
+            }
+            FontLoader { id: genLogoLucide2; source: "qrc:/InGe/Mobile/fonts/lucide/Lucide-w300.ttf" }
+            FontLoader { id: pickerFig; source: "qrc:/InGe/Mobile/fonts/Figtree-Medium.ttf" }
+            Rectangle {                                   // vista previa 3D Touch
+                id: previewCard
+                parent: Overlay.overlay
+                anchors.centerIn: parent
+                width: Math.min((Overlay.overlay ? Overlay.overlay.width : root.width) * 0.86, root.dp(420))
+                height: width * 0.78
+                radius: root.dp(26)
+                z: 2000
+                visible: opacity > 0.01
+                opacity: resourcesPicker.previewShown ? 1 : 0
+                scale: resourcesPicker.previewShown ? 1 : 0.86
+                Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutBack } }
+                color: root.darkMode ? Qt.rgba(0.04, 0.06, 0.11, 0.94) : Qt.rgba(1, 1, 1, 0.96)
+                border.width: 1
+                border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.16) : Qt.rgba(0, 0, 0, 0.08)
+                Image {
                     anchors.fill: parent
-                    anchors.margins: 10
-                    spacing: 10
-
-                    Label {
-                        Layout.fillWidth: true
-                        text: resourcesPicker.selectedFileName.length
-                              ? resourcesPicker.selectedFileName
-                              : "Vista previa"
-                        elide: Text.ElideRight
-                        color: root.cMuted
-                    }
-
-                    Image {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        fillMode: Image.PreserveAspectFit
-                        asynchronous: true
-                        source: resourcesPicker.selectedUrl
-                        sourceSize: Qt.size(512, 512)
-                    }
+                    anchors.margins: root.dp(14)
+                    fillMode: Image.PreserveAspectFit
+                    asynchronous: true
+                    source: resourcesPicker.previewPath.length ? "file:///" + resourcesPicker.previewPath : ""
+                    sourceSize: Qt.size(768, 768)
+                }
+                Text {
+                    anchors.centerIn: parent
+                    visible: resourcesPicker.previewShown && resourcesPicker.previewPath.length === 0
+                    text: "Cargando…"
+                    color: root.cMuted
+                    font.pixelSize: root.sp(13)
+                }
+            }
+            Connections {
+                target: typeof CalicataCloud !== "undefined" ? CalicataCloud : null
+                function onLibraryLogoPreviewReady(nodeId, localPath, error) {
+                    if (nodeId === resourcesPicker.previewNode) resourcesPicker.previewPath = localPath
                 }
             }
         }
@@ -10227,7 +10407,6 @@ Item {
             requestScope = root.logoCloudScope
             libraryMode = true
             libraryParents = []
-            resList.currentIndex = -1
 
             // ✅ refresca folder si resourcesPath recién se calculó
             resModel.folder = _folderUrlForResources()
@@ -10277,73 +10456,43 @@ Item {
         implicitHeight: genLogoLayout.implicitHeight + root.dp(24)
         radius: root.dp(14)
         color: "transparent"
-        CalicataSurface { dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"; anchors.fill: parent; radius: parent.radius }
 
         ColumnLayout {
             id: genLogoLayout
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: root.dp(12)
-            spacing: root.dp(10)
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: root.dp(8)
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: root.dp(1)
-                    Text {
-                        Layout.fillWidth: true
-                        text: genLogoSlot.title
-                        color: root.cText
-                        font.bold: true
-                        font.pixelSize: root.fsField
-                        elide: Text.ElideRight
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        text: genLogoSlot.subtitle
-                        color: root.cMuted
-                        font.pixelSize: root.fsLabel
-                        elide: Text.ElideRight
-                    }
-                }
-                Rectangle {
-                    Layout.preferredHeight: root.dp(24)
-                    Layout.preferredWidth: genLogoState.implicitWidth + root.dp(16)
-                    radius: height / 2
-                    color: genLogoSlot.hasLogo && !genLogoSlot.readFailed ? root.cGenGreenSoft : root.cGenOrangeSoft
-                    Text {
-                        id: genLogoState
-                        anchors.centerIn: parent
-                        text: genLogoSlot.logoState
-                        color: genLogoSlot.hasLogo && !genLogoSlot.readFailed ? root.cGenGreen : root.cGenOrange
-                        font.pixelSize: root.sp(11)
-                        font.weight: Font.DemiBold
-                    }
-                }
-            }
+            anchors.margins: 0
+            spacing: root.dp(8)
 
             Button {
                 id: genLogoPreview
                 Layout.fillWidth: true
-                Layout.preferredHeight: root.dp(84)
+                Layout.preferredHeight: root.dp(136)
                 padding: 0
                 enabled: !root._logoRequestPending
-                Accessible.name: "Adjuntar " + genLogoSlot.title
-                onClicked: root._beginLogoRequest(genLogoSlot.target)
-                background: CalicataSurface {
-                    dark: root.darkMode; accent: root.cGenBlue; danger: root.flow ? root.flow.theme.error : "#D9483B"
-                    radius: root.dp(12)
-                    pressed: genLogoPreview.down
-                    focused: genLogoPreview.down
-                    enabledLook: genLogoPreview.enabled
+                Accessible.name: "Editar " + genLogoSlot.title
+                onClicked: genLogoActions.open()
+                background: Rectangle {      // sin tarjeta: el logo flota sobre el vidrio; solo se ilumina al pulsar
+                    radius: root.dp(24)
+                    color: genLogoPreview.down ? (root.darkMode ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(0, 0, 0, 0.06)) : "transparent"
                 }
                 contentItem: Item {
+                    Text {                                  // marca de agua: nombre del logo; tocar para editar
+                        z: 2
+                        anchors.left: parent.left; anchors.top: parent.top
+                        anchors.leftMargin: root.dp(18); anchors.topMargin: root.dp(12)
+                        text: genLogoSlot.title
+                        font.family: genLogoFont.status === FontLoader.Ready ? genLogoFont.name : ""
+                        font.weight: Font.Medium
+                        font.pixelSize: root.sp(15)
+                        color: root.cText
+                        opacity: 0.40
+                    }
                     Image {
                         anchors.fill: parent
                         anchors.margins: root.dp(8)
+                        anchors.topMargin: root.dp(32)
                         visible: genLogoSlot.hasLogo
                         source: genLogoSlot.logoSource
                         // Logo: miniatura acotada (no se decodifica a resolución completa).
@@ -10378,8 +10527,9 @@ Item {
 
             Text {
                 Layout.fillWidth: true
-                text: genLogoSlot.hasLogo ? genLogoSlot.resourceName + " · " + genLogoSlot.syncState
-                                          : genLogoSlot.syncState
+                // Solo se muestra un fallo real; el estado normal y el nombre del recurso se ocultan (DIOS).
+                visible: genLogoSlot.syncState === "Fallo de sincronización"
+                text: genLogoSlot.syncState
                 color: genLogoSlot.syncState === "Fallo de sincronización" ? (root.flow ? root.flow.theme.error : "#B4232E")
                      : genLogoSlot.syncState.indexOf("Sincronizado") === 0 ? root.cGenGreen
                      : genLogoSlot.syncState === "Sin logo" ? root.cMuted : root.cGenOrange
@@ -10387,47 +10537,103 @@ Item {
                 wrapMode: Text.WordWrap
             }
 
-            // Acciones (contrato Web): Elegir · Anteriores · Restablecer · Vaciar.
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: root.dp(8)
+        }
+        FontLoader { id: genLogoFont; source: "qrc:/InGe/Mobile/fonts/Figtree-Medium.ttf" }
+        FontLoader { id: genLogoLucide; source: "qrc:/InGe/Mobile/fonts/lucide/Lucide-w300.ttf" }
+        // Versiones anteriores (nube y locales; nunca se borran al cambiar) en un popup propio.
+        GenPopup {
+            id: genLogoVersions
+            preferredWidth: root.dp(380)
+            preferredHeight: root.dp(96) + Math.min(5, Math.max(1, genLogoSlot.versionRows.length)) * root.dp(62)
+            background: Item {
+                MobileGlass.DockGlassPanel {
+                    glassUi: genGlassUi
+                    radius: root.dp(28)
+                    u: root.uiScale
+                    reducedMotion: root.flowReduceMotion
+                    lowFallback: false
+                }
+                Rectangle {
+                    anchors.fill: parent
+                    radius: root.dp(28)
+                    color: root.darkMode ? Qt.rgba(0.04, 0.06, 0.11, 0.70) : Qt.rgba(1, 1, 1, 0.74)
+                    border.width: 1
+                    border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(1, 1, 1, 0.6)
+                }
+            }
+            contentItem: ColumnLayout {
+                spacing: root.dp(10)
+                GenDialogHeader {
+                    title: "Versiones"
+                    onCloseRequested: genLogoVersions.close()
+                }
+                ScrollView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    contentWidth: availableWidth
+                    LogoHistoryStrip {
+                        width: parent.width
+                        target: genLogoSlot.target
+                        expanded: true
+                        showToggle: false
+                    }
+                }
+            }
+        }
+
+        // Acciones (contrato Web) tras tocar la vista previa: Elegir · Anteriores · Restablecer · Vaciar.
+        GenPopup {
+            id: genLogoActions
+            preferredWidth: root.dp(320)
+            preferredHeight: root.dp(40) + 4 * root.dp(56)
+            background: Item {
+                MobileGlass.DockGlassPanel {
+                    glassUi: genGlassUi
+                    radius: root.dp(28)
+                    u: root.uiScale
+                    reducedMotion: root.flowReduceMotion
+                    lowFallback: false
+                }
+                Rectangle {
+                    anchors.fill: parent
+                    radius: root.dp(28)
+                    color: root.darkMode ? Qt.rgba(0.04, 0.06, 0.11, 0.70) : Qt.rgba(1, 1, 1, 0.74)
+                    border.width: 1
+                    border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(1, 1, 1, 0.6)
+                }
+            }
+            contentItem: ColumnLayout {
+                spacing: root.dp(2)
                 Repeater {
                     model: [
-                        { label: "Elegir", full: "Elegir imagen", icon: "calgen.attach", action: "attach" },
-                        { label: "Anteriores", full: "Ver versiones anteriores", icon: "calgen.history", action: "versions" },
-                        { label: "Restablecer", full: "Elegir recurso institucional de la biblioteca compartida", icon: "calgen.default", action: "default" },
-                        { label: "Vaciar", full: "Dejar vacío", icon: "calgen.clear", action: "clear" }
+                        { label: "Elegir imagen", icon: "calgen.attach", action: "attach" },
+                        { label: "Versiones anteriores", icon: "calgen.history", action: "versions" },
+                        { label: "Restablecer (biblioteca)", icon: "calgen.default", action: "default" },
+                        { label: "Vaciar", icon: "calgen.clear", action: "clear" }
                     ]
-                    delegate: GenDialogButton {
+                    delegate: GenChoiceRow {
                         required property var modelData
                         Layout.fillWidth: true
-                        Layout.preferredWidth: 1
-                        stacked: true
-                        soft: modelData.action !== "clear"
-                        text: modelData.label
+                        compact: true
+                        title: modelData.label
                         iconName: modelData.icon
-                        Accessible.name: modelData.full
                         enabled: !root._logoRequestPending
                                  && (modelData.action !== "clear" || genLogoSlot.hasLogo)
                                  && (modelData.action !== "versions" || genLogoSlot.versionRows.length > 0)
-                        onClicked: {
+                        opacity: enabled ? 1 : 0.45
+                        onPicked: {
+                            genLogoActions.close()
                             if (modelData.action === "attach") root._beginLogoRequest(genLogoSlot.target)
-                            else if (modelData.action === "versions") genLogoSlot.showVersions = !genLogoSlot.showVersions
+                            else if (modelData.action === "versions") genLogoVersions.open()
                             else if (modelData.action === "default") root._useDefaultLogo(genLogoSlot.target)
                             else root._deleteLogo(genLogoSlot.target)
                         }
                     }
                 }
             }
-
-            // Versiones anteriores (nube y locales): nunca se borran al cambiar.
-            LogoHistoryStrip {
-                Layout.fillWidth: true
-                target: genLogoSlot.target
-                visible: genLogoSlot.showVersions && rows.length > 0
-                expanded: true
-            }
         }
+
     }
 
     function _closeIdentityPopup() {
@@ -10437,20 +10643,164 @@ Item {
     }
 
     GenPopup {
+        id: identityNamePopup
+        background: Item {
+            MobileGlass.DockGlassPanel {
+                glassUi: genGlassUi
+                radius: root.dp(28)
+                u: root.uiScale
+                reducedMotion: root.flowReduceMotion
+                lowFallback: false
+            }
+            // Velo de legibilidad: el vidrio conserva el brillo, pero el rellenado se lee siempre.
+            Rectangle {
+                anchors.fill: parent
+                radius: root.dp(28)
+                color: root.darkMode ? Qt.rgba(0.04, 0.06, 0.11, 0.70) : Qt.rgba(1, 1, 1, 0.74)
+                border.width: 1
+                border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(1, 1, 1, 0.6)
+            }
+        }
+        preferredHeight: root.dp(640)
+        contentItem: ColumnLayout {
+            spacing: root.dp(12)
+            GenDialogHeader {
+                title: "Datos de la ficha"
+                onCloseRequested: identityNamePopup.close()
+            }
+            ScrollView {
+                id: nameScroll
+                // Sin rebote ni desplazamiento automático: el contenido arranca arriba y no se mueve solo.
+                Component.onCompleted: { if (contentItem) contentItem.boundsBehavior = Flickable.StopAtBounds }
+                onContentHeightChanged: if (contentItem && !contentItem.moving && !contentItem.dragging) contentItem.contentY = Math.min(contentItem.contentY, Math.max(0, contentItem.contentHeight - contentItem.height))
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                contentWidth: availableWidth
+                ColumnLayout {
+                    width: nameScroll.availableWidth
+                    spacing: root.dp(10)
+                    // Mismos campos y reglas que «Datos generales» de la web (CalicataDetailPanel).
+                    GenHeaderField {
+                        Layout.fillWidth: true
+                        label: "Código completo"
+                        iconName: "calgen.code"
+                        boundText: txtCodigo.text
+                        inputPlaceholder: "Sin registrar"
+                        commitHandler: function(t) {
+                            root._setCanonicalCalicataCode(t)
+                            var pkFromCode = Rules.progresivaFromCode(t)
+                            if (pkFromCode.length && pkFromCode !== txtPk.text.trim())
+                                root._setProgresiva(pkFromCode, false)
+                        }
+                    }
+                    GenHeaderField {
+                        Layout.fillWidth: true
+                        label: "Título de la ficha / testificación"
+                        headerKey: "description"
+                        hint: ""
+                        inputPlaceholder: "Título de la ficha"
+                    }
+                    GenFieldShell {
+                        Layout.fillWidth: true
+                        label: "Lado de la vía"
+                        iconName: "map.location"
+                        tappable: true
+                        valueText: root.roadSideValue
+                        placeholder: "Seleccionar"
+                        onActivated: root.prfPick("Lado de la vía", Rules.ROAD_SIDE_OPTIONS, root.roadSideValue,
+                                                  "map.location", function(v) { root.roadSideValue = v; root._markDirty() })
+                    }
+                    GenHeaderField {
+                        Layout.fillWidth: true
+                        label: "Progresiva"
+                        iconName: "calgen.code"
+                        boundText: txtPk.text
+                        hint: ""
+                        inputPlaceholder: "Ej. 12+340"
+                        commitHandler: function(t) { root._setProgresiva(t, true) }
+                    }
+                    GenHeaderField {
+                        Layout.fillWidth: true
+                        label: "Supervisor"
+                        iconName: "calgen.supervisor"
+                        accent: root.cGenViolet
+                        accentSoft: root.cGenVioletSoft
+                        boundText: txtSupervisor.text
+                        inputMaximumLength: Rules.SUPERVISOR_MAX_LENGTH
+                        inputPlaceholder: "Sin registrar"
+                        commitHandler: function(t) { txtSupervisor.text = t }
+                    }
+                    GenFieldShell {
+                        Layout.fillWidth: true
+                        label: "Fecha de inicio"
+                        iconName: "calgen.date"
+                        accent: root.cGenOrange
+                        accentSoft: root.cGenOrangeSoft
+                        tappable: true
+                        valueText: btnFechaInicio.text === "Seleccionar fecha" ? "" : btnFechaInicio.text
+                        placeholder: "Seleccionar fecha"
+                        onActivated: root._openDatePicker(btnFechaInicio, "FECHA INICIO")
+                    }
+                    GenFieldShell {
+                        Layout.fillWidth: true
+                        label: "Fecha de fin"
+                        iconName: "calgen.date"
+                        accent: root.cGenOrange
+                        accentSoft: root.cGenOrangeSoft
+                        tappable: true
+                        valueText: btnFechaFin.text === "Seleccionar fecha" ? "" : btnFechaFin.text
+                        placeholder: "Seleccionar fecha"
+                        onActivated: root._openDatePicker(btnFechaFin, "FECHA FIN")
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        visible: text.length > 0
+                        text: Rules.validateFieldDates(root.doc ? String(root.doc.header.fecha_inicio || "") : "",
+                                                       root.doc ? String(root.doc.header.fecha_fin || "") : "")
+                        color: root.flow ? root.flow.theme.error : "#B4232E"
+                        font.pixelSize: root.fsLabel
+                        wrapMode: Text.WordWrap
+                    }
+                }
+            }
+        }
+    }
+
+    GenPopup {
         id: identityPopup
-        preferredHeight: root.dp(680)
+        background: Item {
+            MobileGlass.DockGlassPanel {
+                glassUi: genGlassUi
+                radius: root.dp(28)
+                u: root.uiScale
+                reducedMotion: root.flowReduceMotion
+                lowFallback: false
+            }
+            // Velo de legibilidad: el vidrio conserva el brillo, pero el rellenado se lee siempre.
+            Rectangle {
+                anchors.fill: parent
+                radius: root.dp(28)
+                color: root.darkMode ? Qt.rgba(0.04, 0.06, 0.11, 0.70) : Qt.rgba(1, 1, 1, 0.74)
+                border.width: 1
+                border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(1, 1, 1, 0.6)
+            }
+        }
+        preferredHeight: root.dp(72) + 2 * root.dp(158) + root.dp(24)
+        onAboutToShow: { if (identityScroll.contentItem) identityScroll.contentItem.contentY = 0 }
         contentItem: ColumnLayout {
             spacing: root.dp(12)
 
             GenDialogHeader {
-                title: "Identidad del reporte"
-                subtitle: "Logos utilizados en la exportación"
-                badgeText: "3D Touch"
+                title: "Logos"
                 onCloseRequested: root._closeIdentityPopup()
             }
 
             ScrollView {
                 id: identityScroll
+                // Sin rebote ni desplazamiento automático: el contenido arranca arriba y no se mueve solo.
+                Component.onCompleted: { if (contentItem) contentItem.boundsBehavior = Flickable.StopAtBounds }
+                onContentHeightChanged: if (contentItem && !contentItem.moving && !contentItem.dragging) contentItem.contentY = Math.min(contentItem.contentY, Math.max(0, contentItem.contentHeight - contentItem.height))
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
@@ -10463,7 +10813,8 @@ Item {
 
                     Text {
                         Layout.fillWidth: true
-                        visible: root.logoFeedbackText.length > 0
+                        // Solo avisos de error; los mensajes informativos («Logo elegido desde Recursos») se ocultan.
+                        visible: /no se pudo|error|fall|inv[aá]lid|sin conexi/i.test(root.logoFeedbackText)
                         text: root.logoFeedbackText
                         color: root.cMuted
                         font.pixelSize: root.fsLabel
@@ -10478,15 +10829,13 @@ Item {
 
                         GenLogoSlot {
                             target: "mtc"
-                            title: "Logo MTC / entidad"
-                            subtitle: "ENTITY · Entidad / cliente"
+                            title: "Entidad"
                             hasLogo: root.hasLogoMtc
                             logoSource: root.logoMtcSource
                         }
                         GenLogoSlot {
                             target: "pro"
-                            title: "Logo del proyecto"
-                            subtitle: "PROJECT · Proyecto / empresa"
+                            title: "Proyecto"
                             hasLogo: root.hasLogoProyecto
                             logoSource: root.logoProyectoSource
                         }
@@ -10494,10 +10843,6 @@ Item {
                 }
             }
 
-            GenDialogButton {
-                text: "Cerrar"
-                onClicked: root._closeIdentityPopup()
-            }
         }
     }
 
@@ -10516,9 +10861,10 @@ Item {
         property real originDY: 0
         property real offsetX: 0
         property real offsetY: 0
-        x: offsetX; y: offsetY
-        width: parent ? parent.width : 400
-        height: parent ? parent.height : 800
+        x: parent ? (parent.width - width) / 2 + offsetX : offsetX
+        y: parent ? (parent.height - height) / 2 + offsetY : offsetY
+        width: parent ? Math.min(parent.width - root.dp(16), root.dp(root.isPhone ? 560 : 760)) : 400
+        height: parent ? parent.height - root.dp(root.isPhone ? 16 : 36) : 800
         modal: true
         focus: true
         padding: 0
@@ -10526,7 +10872,14 @@ Item {
         readonly property var info: root.photoSlotInfo(root.activePhotoCategory)
         onOpened: { viewerImage.scale = 1; viewerImage.x = 0; viewerImage.y = 0 }
         onClosed: { offsetX = 0; offsetY = 0 }
-        background: Rectangle { color: "#F20A0D12" }
+        background: Item {
+            MobileGlass.DockGlassPanel {
+                glassUi: genGlassUi
+                radius: root.dp(24)
+                u: root.uiScale
+                reducedMotion: root.flowReduceMotion
+            }
+        }
         enter: Transition {
             ParallelAnimation {
                 NumberAnimation { property: "opacity"; from: 0; to: 1; duration: root.flow ? root.flow.duration(220) : 220; easing.type: Easing.OutCubic }
@@ -10591,7 +10944,7 @@ Item {
                         anchors.centerIn: parent
                         width: root.dp(22); height: width
                         name: "calgen.chevronLeft"; flow: root.flow
-                        tintColor: "#FFFFFF"; activeTintColor: "#FFFFFF"; inactiveOpacity: 1
+                        tintColor: root.cText; activeTintColor: root.cText; inactiveOpacity: 1
                     }
                     TapHandler { id: viewerBackTap; onTapped: photoViewer.close() }
                     Accessible.role: Accessible.Button
@@ -10600,8 +10953,8 @@ Item {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 0
-                    Text { text: root.photoSlotTitles[root.activePhotoCategory - 1] || ""; color: "white"; font.bold: true; font.pixelSize: root.sp(16) }
-                    Text { text: photoViewer.info.label + (photoViewer.info.date.length ? " · " + photoViewer.info.date : ""); color: "#B8C0CC"; font.pixelSize: root.sp(11) }
+                    Text { text: root.photoSlotTitles[root.activePhotoCategory - 1] || ""; color: root.cText; font.bold: true; font.pixelSize: root.sp(16) }
+                    Text { text: photoViewer.info.label + (photoViewer.info.date.length ? " · " + photoViewer.info.date : ""); color: root.cMuted; font.pixelSize: root.sp(11) }
                 }
             }
             // Acciones del visor sobre la misma barra Liquid Glass de Fotos (variante oscura).
@@ -11020,7 +11373,9 @@ Item {
         flow: root.flow
         anchors.fill: parent
         anchors.topMargin: 0                         // editor sin cabecera
-        anchors.bottomMargin: root.fichaDockClearance          // el contenido llega hasta el Dock
+        // El viewport continúa detrás del Dock contextual: no reserva una
+        // franja opaca entre la ficha y la cápsula flotante.
+        anchors.bottomMargin: 0
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         pressDelay: root.touchPressDelay
@@ -11029,7 +11384,9 @@ Item {
         flickableDirection: Flickable.VerticalFlick
 
         contentWidth: width
-        contentHeight: finalPageCol.implicitHeight + root.dp(24)
+        // Espacio DESPLAZABLE al final, en lugar de recortar el viewport.
+        // Los últimos controles pueden subir por encima del Dock sin taparse.
+        contentHeight: finalPageCol.implicitHeight + root.dp(24) + root.fichaDockClearance
 
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
         ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AlwaysOff }
@@ -11061,6 +11418,22 @@ Item {
 
         GenPopup {
             id: popFechaPicker
+            background: Item {
+                MobileGlass.DockGlassPanel {
+                    glassUi: genGlassUi
+                    radius: root.dp(28)
+                    u: root.uiScale
+                    reducedMotion: root.flowReduceMotion
+                    lowFallback: false
+                }
+                Rectangle {
+                    anchors.fill: parent
+                    radius: root.dp(28)
+                    color: root.darkMode ? Qt.rgba(0.04, 0.06, 0.11, 0.70) : Qt.rgba(1, 1, 1, 0.74)
+                    border.width: 1
+                    border.color: root.darkMode ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(1, 1, 1, 0.6)
+                }
+            }
             property var targetButton: null
             property string titleText: "Fecha"
             property date selectedDate: new Date()
@@ -11232,6 +11605,9 @@ Item {
                         model: typeof CalicataCloud !== "undefined" ? CalicataCloud.presenceMembers : []
                         delegate: Row {
                             required property var modelData
+                            // La presencia VIEWING sigue activa en Realtime, pero no se
+                            // dibuja encima de la ficha. Mostrar solo edición activa.
+                            visible: modelData.mode === "EDITING"
                             spacing: root.dp(4)
                             Rectangle {
                                 width: root.dp(22); height: width; radius: width / 2
@@ -11241,7 +11617,7 @@ Item {
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: (modelData.self ? "Tú" : modelData.name) + " · " + (modelData.mode === "EDITING" ? "editando" : "viendo")
+                                text: (modelData.self ? "Tú" : modelData.name) + " · editando"
                                 color: root.cMuted; font.pixelSize: root.fsLabel
                             }
                         }
@@ -11256,13 +11632,16 @@ Item {
                 sectionNumber: 1
                 glassPanel: false
 
-                // General como lista vertical (ficha QField): los mismos campos y
-                // guardados que tenían los paneles, en línea; selectores con chevron.
-                ColumnLayout {
+                // Teléfono: una columna. Tablet y plegable: dos columnas iguales.
+                GridLayout {
                     id: generalList
+                    visible: false   // DIOS: sección «Datos generales» oculta (los datos se conservan)
                     Layout.fillWidth: true
-                    spacing: root.dp(8)
-                    GenGroupHeader { title: "DATOS GENERALES"; Layout.topMargin: 0 }
+                    columns: root.isPhone ? 1 : 2
+                    uniformCellWidths: true
+                    columnSpacing: root.dp(12)
+                    rowSpacing: root.dp(8)
+                    GenGroupHeader { title: "DATOS GENERALES"; Layout.topMargin: 0; Layout.columnSpan: generalList.columns }
                     GenHeaderField {
                         objectName: "fichaField_codigo"
                         mandatory: true
@@ -11367,6 +11746,7 @@ Item {
                     }
                     Text {
                         Layout.fillWidth: true
+                        Layout.columnSpan: generalList.columns
                         visible: text.length > 0
                         text: Rules.validateFieldDates(root.doc ? String(root.doc.header.fecha_inicio || "") : "",
                                                        root.doc ? String(root.doc.header.fecha_fin || "") : "")
@@ -11493,6 +11873,11 @@ Item {
                     title: root._headerCode(root.doc ? root.doc.header : {})
                     header: root.doc ? root.doc.header : ({})
                     point: root.doc ? root._locationPoint() : ({ lat: NaN, lon: NaN })
+                    idStatus: root.identityStatus
+                    onOpenName: identityNamePopup.open()
+                    onOpenFolder: root._openProjectPicker()
+                    onOpenMachine: root._openMachinePicker()
+                    onOpenLogos: identityPopup.open()
                     onOpenMap: function(mode) {
                         if (root.openLocationEditor(mode))
                             console.info("INGE_CALICATA_MAP_EDITOR_OPEN mode="+mode)
@@ -11788,6 +12173,9 @@ Item {
                     Layout.fillWidth: true
                     readonly property int mode: width >= root.dp(1180) ? 3 : width >= root.dp(640) ? 2 : 1
                     readonly property real sideWidth: mode === 3 ? root.dp(300) : Math.min(root.dp(290), width * 0.38)
+                    // En pantallas anchas el gráfico ocupa el espacio disponible sobre el Dock.
+                    readonly property real graphHeight: mode === 1 ? root.dp(360)
+                        : Math.max(root.dp(460), Math.min(root.dp(760), vFlick.height - root.fichaDockClearance - root.dp(155)))
                     columns: mode === 3 ? 3 : mode === 2 ? 2 : 1
                     columnSpacing: root.dp(16)
                     rowSpacing: root.dp(16)
@@ -11937,7 +12325,7 @@ Item {
                                 visible: cortesModel.count > 0
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: root.dp(150)
-                                Layout.preferredHeight: root.dp(prfLayout.mode === 1 ? 360 : 460)
+                                Layout.preferredHeight: prfLayout.graphHeight
                                 model: cortesModel
                                 bandInfo: root.stratumBandInfo
                                 selectedIndex: root.selectedStratum
@@ -11956,7 +12344,7 @@ Item {
                                 kawaiiLastInputMs: root.kawaiiLastInteractionAt
                                 kawaiiCrashAllowed: root.visible && !!root.flow
                                     && root.flow.appSkin === "ingenieros"
-                                    && root.flow.extremeMotion && root.flow.motionAllowed
+                                    && root.flow.motionAllowed
                                     && !root.flow.powerSaveMode && !root.flow.bareUi
                                     && !root.flowReduceMotion && !root._loading
                                     && !root.labDetailOpen && !root.ubicacionMapOpen
@@ -11967,7 +12355,7 @@ Item {
                             }
                             ListView {
                                 Layout.preferredWidth: root.dp(112)
-                                Layout.preferredHeight: root.dp(prfLayout.mode === 1 ? 360 : 460)
+                                Layout.preferredHeight: prfLayout.graphHeight
                                 clip: true
                                 spacing: root.dp(6)
                                 model: cortesModel

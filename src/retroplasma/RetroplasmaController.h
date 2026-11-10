@@ -89,6 +89,7 @@ public:
     void setViewport(double width,double height,double pixelRatio=1);
     void framePresented();
     inge::rp::Mat4 viewProjection()const{return m_camera.viewProjection(m_width/m_height);}
+    bool planetaryView()const{return m_scene&&m_scene->planetary;}
     inge::rp::Vec3 viewLight()const{return m_scene&&m_scene->planetary?inge::rp::normalized(m_camera.eye()):inge::rp::Vec3{.25,1,.4};}
     std::vector<inge::rp::RenderTile> renderTiles()const{auto result=m_renderTiles;if(m_scene&&m_scene->planetary)result.insert(result.end(),m_geoTiles.begin(),m_geoTiles.end());return result;}
     std::shared_ptr<inge::rp::MetricsMailbox> mailbox()const{return m_mailbox;}

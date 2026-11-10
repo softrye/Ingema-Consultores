@@ -7,6 +7,9 @@ import QtMultimedia
 Item {
     id: visitor
     required property bool allowed
+    // Stable across touches/navigation: do not unload/reload the FFmpeg codec
+    // on every touch while deciding if the one-shot AFK visit is eligible.
+    required property bool mediaEnabled
     required property double lastInteractionAt
     // One visit per genuine idle session, NOT a 20s repeating loop.
     // A new visit requires fresh user input followed by 20 seconds idle.
@@ -106,7 +109,7 @@ Item {
 
     MediaPlayer {
         id: movie
-        source: visitor.allowed ? "qrc:/images/kawaii/cinnamoroll-knock-clean-10s.mp4" : ""
+        source: visitor.mediaEnabled ? "qrc:/images/kawaii/cinnamoroll-knock-clean-10s.mp4" : ""
         loops: 1
         playbackRate: 1
         videoOutput: nativeVideo

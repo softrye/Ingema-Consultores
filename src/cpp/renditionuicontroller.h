@@ -42,6 +42,7 @@ public:
 
     // Reglas del dominio expuestas a QML (sin duplicarlas en JavaScript).
     Q_INVOKABLE bool canEdit(const QVariantMap &rendition) const;
+    Q_INVOKABLE bool canArchive(const QVariantMap &rendition) const;
     Q_INVOKABLE QString headerError(const QVariantMap &header) const;
     Q_INVOKABLE QString expenseError(const QVariantMap &rendition, const QVariantMap &expense) const;
     Q_INVOKABLE QString amountError(const QString &amount) const;

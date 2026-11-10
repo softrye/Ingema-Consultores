@@ -78,7 +78,8 @@ tick(900000);
 assert.equal(playCount, 2, 'second idle session also permits one visit only');
 
 // No graphics-tier override, no conversions and user accessibility still gate it.
-assert.match(qml, /source: visitor\.allowed \? "qrc:\/images\/kawaii\/cinnamoroll-knock-clean-10s\.mp4"/);
+assert.match(qml, /source: visitor\.mediaEnabled \? "qrc:\/images\/kawaii\/cinnamoroll-knock-clean-10s\.mp4"/);
+assert.match(qml, /required property bool mediaEnabled/);
 assert.match(qml, /AudioOutput\s*\{/);
 assert.match(qml, /onLastInteractionAtChanged:\s*\{\s*\/\/[^\n]*\n\s*playedThisIdle = false/);
 assert.match(qml, /running: visitor\.allowed && !visitor\.showing && !visitor\.playbackFailed/);

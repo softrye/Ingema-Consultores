@@ -10,6 +10,8 @@ QtObject {
     property int mode: light
     property bool glassEnabled: false
     property var colors
+    property string skin: "none"
+    readonly property bool kawaii: skin === "ingenieros"
     // Paleta corporativa INGEMA (FlowColors). El respaldo local evita leer
     // un objeto indefinido antes de que InGeCoreFlow asigne "colors".
     readonly property FlowColors defaultColors: FlowColors {}
@@ -58,11 +60,11 @@ QtObject {
     // accent = seleccion, foco, enlaces e iconos activos (legible sobre el
     // fondo). En Dark se usa el tinte derivado de INGEMA Blue porque #0654A2
     // sobre Navy/Deep no alcanza contraste de texto.
-    readonly property color accent: isDark ? brand.ingemaBlueTint : brand.ingemaBlue
-    readonly property color accentSecondary: isDark ? brand.ingemaGreenTint : brand.ingemaGreen
+    readonly property color accent: kawaii ? (isDark ? "#FF9ECD" : "#AD2D70") : isDark ? brand.ingemaBlueTint : brand.ingemaBlue
+    readonly property color accentSecondary: kawaii ? (isDark ? "#9EDFFF" : "#267AAB") : isDark ? brand.ingemaGreenTint : brand.ingemaGreen
 
     // Accion primaria rellena: INGEMA Blue en ambos modos, texto blanco (7.5:1).
-    readonly property color actionPrimary: brand.ingemaBlue
+    readonly property color actionPrimary: kawaii ? "#B53676" : brand.ingemaBlue
     readonly property color actionPrimaryText: "#FFFFFF"
     // Nombre que usan Main.qml, FlowButton y NothingButton: sin él reciben
     // undefined ("Unable to assign [undefined] to QColor").

@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import "RStyle.js" as S
 
 // Revisión y correcciones (paridad con RenditionReviewPanel de la Web). El
@@ -10,6 +9,7 @@ RCard {
     id: panel
     property var app
     property string remoteId: ""
+    property string versionId: ""                    // versión local cargada (la que se exporta)
     property bool active: true
     readonly property var ctl: app.ctl
     ui: app.ui
@@ -23,7 +23,11 @@ RCard {
     property string requestId: ""
     property string actionError: ""
     readonly property var life: ({ alive: true })
-    readonly property bool hasActions: context !== null && (context.can_request_edit === true || (context.next_states || []).length > 0
+    // «Registrar una exportación» (Web): sólo si el servidor la concede y conserva el estado.
+    readonly property bool canRecordExport: context !== null && context.can_record_export === true && context.export_preserves_state === true
+    property string exportRequestId: ""
+    property string exportReason: ""
+    readonly property bool hasActions: context !== null && (canRecordExport || context.can_request_edit === true || (context.next_states || []).length > 0
                                        || (context.can_decide_edit === true && (context.requests || []).length > 0))
     readonly property var adminStates: context ? (context.next_states || []) : []
     readonly property bool asAdmin: adminStates.length > 0
@@ -94,6 +98,34 @@ RCard {
                                    expectedRequestRowVersion: Number(request.row_version || 0), approve: approve, reason: reason.trim() },
                  "reviewAction:" + remoteId, function(ok, result, code, message) {
             panel.afterAction(ok, result, code, message, approve ? "Solicitud autorizada." : "Solicitud denegada.")
+        })
+    }
+
+    // Genera el archivo de la versión aprobada y luego registra la exportación
+    // (record_rendition_export_v03). La descarga sola no cambia el estado.
+    function recordExport(format) {
+        actionError = ""
+        var version = String(context.version_id || "")
+        if (!version.length || version !== versionId) {
+            actionError = "La versión aprobada no está disponible para exportar. Sincroniza la rendición."; return
+        }
+        if (!exportRequestId.length) exportRequestId = ctl.newId()   // estable mientras no cambie el motivo
+        var requestId = exportRequestId, reasonText = exportReason.trim(), rowVersion = Number(context.row_version)
+        var life = panel.life
+        app.askExportDestination(format === "PDF" ? "pdf" : "xlsx", function(destination) {
+            panel.app.call("ownerExport", { format: format === "PDF" ? "pdf" : "xlsx", destination: destination }, "export:" + format,
+                           function(ok, result, code, message) {
+                if (!ok) { if (life.alive) panel.actionError = panel.app.errorText(code, message); return }
+                var path = String(result.output || "")
+                if (destination === "phone" && typeof excelExporter !== "undefined" && excelExporter && path.length)
+                    excelExporter.openExportedFile(path, true)
+                panel.app.call("reviewExport", { renditionId: panel.remoteId, versionId: version, expectedRowVersion: rowVersion,
+                                                  requestId: requestId, format: format, reason: reasonText },
+                               "reviewAction:" + panel.remoteId, function(ok2, result2, code2, message2) {
+                    if (ok2 && life.alive) { panel.exportRequestId = ""; panel.exportReason = ""; exportReasonField.text = "" }
+                    panel.afterAction(ok2, result2, code2, message2, "Exportación " + (format === "PDF" ? "PDF" : "Excel") + " registrada.")
+                })
+            })
         })
     }
 
@@ -244,6 +276,45 @@ RCard {
                     RButton { width: (parent.width - parent.spacing) / 2; ui: panel.ui; label: "Denegar"; danger: true
                               enabledButton: panel.reason.trim().length > 0; onActivated: panel.decide(requestCard.modelData, false) }
                 }
+            }
+        }
+    }
+    // ------------------------------------------ Registrar una exportación (Web)
+    Text { visible: panel.canRecordExport; text: "Registrar una exportación"; color: S.text
+           font.family: panel.ui.fontFamily; font.pixelSize: 15 * panel.ui.u; font.weight: Font.Bold }
+    Text {
+        width: parent.width; visible: panel.canRecordExport
+        text: "Generar y registrar la exportación conserva esta versión aprobada. La descarga por sí sola no cambia el estado."
+        color: S.muted; wrapMode: Text.WordWrap
+        font.family: panel.ui.fontFamily; font.pixelSize: 13 * panel.ui.u
+    }
+    RField {
+        id: exportReasonField
+        objectName: "reviewExportReason"
+        width: parent.width
+        ui: panel.ui
+        formStyle: true
+        visible: panel.canRecordExport
+        label: "Motivo de la exportación"
+        placeholder: "Breve motivo (obligatorio)"
+        maxLength: 500
+        onEdited: { panel.exportReason = text; panel.exportRequestId = "" }
+    }
+    Row {
+        id: exportRow
+        width: parent.width; spacing: 8 * panel.ui.u
+        visible: panel.canRecordExport
+        Repeater {
+            model: ["PDF", "EXCEL"]
+            delegate: RButton {
+                required property string modelData
+                objectName: "reviewExport" + modelData
+                width: (exportRow.width - exportRow.spacing) / 2; height: 48 * panel.ui.u; radius: 16 * panel.ui.u
+                ui: panel.ui
+                label: "Exportar " + (modelData === "EXCEL" ? "Excel" : "PDF") + " y registrar"
+                enabledButton: panel.exportReason.trim().length > 0 && !panel.app.busy("reviewAction:" + panel.remoteId)
+                busy: panel.app.busy("export:" + modelData)
+                onActivated: panel.recordExport(modelData)
             }
         }
     }

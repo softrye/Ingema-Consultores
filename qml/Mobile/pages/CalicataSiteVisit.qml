@@ -113,8 +113,8 @@ Item {
     // Un solo reproductor, creado únicamente con el preset y ciclo de vida permitidos.
     Item {
         id: engineer
-        width: Math.min(visit.width * 0.65, 340 * visit.u)
-        height: Math.max(0, Math.min(visit.height * 0.47, editButton.y - progressColumn.y - 12 * visit.u))
+        width: Math.min(visit.width * 0.92, 480 * visit.u)      // más grande (antes 0.65 / 340)
+        height: Math.max(0, Math.min(visit.height * 0.56, editButton.y - progressColumn.y - 12 * visit.u))
         anchors.right: parent.right
         anchors.rightMargin: visit.gutter * 0.45
         y: Math.max(progressColumn.y + 10 * visit.u, editButton.y - height - 14 * visit.u)

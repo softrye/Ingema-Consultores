@@ -336,10 +336,8 @@ TestCase {
         var glass = createTemporaryObject(glassComponent, test)
         verify(glass !== null)
         compare(glass.textureReady, false)
-        var shader = findChild(glass, "glassShader")
-        verify(shader !== null)
-        compare(shader.visible, false)
-        compare(shader.enabled, false)
+        // Sin ningún proveedor válido el shader no existe: nunca recibe null.
+        compare(findChild(glass, "glassShader"), null)
     }
     function test_capturePausesForNavigationMenusAndKeyboard() {
         var shell = createTemporaryObject(shellComponent, test)

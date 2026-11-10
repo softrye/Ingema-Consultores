@@ -9,6 +9,8 @@
 #include <QMetaObject>
 #include <QPointer>
 #include <QQuickWindow>
+#include <QSettings>
+#include <QSurfaceFormat>
 #include <QTimer>
 
 #ifdef Q_OS_ANDROID
@@ -19,7 +21,35 @@
 
 namespace {
 constexpr auto kPerformanceRuntimeClass = "com/ingema/ingeplus/InGePerformanceRuntime";
+constexpr auto kFidelityKey = "graphics/fidelityChoice";
 QPointer<InGeGraphicsCore> g_graphicsCore;
+int g_startupSamples = 0;
+
+bool validQualityChoice(const QString &value)
+{
+    return value == QLatin1String("AUTO") || value == QLatin1String("LOW") || value == QLatin1String("HIGH")
+        || value == QLatin1String("VERY_HIGH") || value == QLatin1String("EXTREME");
+}
+
+// EXTREME: MSAA 8 (EGL/RHI reducen a lo que admita el dispositivo); VERY_HIGH: 4.
+int samplesForChoice(const QString &choice)
+{
+    return choice == QLatin1String("EXTREME") ? 8 : choice == QLatin1String("VERY_HIGH") ? 4 : 0;
+}
+}
+
+void InGeGraphicsCore::applyStartupFidelity()
+{
+    const QString choice = QSettings().value(QLatin1String(kFidelityKey)).toString();
+    g_startupSamples = samplesForChoice(choice);
+    if (g_startupSamples > 0) {
+        QSurfaceFormat format = QSurfaceFormat::defaultFormat();
+        format.setSamples(g_startupSamples);
+        QSurfaceFormat::setDefaultFormat(format);
+        QQuickWindow::setTextRenderType(QQuickWindow::QtTextRendering);
+    }
+    qInfo().noquote() << "INGE_GRAPHICS_FIDELITY_STARTUP choice=" << (choice.isEmpty() ? QStringLiteral("AUTO") : choice)
+                      << " msaa=" << g_startupSamples;
 }
 
 InGeGraphicsCore::InGeGraphicsCore(QObject *parent)
@@ -53,6 +83,48 @@ int InGeGraphicsCore::thermalStatus() const { return m_thermalStatus; }
 bool InGeGraphicsCore::systemAnimationsEnabled() const { return m_systemAnimationsEnabled; }
 qreal InGeGraphicsCore::systemFontScale() const { return m_systemFontScale; }
 int InGeGraphicsCore::memoryTrimLevel() const { return m_memoryTrimLevel; }
+QString InGeGraphicsCore::qualityOverride() const { return m_qualityOverride; }
+QString InGeGraphicsCore::fidelity() const
+{
+    return m_qualityOverride == QLatin1String("VERY_HIGH") || m_qualityOverride == QLatin1String("EXTREME")
+        ? m_qualityOverride : m_deviceTier;
+}
+bool InGeGraphicsCore::advancedMotion() const
+{
+    const QString value = fidelity();
+    return value == QLatin1String("VERY_HIGH") || value == QLatin1String("EXTREME");
+}
+bool InGeGraphicsCore::extremeGlass() const { return fidelity() == QLatin1String("EXTREME"); }
+int InGeGraphicsCore::textSmoothing() const
+{
+    const QString value = fidelity();
+    return value == QLatin1String("EXTREME") ? 2 : value == QLatin1String("VERY_HIGH") ? 1 : 0;
+}
+bool InGeGraphicsCore::msaaRestartRequired() const
+{
+    return samplesForChoice(m_qualityOverride) != g_startupSamples;
+}
+
+void InGeGraphicsCore::setQualityOverride(const QString &value)
+{
+    const QString mode = validQualityChoice(value) ? value : QStringLiteral("AUTO");
+    // Persistida también aquí: el MSAA del siguiente arranque se lee antes de la ventana.
+    QSettings().setValue(QLatin1String(kFidelityKey), mode);
+#ifdef Q_OS_ANDROID
+    // The runtime saves the choice, reclassifies and pushes the new state back.
+    QJniObject::callStaticMethod<void>(kPerformanceRuntimeClass, "setUserOverride",
+                                       "(Ljava/lang/String;)V",
+                                       QJniObject::fromString(mode).object<jstring>());
+    QJniEnvironment env;
+    if (env->ExceptionCheck())
+        env->ExceptionClear();
+#else
+    if (mode == m_qualityOverride)
+        return;
+    m_qualityOverride = mode;
+    emit deviceStateChanged();
+#endif
+}
 
 // The Activity may initialize the runtime before or after Qt creates this
 // object: read it here, and the runtime pushes every later change.
@@ -86,7 +158,8 @@ void InGeGraphicsCore::applyDevicePerformanceState(const QString &json)
                                .toBool(m_systemAnimationsEnabled);
     const qreal fontScale = state.value(QStringLiteral("fontScale")).toDouble(m_systemFontScale);
     const int trimLevel = state.value(QStringLiteral("trimLevel")).toInt(m_memoryTrimLevel);
-    if (tier == m_deviceTier && baseTier == m_baseDeviceTier && lowRam == m_lowRamDevice
+    const QString qualityOverride = state.value(QStringLiteral("override")).toString(m_qualityOverride);
+    if (qualityOverride == m_qualityOverride && tier == m_deviceTier && baseTier == m_baseDeviceTier && lowRam == m_lowRamDevice
         && totalMemoryMb == m_totalMemoryMb && powerSave == m_powerSaveMode
         && thermal == m_thermalStatus && animators == m_systemAnimationsEnabled
         && qFuzzyCompare(fontScale, m_systemFontScale) && trimLevel == m_memoryTrimLevel)
@@ -100,7 +173,9 @@ void InGeGraphicsCore::applyDevicePerformanceState(const QString &json)
     m_systemAnimationsEnabled = animators;
     m_systemFontScale = fontScale > 0.0 ? fontScale : 1.0;
     m_memoryTrimLevel = trimLevel;
+    m_qualityOverride = qualityOverride;
     qInfo().noquote() << "INGE_DEVICE_PERFORMANCE tier=" << m_deviceTier
+                      << " override=" << m_qualityOverride
                       << " base=" << m_baseDeviceTier << " lowRam=" << m_lowRamDevice
                       << " ramMb=" << m_totalMemoryMb << " powerSave=" << m_powerSaveMode
                       << " thermal=" << m_thermalStatus

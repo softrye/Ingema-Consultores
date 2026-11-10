@@ -2,7 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 
 // Pure presentation: never writes CalicataDocument, stratum models, or layer geometry.
-// One ten-second AFK surprise per idle period, only with the Kawaii / Extreme skin.
+// One ten-second AFK surprise per idle period on every fidelity tier.
 Item {
     id: crash
     property bool allowed: false

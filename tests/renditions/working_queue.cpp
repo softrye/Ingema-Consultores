@@ -286,6 +286,69 @@ int main(int argc, char **argv)
     sync2.synchronize(); settle();
     check(FakeServer::last("addExpense").value("requestId") == request, "AUTH4 renewed session replays the same request_id");
 
+    // Draft trash: durable request, server-confirmed hiding and restoration.
+    RenditionLocalStore trashStore(QUuid::createUuid().toString());
+    RenditionRepository trashRepo;
+    const auto trashLocal = trashStore.createDraft("2026-10-01", "2026-10-31", {"p1"}, "p1", "folder", "space", true);
+    check(trashStore.markRenditionSynced(trashLocal, {{"rendition_id",rid},{"row_version",4},{"can_edit_content",true}}), "trash fixture");
+    const auto trashExpense = trashStore.addLocalExpense(trashLocal, form, true);
+    check(!trashStore.requestDraftTrash(trashLocal), "trash refuses unsynced edits");
+    check(trashStore.markExpenseSynced(trashLocal,trashExpense,{{"expense_id","33333333-3333-4333-8333-333333333333"},{"expense_row_version",1},{"rendition_row_version",5}}), "trash expense confirmed");
+    RenditionSyncController trashSync(&trashStore,&trashRepo);
+    settle();
+    check(trashStore.requestDraftTrash(trashLocal), "trash intention persisted");
+    check(trashStore.renditions().size()==1, "trash remains visible before server ack");
+    FakeServer::calls.clear(); trashSync.synchronize(); settle();
+    const auto firstTrash = FakeServer::last("trashDraft");
+    check(firstTrash.value("id")==rid && firstTrash.value("version").toLongLong()==5
+          && !firstTrash.value("requestId").toString().isEmpty(), "trash sends selected identity, CAS, request");
+    emit trashRepo.operationFailed("rendition_trash","NETWORK_AMBIGUOUS","unreachable"); settle();
+    RenditionLocalStore trashRestart(trashStore.accountId());
+    check(trashRestart.pendingOperations().first().toMap().value("requestId")==firstTrash.value("requestId"), "trash request survives restart");
+    FakeServer::calls.clear(); trashSync.synchronize(); settle();
+    check(FakeServer::last("trashDraft")==firstTrash, "trash retries identical request and CAS");
+    emit trashRepo.draftTrashed({{"rendition_id",rid},{"row_version",6},{"node_id","44444444-4444-4444-8444-444444444444"},{"node_version",3},{"lifecycle","TRASHED"}});
+    settle();
+    check(trashStore.renditions().isEmpty() && trashStore.expensesFor(trashLocal).size()==1, "trash ack hides without deleting contents");
+    trashStore.mergeRemoteRenditions({QVariantMap{{"id",rid},{"row_version",5},{"status","BORRADOR"}}});
+    check(trashStore.renditions().isEmpty(), "stale list cannot resurrect trashed row");
+    trashStore.mergeRemoteRenditions({QVariantMap{{"id",rid},{"row_version",6},{"status","BORRADOR"},{"can_edit_content",true}}});
+    check(trashStore.renditions().size()==1 && trashStore.expensesFor(trashLocal).size()==1, "Files recovery reappears with preserved expenses");
+    check(trashStore.requestDraftTrash(trashLocal), "new trash after recovery");
+    trashSync.synchronize(); settle();
+    emit trashRepo.operationFailed("rendition_trash","RENDITION_NOT_FOUND_OR_FORBIDDEN","forbidden"); settle();
+    check(trashStore.renditions().size()==1 && !trashStore.rendition(trashLocal).value("trashRequested").toBool()
+          && trashStore.pendingCount()==0, "definitive rejection preserves row and releases pending action");
+
+    RenditionLocalStore archiveStore(QUuid::createUuid().toString());
+    RenditionRepository archiveRepo;
+    archiveStore.mergeRemoteRenditions({QVariantMap{{"id",rid},{"row_version",4},{"status","APROBADO"},
+        {"current_version_id","immutable-version"},{"can_edit_content",false}}});
+    const auto archiveLocal=archiveStore.renditions().first().toMap().value("localId").toString();
+    RenditionSyncController archiveSync(&archiveStore,&archiveRepo); settle();
+    check(archiveStore.requestRenditionArchive(archiveLocal), "approved rendition archives without content edit capability");
+    check(archiveStore.renditions().size()==1, "archive remains visible before receipt");
+    FakeServer::calls.clear(); archiveSync.synchronize(); settle();
+    const auto archiveRequest=FakeServer::last("archiveRendition");
+    check(archiveRequest.value("id")==rid && archiveRequest.value("version").toLongLong()==4, "archive target and CAS");
+    emit archiveRepo.operationFailed("rendition_archive","NETWORK_AMBIGUOUS","offline"); settle();
+    RenditionLocalStore archiveRestart(archiveStore.accountId());
+    check(archiveRestart.pendingOperations().first().toMap().value("requestId")==archiveRequest.value("requestId"), "archive persists request across restart");
+    FakeServer::calls.clear(); archiveSync.synchronize(); settle();
+    check(FakeServer::last("archiveRendition")==archiveRequest, "archive retries original request");
+    emit archiveRepo.renditionArchived({{"rendition_id",rid},{"row_version",5},{"node_id","44444444-4444-4444-8444-444444444444"},{"node_version",2},{"lifecycle","ARCHIVED"}}); settle();
+    check(archiveStore.renditions().isEmpty() && archiveStore.rendition(archiveLocal).value("currentVersionId")=="immutable-version", "archive ack hides and preserves version");
+    const QVariantMap activeApproved{{"id",rid},{"row_version",5},{"status","APROBADO"},{"current_version_id","immutable-version"}};
+    archiveStore.mergeRemoteRenditions({activeApproved},false);
+    check(archiveStore.renditions().isEmpty(), "archived read-only detail cannot reactivate local list");
+    archiveStore.mergeRemoteRenditions({QVariantMap{{"id",rid},{"row_version",4},{"status","APROBADO"}}});
+    check(archiveStore.renditions().isEmpty(), "stale list cannot reactivate archive");
+    archiveStore.mergeRemoteRenditions({activeApproved});
+    check(archiveStore.renditions().size()==1 && archiveStore.rendition(archiveLocal).value("currentVersionId")=="immutable-version", "Files reactivation restores approved row intact");
+    RenditionLocalStore inReview(QUuid::createUuid().toString());
+    inReview.mergeRemoteRenditions({QVariantMap{{"id",rid},{"row_version",1},{"status","EN_REVISION"}}});
+    check(!inReview.requestRenditionArchive(inReview.renditions().first().toMap().value("localId").toString()), "archive rejects in-review row locally");
+
     std::cout << "PASS renditions working queue: " << checks << " checks" << std::endl;
     return 0;
 }

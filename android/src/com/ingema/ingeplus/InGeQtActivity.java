@@ -130,8 +130,53 @@ public final class InGeQtActivity extends QtActivity {
     private boolean betaCrashHandlerInstalled;
 
     @androidx.annotation.Keep
+    // Token de Cesium ion para el proxy satelital nativo (C++). Nunca se registra en logs.
+    public static String cesiumIonToken() {
+        final String token = BuildConfig.CESIUM_ION_TOKEN;
+        return token == null ? "" : token.trim();
+    }
+
     public static InGeQtActivity currentActivity() {
         return current.get();
+    }
+
+    // ===== Inicio de sesión con Google (Supabase OAuth PKCE) =====
+    // AuthSession abre /auth/v1/authorize en una Custom Tab; el deep link
+    // com.ingema.ingeplus://login-callback lo recibe InGeOAuthCallbackActivity y lo
+    // deja aquí. AuthSession lo consume al volver a primer plano (un solo uso).
+    // Nunca se registra el code en logcat.
+    private static String pendingOAuthCallback;
+
+    static synchronized void deliverOAuthCallback(String uri) {
+        pendingOAuthCallback = uri;
+        android.util.Log.i("InGeAuth", "INGE_OAUTH_CALLBACK_RECEIVED");
+    }
+
+    public static synchronized String takeOAuthCallback() {
+        final String value = pendingOAuthCallback;
+        pendingOAuthCallback = null;
+        return value == null ? "" : value;
+    }
+
+    public static boolean openOAuthUrl(final String url) {
+        final InGeQtActivity activity = current.get();
+        if (activity == null || url == null || url.isEmpty())
+            return false;
+        activity.runOnUiThread(() -> {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            // Protocolo Custom Tabs sin la librería androidx.browser: el extra de
+            // sesión (binder nulo) pide al navegador una Custom Tab en esta tarea.
+            Bundle extras = new Bundle();
+            extras.putBinder("android.support.customtabs.extra.SESSION", null);
+            intent.putExtras(extras);
+            intent.putExtra("android.support.customtabs.extra.SHARE_STATE", 2);   // sin compartir
+            try {
+                activity.startActivity(intent);
+            } catch (android.content.ActivityNotFoundException error) {
+                android.util.Log.w("InGeAuth", "INGE_OAUTH_NO_BROWSER");
+            }
+        });
+        return true;
     }
 
     // Home V2: abre / cierra el visor Cesium existente (WebView directo con
@@ -473,6 +518,19 @@ public final class InGeQtActivity extends QtActivity {
         // refresh cap and publish the state to Qt (GraphicsCore).
         performanceRuntime.setBudgetListener(this::configureAdaptiveRefreshRate);
         performanceRuntime.startMonitoring();
+    }
+
+    // El callback normalmente pasa por InGeOAuthCallbackActivity, pero Android
+    // también puede redirigir el VIEW al host existente (singleTop/CLEAR_TOP).
+    // Registrar la URI antes de que Qt procese el cambio a Active.
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        final Uri data = intent != null ? intent.getData() : null;
+        if (data != null && "com.ingema.ingeplus".equals(data.getScheme())
+                && "login-callback".equals(data.getHost()))
+            deliverOAuthCallback(data.toString());
     }
 
     @Override
@@ -991,8 +1049,24 @@ public final class InGeQtActivity extends QtActivity {
         }
     }
 
+    // Puente para Qt (BiometricGate): disponibilidad y verificación con sondeo
+    // del resultado (-2 inactivo, -1 en curso, 0 rechazada, 1 aprobada).
+    private static volatile int sQtBiometricState = -2;
+    public static boolean qtBiometricAvailable() {
+        final InGeQtActivity activity = currentActivity();
+        return activity != null && activity.isBiometricAvailable();
+    }
+    public static void qtStartBiometric() {
+        final InGeQtActivity activity = currentActivity();
+        if (activity == null) { sQtBiometricState = 0; return; }
+        sQtBiometricState = -1;
+        activity.runOnUiThread(() -> activity.authenticateBiometric(ok -> sQtBiometricState = ok ? 1 : 0));
+    }
+    public static int qtBiometricState() { return sQtBiometricState; }
+    public static void qtBiometricConsume() { sQtBiometricState = -2; }
+
     // Verificación biométrica del sistema (BiometricPrompt en
-    // InGeBiometricActivity). Sin consumidor visual tras Visual Zero.
+    // InGeBiometricActivity).
     private void authenticateBiometric(java.util.function.Consumer<Boolean> result) {
         if (!isBiometricAvailable() || pendingBiometricResult != null) {
             result.accept(false);

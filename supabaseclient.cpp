@@ -6,6 +6,42 @@
 #include <QDateTime>
 #include <QNetworkReply>
 #include <QNetworkProxy>
+#include <QCoreApplication>
+#include <QSysInfo>
+#include <QRegularExpression>
+#ifdef Q_OS_ANDROID
+#include <QJniObject>
+#endif
+
+namespace {
+QString userAgentField(QString value, int limit = 96)
+{
+    value.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9 ._-]")), QStringLiteral(" "));
+    return value.simplified().left(limit);
+}
+
+QByteArray applicationUserAgent()
+{
+    QString version = userAgentField(QCoreApplication::applicationVersion(), 32);
+    if (version.isEmpty()) version = QStringLiteral("unknown");
+#ifdef Q_OS_ANDROID
+    QString maker = userAgentField(QJniObject::getStaticObjectField<jstring>("android/os/Build", "MANUFACTURER").toString(), 32);
+    const QString model = userAgentField(QJniObject::getStaticObjectField<jstring>("android/os/Build", "MODEL").toString(), 60);
+    if (maker.compare(QStringLiteral("samsung"), Qt::CaseInsensitive) == 0)
+        maker = QStringLiteral("Samsung");
+    QString device = model.startsWith(maker, Qt::CaseInsensitive) && !maker.isEmpty()
+        ? model : (maker + QLatin1Char(' ') + model).simplified();
+    if (device.isEmpty()) device = QStringLiteral("Dispositivo Android");
+    QString release = userAgentField(QJniObject::getStaticObjectField<jstring>("android/os/Build$VERSION", "RELEASE").toString(), 32);
+    if (release.isEmpty()) release = userAgentField(QSysInfo::productVersion(), 32);
+    return QStringLiteral("InGePlus-Android/%1 (%2; Android %3)").arg(version, device, release).toLatin1();
+#elif defined(Q_OS_IOS)
+    return QStringLiteral("InGePlus-iOS/%1 (iPhone; iOS %2)").arg(version, userAgentField(QSysInfo::productVersion(),32)).toLatin1();
+#else
+    return QStringLiteral("InGePlus-Desktop/%1 (%2)").arg(version, userAgentField(QSysInfo::prettyProductName())).toLatin1();
+#endif
+}
+}
 
 SupabaseClient::SupabaseClient(const QString& projectUrl,
                                const QString& anonKey,
@@ -97,6 +133,7 @@ QNetworkRequest SupabaseClient::makeRequest(const QUrl& url,
         QDateTime::currentMSecsSinceEpoch());
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     req.setRawHeader("Accept", "application/json");
+    req.setRawHeader("User-Agent", applicationUserAgent());
     req.setRawHeader("apikey", m_anonKey.toUtf8());
 #if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
     if (transferTimeoutMs > 0)

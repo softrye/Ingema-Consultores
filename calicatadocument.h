@@ -161,6 +161,8 @@ public:
     Q_INVOKABLE bool emptyPhotoSlot(int idx);
     // Cloud bookkeeping written by CalicataCloudService (never marks dirty by itself).
     Q_INVOKABLE void setPhotoCloudState(int idx, const QVariantMap &changes);
+    Q_INVOKABLE void cacheLogoFromCloud(const QString &category, const QString &relativePath,
+                                       const QString &mediaId, const QVariantList &history);
     bool bindStratumIdentity(const QString &localStratumId, const QString &remoteStratumId);
     // Web -> Android: adopt a downloaded cloud revision unless an unpublished
     // local edit of the slot exists (then false = conflict, nothing replaced).

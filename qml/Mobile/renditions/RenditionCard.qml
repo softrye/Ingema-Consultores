@@ -1,5 +1,7 @@
 import QtQuick
 import "RStyle.js" as S
+import ".." as Mobile
+import InGe.CoreFlow 3.0 as CoreFlowModule           // ganchos «Extrema» del motor único
 
 // Tarjeta de rendición del diseño aprobado. Datos reales del estado publicado.
 // - Los dos puntos = estado ADMINISTRATIVO de la ficha (Borrador ámbar,
@@ -8,13 +10,15 @@ import "RStyle.js" as S
 //   sin fuente verificable la barra queda vacía y no se muestra porcentaje.
 Rectangle {
     id: card
-    readonly property bool glassOn: !!ui && !!ui.cardGlassUi && !!ui.cardGlassUi.glassTexture
-                                    && ui.cardGlassUi.glassReady !== false
-    Component.onCompleted: S.renderCount("rendition_delegate_created")
+    Component.onCompleted: {
+        S.renderCount("rendition_delegate_created")
+        if (extreme && cascadeIndex >= 0) { enter = 0; cascadeIn.start() }
+    }
     property var ui
     property var ctl
     property var row: ({})
     signal activated()
+    signal held()                                  // pulsación prolongada → menú 3D Touch
 
     readonly property string code: S.text_(row, "visibleCode", "visible_code")
     readonly property string renditionName: S.renditionDisplayName(S.text_(row, "displayName", "display_name"), code)
@@ -52,16 +56,63 @@ Rectangle {
 
     implicitHeight: content.implicitHeight + 34 * ui.u
     radius: 22 * ui.u
-    color: tap.pressed ? Qt.rgba(247 / 255, 249 / 255, 252 / 255, 0.95) : Qt.rgba(1, 1, 1, 0.90)
-    border.width: 1
-    border.color: S.ink(0.05)
-    scale: tap.pressed ? 0.985 : 1
+    readonly property bool glassOn: !!ui && !!ui.cardGlassUi && !!ui.cardGlassUi.glassTexture
+                                    && ui.cardGlassUi.glassReady !== false
+    // Liquid Glass activo: captura lista, o respaldo LOW del material (sin captura).
+    readonly property bool liquidOn: !!ui && ui.liquidGlass !== false && !!ui.liquidGlassMaterial
+                                     && (glassOn || (ui.liquidGlassMaterial.fallback === true && !!ui.cardGlassUi))
+    // Fuera de pantalla no se dibuja el vidrio (ahorra pasadas de GPU al desplazar).
+    readonly property bool onScreen: {
+        if (!liquidOn) return false
+        var tick = ui.cardGlassUi ? ui.cardGlassUi.glassTick : 0
+        var p = mapToItem(null, 0, 0)
+        return p.y + height > -20 && p.y < (Window.height > 0 ? Window.height : 2400) + 20
+    }
+    color: liquidOn ? (tap.pressed ? Qt.rgba(1, 1, 1, 0.06) : "transparent")
+                   : (tap.pressed ? S.lite(247, 249, 252, 0.95) : S.glass(0.90))
+    border.width: liquidOn ? 0 : 1
+    border.color: S.dark ? Qt.rgba(1, 1, 1, 0.12) : S.ink(0.05)
+    Mobile.GlassSurface {                             // Liquid Glass oficial (preset único del Dock)
+        ui: card.glassOn ? card.ui.cardGlassUi : null
+        material: card.liquidOn ? card.ui.liquidGlassMaterial : null
+        tint: card.ui.dockGlassTint                  // oscuro igual que claro y el Dock: sin tinte negro
+        visible: card.onScreen
+        radius: card.radius
+        margin: 10 * card.ui.u
+    }
+    Rectangle {                                       // brillo superior del vidrio oscuro
+        visible: S.dark && !card.liquidOn
+        anchors.fill: parent; anchors.margins: 1; radius: parent.radius - 1
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.10) }
+            GradientStop { position: 0.45; color: Qt.rgba(1, 1, 1, 0.0) }
+        }
+    }
+    // «Extrema» (InGeCoreFlow.extremeMotion): cascada de entrada, escala y realce al pulsar.
+    readonly property var flowCore: CoreFlowModule.InGeCoreFlow
+    readonly property bool extreme: flowCore.extremeMotion === true
+    property int cascadeIndex: -1
+    property real enter: 1
+    SequentialAnimation {
+        id: cascadeIn
+        PauseAnimation { duration: Math.min(card.cascadeIndex, 10) * card.flowCore.staggerDuration }
+        NumberAnimation { target: card; property: "enter"; to: 1; duration: 280; easing.type: Easing.OutCubic }
+    }
+    opacity: enter
+    transform: Translate { y: (1 - card.enter) * 14 * card.ui.u }
+    scale: tap.pressed ? (extreme ? flowCore.pressScale : 0.985) : 1
     Behavior on scale { NumberAnimation { duration: 110; easing.type: Easing.OutQuad } }
+    Rectangle {                                            // realce blanco del vidrio al pulsar
+        anchors.fill: parent; radius: card.radius; z: 2
+        visible: card.extreme && tap.pressed
+        color: Qt.rgba(1, 1, 1, card.flowCore.pressHighlight)
+    }
 
     // Sombra suave estática.
-    Rectangle { z: -1; anchors.fill: parent; anchors.topMargin: 6 * card.ui.u; anchors.margins: -1; radius: card.radius; color: S.ink(0.045) }
+    Rectangle { z: -1; anchors.fill: parent; anchors.topMargin: 6 * card.ui.u; anchors.margins: -1; radius: card.radius; visible: !card.liquidOn; color: S.dark ? Qt.rgba(0, 0, 0, 0.35) : S.ink(0.045) }
 
-    MouseArea { id: tap; anchors.fill: parent; onClicked: card.activated() }
+    MouseArea { id: tap; anchors.fill: parent; pressAndHoldInterval: 380
+                onClicked: card.activated(); onPressAndHold: card.held() }
 
     Column {
         id: content
@@ -170,7 +221,14 @@ Rectangle {
             spacing: 6 * card.ui.u
             Repeater {
                 model: 2
-                delegate: Rectangle { width: 12 * card.ui.u; height: width; radius: width / 2; color: card.statusTone }
+                delegate: Rectangle { anchors.verticalCenter: parent.verticalCenter
+                                      width: 12 * card.ui.u; height: width; radius: width / 2; color: card.statusTone }
+            }
+            Text {                                             // etiqueta de la Web (Revisado, Archivado, Exportado…)
+                anchors.verticalCenter: parent.verticalCenter
+                text: card.ctl.statusLabel(String(card.row.status || "BORRADOR"))
+                color: card.statusTone
+                font.family: card.ui.fontFamily; font.pixelSize: 13 * card.ui.u; font.weight: Font.DemiBold
             }
             Accessible.role: Accessible.StaticText
             Accessible.name: "Estado " + card.ctl.statusLabel(String(card.row.status || "BORRADOR"))

@@ -32,6 +32,7 @@ class Renderer final : public QQuickRhiItemRenderer {
     std::shared_ptr<inge::rp::MetricsMailbox> m_mailbox;
     inge::rp::Mat4 m_camera;
     inge::rp::Vec3 m_light{.25,1,.4};
+    bool m_planetary=false;                         // globo: atmósfera (fresnel) en terrain.frag
     QShader m_vertex,m_fragment;
     QString m_error;
     bool m_active=false;
@@ -50,7 +51,7 @@ class Renderer final : public QQuickRhiItemRenderer {
             m_sceneRevision=controller->sceneRevision();m_sceneChanged=true;
         }
         if(controller&&m_gpuBudget!=controller->gpuBudgetBytes()){m_gpuBudget=controller->gpuBudgetBytes();m_sceneChanged=true;}
-        if(controller){m_selected=controller->renderTiles();m_camera=controller->viewProjection();m_light=controller->viewLight();m_mailbox=controller->mailbox();}
+        if(controller){m_selected=controller->renderTiles();m_camera=controller->viewProjection();m_light=controller->viewLight();m_planetary=controller->planetaryView();m_mailbox=controller->mailbox();}
         else {m_selected.clear();m_mailbox.reset();}
     }
     void publish(inge::rp::RenderMetrics stats,QElapsedTimer &clock){
@@ -132,9 +133,9 @@ class Renderer final : public QQuickRhiItemRenderer {
         }
         QMatrix4x4 matrix;for(int r=0;r<4;++r)for(int c=0;c<4;++c)matrix(r,c)=float(m_camera.at(r,c));
         matrix=m_rhi->clipSpaceCorrMatrix()*matrix;
-        float uniform[20];std::copy(matrix.constData(),matrix.constData()+16,uniform);uniform[16]=float(m_light.x);uniform[17]=float(m_light.y);uniform[18]=float(m_light.z);uniform[19]=0;
+        float uniform[20];std::copy(matrix.constData(),matrix.constData()+16,uniform);uniform[16]=float(m_light.x);uniform[17]=float(m_light.y);uniform[18]=float(m_light.z);uniform[19]=m_planetary?1.f:0.f;
         uploads->updateDynamicBuffer(m_uniform.get(),0,80,uniform);
-        cb->beginPass(renderTarget(),QColor(12,23,34),{1.0f,0},uploads);
+        cb->beginPass(renderTarget(),QColor(0,0,0,0),{1.0f,0},uploads);   // fondo transparente: estrellas en QML
         const auto size=renderTarget()->pixelSize();cb->setViewport({0,0,float(size.width()),float(size.height())});
         for(const auto &[key,gpu]:m_tiles){Q_UNUSED(key)stats.gpuBytes+=gpu.bytes;++stats.textures;}
         for(const auto &key:m_drawKeys){
@@ -148,7 +149,7 @@ public:
     ~Renderer()override{clearGpu();}
 };
 }
-RetroplasmaItem::RetroplasmaItem(QQuickItem *parent):QQuickRhiItem(parent){setAlphaBlending(false);setSampleCount(1);connect(this,&QQuickItem::windowChanged,this,[this](QQuickWindow *){connectPresentation();if(m_controller)m_controller->setViewport(width(),height(),window()?window()->effectiveDevicePixelRatio():1);});}
+RetroplasmaItem::RetroplasmaItem(QQuickItem *parent):QQuickRhiItem(parent){setAlphaBlending(true);setSampleCount(1);connect(this,&QQuickItem::windowChanged,this,[this](QQuickWindow *){connectPresentation();if(m_controller)m_controller->setViewport(width(),height(),window()?window()->effectiveDevicePixelRatio():1);});}
 void RetroplasmaItem::connectPresentation(){
     QObject::disconnect(m_presentConnection);
     if(window()&&m_controller){auto controller=m_controller;m_presentConnection=connect(window(),&QQuickWindow::frameSwapped,this,[controller](){if(controller)controller->framePresented();},Qt::QueuedConnection);}

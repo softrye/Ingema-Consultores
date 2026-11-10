@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../components" as Components
+import ".." as MobileGlass
 
 // Editor avanzado de una fotografía de Calicata (contrato Web photoDerivative.ts /
 // photoOverlayStyle.ts). La ORIGINAL nunca se toca. "Después" es una vista previa
@@ -659,21 +660,21 @@ Popup {
     }
 
     parent: Overlay.overlay
-    x: offsetX
-    y: offsetY
-    width: parent ? parent.width : 400
-    height: parent ? parent.height : 800
+    readonly property bool wideLayout: form ? !form.isPhone : false
+    x: parent ? (parent.width - width) / 2 + offsetX : offsetX
+    y: parent ? (parent.height - height) / 2 + offsetY : offsetY
+    width: parent ? Math.min(parent.width - editor.dp(16), editor.dp(wideLayout ? 760 : 560)) : 400
+    height: parent ? parent.height - editor.dp(wideLayout ? 36 : 16) : 800
     modal: true
     focus: true
     padding: 0
     closePolicy: Popup.CloseOnEscape
-    background: Rectangle {
-        // Fondo que refractan los controles Liquid Glass del editor.
-        objectName: "calicataGlassBackdrop"
-        color: editor.cPage
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: editor.dark ? "#18202B" : "#EEF4FF" }
-            GradientStop { position: 1.0; color: editor.dark ? "#11161D" : "#F8FAFD" }
+    background: Item {
+        MobileGlass.DockGlassPanel {
+            glassUi: editor.form ? editor.form.photoEditorGlassUi : null
+            radius: editor.dp(24)
+            u: editor.form ? editor.form.uiScale : 1
+            reducedMotion: editor.form ? editor.form.flowReduceMotion : false
         }
     }
     // Se expande desde la tarjeta tocada y vuelve hacia ella al cerrar.
@@ -1182,7 +1183,9 @@ Popup {
         // Vista previa: Antes (original) | Después (derivada real C++) o base de la herramienta.
         Item {
             id: previewBox
-            Layout.fillWidth: true
+            Layout.fillWidth: !editor.wideLayout
+            Layout.preferredWidth: editor.wideLayout ? Math.max(0, editor.availableWidth * 0.86) : -1
+            Layout.alignment: Qt.AlignHCenter
             Layout.leftMargin: editor.dp(12); Layout.rightMargin: editor.dp(12)
             // Con el teclado abierto la vista previa se compacta (sigue visible) y cede
             // espacio al campo que se está escribiendo.
@@ -1713,7 +1716,7 @@ Popup {
         // Pestañas de herramientas con indicador animado.
         Item {
             Layout.fillWidth: true
-            Layout.preferredHeight: editor.dp(58)
+            Layout.preferredHeight: editor.dp(editor.wideLayout ? 72 : 58)
             visible: !editor.mode.length
             Flickable {
                 anchors.fill: parent
@@ -1732,14 +1735,14 @@ Popup {
                             id: tabItem
                             required property var modelData
                             required property int index
-                            width: Math.max(editor.dp(68), tabLabel.implicitWidth + editor.dp(16))
+                            width: Math.max(editor.dp(editor.wideLayout ? 82 : 68), tabLabel.implicitWidth + editor.dp(16))
                             height: tabRow.height
                             scale: tabTap.pressed ? 0.95 : 1
                             Behavior on scale { NumberAnimation { duration: 80 } }
                             Components.FlowIcon {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 y: editor.dp(8)
-                                width: editor.dp(20); height: width
+                                width: editor.dp(editor.wideLayout ? 24 : 20); height: width
                                 name: tabItem.modelData[1]
                                 flow: editor.form ? editor.form.flow : null
                                 tintColor: editor.tab === tabItem.index ? editor.cBlue : editor.cMuted
@@ -1749,7 +1752,7 @@ Popup {
                             Text {
                                 id: tabLabel
                                 anchors.horizontalCenter: parent.horizontalCenter
-                                y: editor.dp(32)
+                                y: editor.dp(editor.wideLayout ? 37 : 32)
                                 text: tabItem.modelData[0]
                                 color: editor.tab === tabItem.index ? editor.cBlue : editor.cMuted
                                 font.pixelSize: editor.dp(11)

@@ -28,6 +28,18 @@ class InGeGraphicsCore final : public QObject
     Q_PROPERTY(bool systemAnimationsEnabled READ systemAnimationsEnabled NOTIFY deviceStateChanged)
     Q_PROPERTY(qreal systemFontScale READ systemFontScale NOTIFY deviceStateChanged)
     Q_PROPERTY(int memoryTrimLevel READ memoryTrimLevel NOTIFY deviceStateChanged)
+    // Selector «Calidad gráfica»: AUTO | LOW | HIGH | VERY_HIGH | EXTREME (persistido).
+    Q_PROPERTY(QString qualityOverride READ qualityOverride NOTIFY deviceStateChanged)
+    // Perfil de fidelidad efectivo: VERY_HIGH/EXTREME sólo por elección manual;
+    // si no, el tier del dispositivo (Automática nunca los elige).
+    Q_PROPERTY(QString fidelity READ fidelity NOTIFY deviceStateChanged)
+    // Punto de enganche de las animaciones avanzadas (VERY_HIGH y EXTREME).
+    Q_PROPERTY(bool advancedMotion READ advancedMotion NOTIFY deviceStateChanged)
+    Q_PROPERTY(bool extremeGlass READ extremeGlass NOTIFY deviceStateChanged)
+    // 0 normal, 1 alto (VERY_HIGH), 2 máximo (EXTREME): renderTypeQuality, layer.smooth/samples.
+    Q_PROPERTY(int textSmoothing READ textSmoothing NOTIFY deviceStateChanged)
+    // MSAA de la ventana sólo se fija al arrancar: true si la elección actual pide reiniciar.
+    Q_PROPERTY(bool msaaRestartRequired READ msaaRestartRequired NOTIFY deviceStateChanged)
 
 public:
     explicit InGeGraphicsCore(QObject *parent = nullptr);
@@ -44,6 +56,15 @@ public:
     bool systemAnimationsEnabled() const;
     qreal systemFontScale() const;
     int memoryTrimLevel() const;
+    QString qualityOverride() const;
+    QString fidelity() const;
+    bool advancedMotion() const;
+    bool extremeGlass() const;
+    int textSmoothing() const;
+    bool msaaRestartRequired() const;
+    // Antes de crear la ventana: MSAA y render de texto según la fidelidad guardada.
+    static void applyStartupFidelity();
+    Q_INVOKABLE void setQualityOverride(const QString &value);
 
     // JSON from InGePerformanceRuntime.stateJson(); GUI thread only.
     void applyDevicePerformanceState(const QString &json);
@@ -68,6 +89,7 @@ private:
     bool m_vulkanAvailable = false;
     QString m_deviceTier = QStringLiteral("UNKNOWN");
     QString m_baseDeviceTier = QStringLiteral("UNKNOWN");
+    QString m_qualityOverride = QStringLiteral("AUTO");
     bool m_lowRamDevice = false;
     int m_totalMemoryMb = 0;
     bool m_powerSaveMode = false;

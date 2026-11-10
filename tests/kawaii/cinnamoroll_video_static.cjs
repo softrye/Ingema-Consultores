@@ -17,13 +17,19 @@ assert.ok(cmake.includes('qt_add_resources(AppCalicatasMobile "inge_kawaii_cinna
 assert.ok(cmake.includes('if(EXISTS "${INGE_KAWAII_CINNAMOROLL_VIDEO}")'));
 assert.ok(home.includes('Kawaii.KawaiiCinnamorollVisit'));
 assert.ok(home.includes('home.kawaiiLastInteractionAt = Date.now()'));
-assert.ok(home.includes('halloweenController.safe'));
+assert.match(home, /readonly property bool kawaiiAppForeground: home\.visible && home\.authReady/);
+assert.match(home, /allowed: home\.appSkin === "ingenieros" && home\.kawaiiAppForeground/);
+assert.match(home, /parent: Controls\.Overlay\.overlay \? Controls\.Overlay\.overlay : home/);
+assert.doesNotMatch(home.slice(home.indexOf('Kawaii.KawaiiCinnamorollVisit {'),
+                               home.indexOf('Halloween.HalloweenScare {')), /halloweenController\.(safe|motionActive)/);
 assert.match(visitor, /import QtMultimedia/);
 assert.match(visitor, /MediaPlayer\s*\{/);
 assert.match(visitor, /VideoOutput\s*\{/);
 assert.match(visitor, /ShaderEffectSource\s*\{/);
 assert.match(visitor, /ShaderEffect\s*\{/);
 assert.ok(visitor.includes('cinnamoroll-knock-clean-10s.mp4'));
+assert.ok(visitor.includes('required property bool mediaEnabled'));
+assert.match(visitor, /source: visitor\.mediaEnabled \?/);
 assert.ok(visitor.includes('kawaii_chroma.frag.qsb'));
 assert.ok(visitor.includes('AudioOutput {'));
 assert.ok(visitor.includes('volume: 1.0'));

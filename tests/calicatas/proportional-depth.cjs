@@ -32,27 +32,24 @@ for (const [totalDepth, at, want] of [[3, 1.5, 150], [60, 30, 150], [100, 1.6, 4
     assert.equal(scope.depthY(totalDepth), 310, 'Entered depth always at the bottom');
 }
 assert.equal(rules.profileDepth(60, 30), 60, 'Partial description must not shorten the axis');
+assert.equal(rules.profileDepth(60, 75), 75, 'Web totalDepthM = max(declared, last stratum): no cap');
 assert.equal(rules.profileDepth(0, 9), 9, 'Legacy unspecified depth follows existing strata');
 assert.equal(rules.boundaryError([{a:'60'}], 0, '60', 60), '');
-assert.notEqual(rules.boundaryError([{a:'60'}], 0, '60.05', 60), '', 'Hasta cannot exceed entered depth');
+assert.equal(rules.boundaryError([{a:'60'}], 0, '60.05', Infinity), '', 'Hasta may exceed the entered (declared) depth');
 assert.equal(rules.boundaryError([{a:'1000000'}], 0, '1000000', Infinity), '', 'No arbitrary global depth cap');
-assert.equal(binding(form, 'allowedDepthM', {root:{requestedDepthM:60, depthMaxM:Infinity}}), 60);
+assert.equal(binding(form, 'allowedDepthM', {root:{requestedDepthM:60, depthMaxM:Infinity}}), Infinity, 'Declared depth is not a cap');
 assert.equal(binding(form, 'allowedDepthM', {root:{requestedDepthM:0, depthMaxM:Infinity}}), Infinity);
 const issues = rules.validateDocument({header:{requested_depth_m:60, final_depth_m:60.05}, cortes:[{de:'0',a:'60.05'}]});
-assert.ok(issues.some(i => i.section === 4 && i.stratum === 0 && /profundidad/i.test(i.message)), 'Imported layers above total must be flagged');
+assert.ok(!issues.some(i => i.section === 4 && i.stratum === 0 && /profundidad total/i.test(i.message)), 'Layers below the declared depth are valid (Web)');
 const rows = [{de:'0.00', a:'3.00', _extraJson:'{}'}];
-const root = {requestedDepthM:60, allowedDepthM:60, totalDepthM:3, _markDirty(){}};
+const root = {requestedDepthM:60, allowedDepthM:Infinity, totalDepthM:3, _markDirty(){}};
 const model = {get count(){return rows.length}, get(i){return rows[i]},
     setProperty(i,key,value){rows[i][key]=value}, append(row){rows.push(row)}};
-const context = vm.createContext({root, Rules:rules, cortesModel:model, allowedDepthM:60,
+const context = vm.createContext({root, Rules:rules, cortesModel:model, allowedDepthM:Infinity,
     _loading:false, _updatingIntervals:false, showInfo(){}, _markDirty(){}});
 for (const name of ['commitBoundary','renumerarCortesYIntervalos','_parseDepthText','_fmtDepth','addCorte','_inheritSampleInterval'])
     vm.runInContext(extract(form,name),context);
 root._inheritSampleInterval = context._inheritSampleInterval;
-assert.equal(context.commitBoundary(0,'60.05'),false);
-assert.equal(rows[0].a,'3.00','Rejected boundary must preserve existing data');
-assert.equal(context.commitBoundary(0,'60.00'),true);
-assert.equal(root.totalDepthM,60);
-context.addCorte();
-assert.equal(rows.length,1,'Cannot append beyond the entered bottom');
-console.log('PASS proportional positions, partial profile, legacy depth and per-record boundary');
+assert.equal(context.commitBoundary(0,'60.05'),true,'No depth cap: Hasta may pass the declared depth');
+assert.equal(root.totalDepthM,60.05);
+console.log('PASS proportional positions, partial profile, legacy depth and uncapped boundary');

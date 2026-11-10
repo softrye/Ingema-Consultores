@@ -3,11 +3,18 @@
 #include <QVariantList>
 
 namespace RenditionContract {
+inline bool canArchiveState(const QVariantMap &row) {
+    const auto status=row.value("status").toString();
+    return status=="BORRADOR" || status=="OBSERVADO" || status=="APROBADO"
+        || status=="REVISADO" || status=="ARCHIVADO" || status=="EXPORTADO";
+}
 inline bool canEditWorkingCopy(const QVariantMap &row) {
     const auto version = row.value("row_version", row.value("rowVersion"));
     if (version.isValid() && (version.toLongLong() < 0 || version.toLongLong() > 9007199254740991LL)) return false;
     const auto status = row.value("status", "BORRADOR").toString().toUpper();
-    if (row.value("archived").toBool() || row.value("is_blocked", row.value("isBlocked")).toBool()
+    if (row.value("archived").toBool() || row.value("trashed").toBool() || row.value("fileArchived").toBool()
+        || row.value("trashRequested").toBool() || row.value("archiveRequested").toBool()
+        || row.value("is_blocked", row.value("isBlocked")).toBool()
         || row.value("isSnapshot").toBool() || (status != "BORRADOR" && status != "OBSERVADO")) return false;
     if (row.contains("can_edit_content") || row.contains("canEditContent")) {
         const auto permission = row.value("can_edit_content", row.value("canEditContent"));
@@ -50,8 +57,8 @@ inline QVariantMap normalize(const QVariantMap &row, const QVariantMap &saved = 
     }
     if (row.contains("current_version_number")) result.insert("versionNumber", row.value("current_version_number"));
     result.insert("currentVersionNumber", result.value("versionNumber"));
-    // An incomplete list response cannot preserve a stale positive authorization.
-    if (!row.contains("canEditContent") && !row.contains("can_edit_content")) result.insert("canEditContent", false);
+    // La lista no trae el permiso efectivo: no se inventa (false borraba el que
+    // trae el detalle según el orden de llegada). El servidor lo revalida al presentar.
     return result;
 }
 }

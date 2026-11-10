@@ -154,7 +154,7 @@ if(NOT ANDROID AND NOT IOS AND NOT INGE_BUILD_MOBILE)
         excelpdfpreviewdialog.h excelpdfpreviewdialog.cpp
         appcontext.h appcontext.cpp
         supabaseclient.h supabaseclient.cpp
-        authsession.h authsession.cpp
+        authsession.h authsession.cpp biometricgate.h
         clouddocs.h clouddocs.cpp
         supabasestorageclient.h supabasestorageclient.cpp
         settingshelper.h
@@ -254,6 +254,9 @@ if(INGE_BUILD_MOBILE)
     # Calicatas: editor original restaurado (Qt Quick Controls, estilo Basic)
     # y sus recursos con las rutas qrc originales.
     find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS QuickControls2)
+    # Mapa topográfico del Home de Calicatas: Qt Location (Map + plugin geoservices "osm").
+    # Enlazarlo hace que androiddeployqt empaquete el módulo QML QtLocation y el plugin.
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Location)
     if(QT_VERSION_MAJOR GREATER_EQUAL 6)
         find_package(Qt6 REQUIRED COMPONENTS QuickDialogs2 Multimedia)
     endif()
@@ -284,17 +287,26 @@ if(INGE_BUILD_MOBILE)
         "${INGE_PROJECT_ROOT}/supabaseclient.h"
         "${INGE_PROJECT_ROOT}/supabaseclient.cpp"
         "${INGE_PROJECT_ROOT}/authsession.h"
+        "${INGE_PROJECT_ROOT}/biometricgate.h"
         "${INGE_PROJECT_ROOT}/authsession.cpp"
         "${INGE_PROJECT_ROOT}/clouddocs.h"
         "${INGE_PROJECT_ROOT}/clouddocs.cpp"
         "${INGE_PROJECT_ROOT}/src/documents/nothingdocuments.h"
         "${INGE_PROJECT_ROOT}/src/documents/nothingdocuments.cpp"
+        "${INGE_PROJECT_ROOT}/src/cpp/supabaserealtimechannel.h"
+        "${INGE_PROJECT_ROOT}/src/cpp/supabaserealtimechannel.cpp"
+        "${INGE_PROJECT_ROOT}/src/cpp/presenceidentity.h"
+        "${INGE_PROJECT_ROOT}/src/cpp/presenceidentity.cpp"
         "${INGE_PROJECT_ROOT}/src/documents/nothingfileops.h"
         "${INGE_PROJECT_ROOT}/src/documents/nothingfileops.cpp"
         "${INGE_PROJECT_ROOT}/betadiagnostics.h"
         "${INGE_PROJECT_ROOT}/betadiagnostics.cpp"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionrepository.h"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionrepository.cpp"
+        "${INGE_PROJECT_ROOT}/src/cpp/satellitetileproxy.cpp"
+        "${INGE_PROJECT_ROOT}/src/cpp/satellitetileproxy.h"
+        "${INGE_PROJECT_ROOT}/src/cpp/accessrequestsclient.h"
+        "${INGE_PROJECT_ROOT}/src/cpp/accessrequestsclient.cpp"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionlocalstore.h"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionlocalstore.cpp"
         "${INGE_PROJECT_ROOT}/src/cpp/renditionlocalstore_working.cpp"
@@ -527,12 +539,13 @@ if(INGE_BUILD_MOBILE)
             Qt${QT_VERSION_MAJOR}::Quick
             Qt${QT_VERSION_MAJOR}::QuickControls2
             Qt${QT_VERSION_MAJOR}::Positioning
+            Qt${QT_VERSION_MAJOR}::Location
             Qt${QT_VERSION_MAJOR}::Concurrent
             Qt${QT_VERSION_MAJOR}::Xml
         )
 
         if(QT_VERSION_MAJOR GREATER_EQUAL 6)
-            target_include_directories(AppCalicatasMobile PRIVATE "${INGE_PROJECT_ROOT}/src/documents")
+            target_include_directories(AppCalicatasMobile PRIVATE "${INGE_PROJECT_ROOT}/src/documents" "${INGE_PROJECT_ROOT}/src/cpp")
             target_link_libraries(AppCalicatasMobile PRIVATE Qt6::GuiPrivate Qt6::QuickDialogs2 Qt6::Multimedia)
         endif()
 
@@ -578,14 +591,18 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/Main.qml"
             "${MOBILE_QML_DIR}/AuroraField.qml"
             "${MOBILE_QML_DIR}/HomeScreen.qml"
+            "${MOBILE_QML_DIR}/StartupIntro.qml"
             "${MOBILE_QML_DIR}/RetroplasmaEarthView.qml"
             "${MOBILE_QML_DIR}/EarthDocumentSheet.qml"
             "${MOBILE_QML_DIR}/EarthGlassAction.qml"
             "${MOBILE_QML_DIR}/AddToolPanel.qml"
             "${MOBILE_QML_DIR}/GlassSurface.qml"
+            "${MOBILE_QML_DIR}/DockGlassPanel.qml"
             # Calicatas: editor original restaurado y sus dependencias reales.
             "${MOBILE_QML_DIR}/CalicataSaveOpenDialog.qml"
             "${MOBILE_QML_DIR}/components/FlowIcon.qml"
+            "${MOBILE_QML_DIR}/components/PresenceAvatars.qml"
+            "${MOBILE_QML_DIR}/components/FieldPresenceHighlight.qml"
             "${MOBILE_QML_DIR}/documents/NothingButton.qml"
             "${MOBILE_QML_DIR}/documents/NothingDocumentsRoot.qml"
             "${MOBILE_QML_DIR}/documents/NothingEntry.qml"
@@ -620,17 +637,22 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/pages/CalicataOperationOverlay.qml"
             "${MOBILE_QML_DIR}/pages/CalicataPhotoEditor.qml"
             "${MOBILE_QML_DIR}/pages/CalicataPointPicker.qml"
+            "${MOBILE_QML_DIR}/pages/CalicataUbicacionView.qml"
+            "${MOBILE_QML_DIR}/pages/CalicataMapEditor.qml"
             "${MOBILE_QML_DIR}/pages/CalicataProfile.qml"
             "${MOBILE_QML_DIR}/pages/CalicataReview.qml"
             "${MOBILE_QML_DIR}/pages/CalicataSiteVisit.qml"
             "${MOBILE_QML_DIR}/pages/CalicataSurface.qml"
             "${MOBILE_QML_DIR}/pages/CalicatasEditorPage.qml"
+            "${MOBILE_QML_DIR}/pages/CalicatasHome.qml"
+            "${MOBILE_QML_DIR}/pages/CalicatasTopoMap.qml"
             "${MOBILE_QML_DIR}/lib/CalicataRules.js"
             "${MOBILE_QML_DIR}/lib/CalicataElevation.js"
             "${MOBILE_QML_DIR}/lib/CalicataExcelImport.js"
             "${MOBILE_QML_DIR}/lib/GpsBus.js"
             "${MOBILE_QML_DIR}/lib/CalicataFormLogic.js"
             "${MOBILE_QML_DIR}/lib/CalicataWorkspaceLogic.js"
+            "${MOBILE_QML_DIR}/lib/CalicataDiagnostics.js"
             "${MOBILE_QML_DIR}/lib/AccountText.js"
             "${MOBILE_QML_DIR}/lib/PhotoEditSchema.js"
             # Rendiciones: subapp QML nativa (RenditionsUi -> RenditionFlutterBridge).
@@ -655,18 +677,32 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/renditions/ReviewPanel.qml"
             "${MOBILE_QML_DIR}/renditions/RenditionReceived.qml"
             "${MOBILE_QML_DIR}/renditions/RendicionesSyncAura.qml"
+            "${MOBILE_QML_DIR}/renditions/RendicionesSyncStars.qml"
+            "${MOBILE_QML_DIR}/renditions/RendicionesSyncBackdrop.qml"
             "${MOBILE_QML_DIR}/renditions/RGlassMenu.qml"
             "${MOBILE_QML_DIR}/renditions/RMenuItem.qml"
-            "${MOBILE_QML_DIR}/renditions/RenditionsDock.qml"
             "${MOBILE_QML_DIR}/renditions/RenditionCard.qml"
             "${MOBILE_QML_DIR}/renditions/FilesBrowser.qml"
             "${MOBILE_QML_DIR}/renditions/RConfetti.qml"
             "${MOBILE_QML_DIR}/renditions/RenditionsDiagnostics.qml"
+            "${MOBILE_QML_DIR}/renditions/RExpenseQuickForm.qml"
+            "${MOBILE_QML_DIR}/renditions/REditableTile.qml"
+            "${MOBILE_QML_DIR}/renditions/RPackedLayout.qml"
             "${MOBILE_QML_DIR}/kawaii/KawaiiLogic.js"
             "${MOBILE_QML_DIR}/kawaii/KawaiiMascot.qml"
             "${MOBILE_QML_DIR}/kawaii/KawaiiLayer.qml"
             "${MOBILE_QML_DIR}/kawaii/KawaiiDockDecoration.qml"
             "${MOBILE_QML_DIR}/kawaii/KawaiiProfileCrash.qml"
+            "${MOBILE_QML_DIR}/kawaii/KawaiiCinnamorollVisit.qml"
+            "${MOBILE_QML_DIR}/halloween/HalloweenLogic.js"
+            "${MOBILE_QML_DIR}/halloween/HalloweenController.qml"
+            "${MOBILE_QML_DIR}/halloween/HalloweenLayer.qml"
+            "${MOBILE_QML_DIR}/halloween/HalloweenScare.qml"
+            "${MOBILE_QML_DIR}/settings/SettingsApp.qml"
+            "${MOBILE_QML_DIR}/settings/SettingsPage.qml"
+            "${MOBILE_QML_DIR}/settings/SettingsGroup.qml"
+            "${MOBILE_QML_DIR}/settings/SettingsRow.qml"
+            "${MOBILE_QML_DIR}/settings/SettingsSwitch.qml"
             "${MOBILE_QML_DIR}/assistant/InGeAssistantSheet.qml"
             "${MOBILE_QML_DIR}/assistant/InGeAssistantController.qml"
         )
@@ -678,13 +714,23 @@ if(INGE_BUILD_MOBILE)
             "${MOBILE_QML_DIR}/fonts/Rubik-Regular.ttf"
             "${MOBILE_QML_DIR}/fonts/Rubik-SemiBold.ttf"
             "${MOBILE_QML_DIR}/fonts/OFL.txt"
+            "${MOBILE_QML_DIR}/fonts/Figtree-Regular.ttf"
+            "${MOBILE_QML_DIR}/fonts/Figtree-Medium.ttf"
+            "${MOBILE_QML_DIR}/fonts/Figtree-Bold.ttf"
+            "${MOBILE_QML_DIR}/fonts/OFL-Figtree.txt"
             "${MOBILE_QML_DIR}/assets/inge_symbol_white.png"
             # Home V1: iconos Lucide (ISC) y fotografias de campo originales.
             "${MOBILE_QML_DIR}/fonts/lucide/Lucide-w300.ttf"
             "${MOBILE_QML_DIR}/fonts/lucide/LICENSE"
+            "${MOBILE_QML_DIR}/assets/map/clouds.png"
             "${MOBILE_QML_DIR}/assets/home/field_01.webp"
             "${MOBILE_QML_DIR}/assets/home/field_02.webp"
             "${MOBILE_QML_DIR}/assets/home/field_03.webp"
+            "${MOBILE_QML_DIR}/assets/space/space_bg.webp"
+            "${MOBILE_QML_DIR}/assets/space/galaxy.webp"
+            "${MOBILE_QML_DIR}/assets/space/space_bg_light.webp"
+            "${MOBILE_QML_DIR}/assets/space/galaxy_light.webp"
+            "${MOBILE_QML_DIR}/assets/space/accretion.webp"
             # InGe.CoreFlow 3.0: singletons registrados desde main_mobile.cpp.
             "${MOBILE_QML_DIR}/flowcore/InGeCoreFlow.qml"
             "${MOBILE_QML_DIR}/flowcore/FlowIcons.qml"
@@ -761,6 +807,7 @@ if(INGE_BUILD_MOBILE)
                 calicatadocument.h calicatadocument.cpp
                 docsops.h
                 src/documents/nothingdocuments.h
+                src/cpp/supabaserealtimechannel.h
                 fsutil.h fsutil.cpp
         )
 
@@ -769,6 +816,9 @@ if(INGE_BUILD_MOBILE)
         qt_add_shaders(AppCalicatasMobile "inge_access_shaders"
             PREFIX "/InGe/Mobile"
             BASE "${MOBILE_QML_DIR}"
+            # ShaderEffect usa el vertex por defecto de Qt Quick: GLSL ES 100.
+            # Mantener los fragment shaders (aurora/glass) en el mismo perfil;
+            # GLSL 300 es puede provocar L0001 al enlazar con ese vertex en Mali.
             GLSL "100es,120,150"
             HLSL 50
             MSL 12
@@ -777,6 +827,32 @@ if(INGE_BUILD_MOBILE)
                 "${MOBILE_QML_DIR}/shaders/glass.frag"
                 "${MOBILE_QML_DIR}/shaders/kawaii_chroma.frag"
         )
+
+        # Keep Gemini's original H.264/AAC bitstream. Bundle only if the
+        # actual media has been installed; do not fake a broken/empty MP4.
+        set(INGE_KAWAII_CINNAMOROLL_VIDEO
+            "${INGE_PROJECT_ROOT}/images/kawaii/cinnamoroll-knock-clean-10s.mp4")
+        if(EXISTS "${INGE_KAWAII_CINNAMOROLL_VIDEO}")
+            qt_add_resources(AppCalicatasMobile "inge_kawaii_cinnamoroll_mp4"
+                PREFIX "/images/kawaii"
+                BASE "${INGE_PROJECT_ROOT}/images/kawaii"
+                FILES "${INGE_KAWAII_CINNAMOROLL_VIDEO}")
+        else()
+            message(STATUS "InGe+: original Cinnamoroll MP4 pending at images/kawaii/cinnamoroll-knock-clean-10s.mp4")
+        endif()
+
+        # Official 10-second InGe+ cinematic intro, bundled without transcoding.
+        # A missing resource is a configuration failure: do not ship an intro
+        # overlay that cannot open its original H.264 + AAC file.
+        set(INGE_STARTUP_INTRO_VIDEO
+            "${INGE_PROJECT_ROOT}/images/intro/ingeplus-opening-10s.mp4")
+        if(NOT EXISTS "${INGE_STARTUP_INTRO_VIDEO}")
+            message(FATAL_ERROR "InGe+ startup intro MP4 missing: ${INGE_STARTUP_INTRO_VIDEO}")
+        endif()
+        qt_add_resources(AppCalicatasMobile "inge_startup_intro_mp4"
+            PREFIX "/images/intro"
+            BASE "${INGE_PROJECT_ROOT}/images/intro"
+            FILES "${INGE_STARTUP_INTRO_VIDEO}")
 
         if(ANDROID)
             # androiddeployqt/qmlimportscanner debe inspeccionar solamente el

@@ -1,10 +1,10 @@
 ﻿#include <QGuiApplication>
-#include <QSurfaceFormat>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QtQml/qqml.h>
 #include <QtQml>
 #include <QSslSocket>
+#include "biometricgate.h"
 #include <QLoggingCategory>
 #include <QCoreApplication>
 #include <QUrl>
@@ -41,10 +41,12 @@
 #include "src/cpp/renditionrepository.h"
 #include "src/cpp/renditionlocalstore.h"
 #include "src/cpp/renditionsynccontroller.h"
+#include "src/cpp/accessrequestsclient.h"
 #include "src/cpp/renditionflutterbridge.h"
 #include "src/cpp/renditionuicontroller.h"
 #include "src/cpp/renditionexportservice.h"
 #include "src/graphics/InGeGraphicsCore.h"
+#include <QSurfaceFormat>
 #include "src/core/StartupInstrumentation.h"
 #include "src/core/RemoteExecutor.h"
 #include "src/core/GeminiAssistant.h"
@@ -54,6 +56,7 @@ Q_LOGGING_CATEGORY(lcNet, "inge.net")
 
 
 #include <QNetworkAccessManager>
+#include "src/cpp/satellitetileproxy.h"
 #include <QNetworkRequest>
 #include <QQmlNetworkAccessManagerFactory>
 
@@ -184,13 +187,18 @@ int main(int argc, char *argv[])
     // Editor original de Calicatas (Qt Quick Controls): estilo Basic, como antes.
     qputenv("QT_QUICK_CONTROLS_STYLE", "Basic");
     QGuiApplication app(argc, argv);
+    // Android IME may be initialized from a Java callback thread. Pre-create the
+    // lazy QInputMethod on Qt GUI thread before any keyboard event arrives.
+    (void)QGuiApplication::inputMethod();
     QQuickStyle::setStyle("Basic");
 
     QCoreApplication::setOrganizationName("InGePlus");
     QCoreApplication::setOrganizationDomain("ingeplus.app");
     QCoreApplication::setApplicationName("InGePlusMobile");
     QCoreApplication::setApplicationVersion("1.1.13");
-
+    // Calidad gráfica VERY_HIGH/EXTREME: MSAA y render de texto antes de crear la ventana.
+    InGeGraphicsCore::applyStartupFidelity();
+    // Earth's native WebView is below the SAME Qt surface; QML draws its Dock above.
     { auto format=QSurfaceFormat::defaultFormat(); format.setAlphaBufferSize(8); QSurfaceFormat::setDefaultFormat(format); }
 
     qInfo() << "INGE_STARTUP_STAGE QT_APP_READY";
@@ -228,6 +236,7 @@ int main(int argc, char *argv[])
     DropboxBridge dropboxBridge(&app);
     DocsOps docsOps(&app);
     InGeGraphicsCore graphicsCore(&app);
+    AccessRequestsClient accessRequests(&app);   // Solicitudes de acceso (Configuración, administradores)
     FlowHaptics flowHaptics(&app);
     // Dock contextual: controladores originales; canal "qml" (sin vista nativa).
     DockContextController dockContextController(&app);
@@ -254,6 +263,7 @@ int main(int argc, char *argv[])
     qmlRegisterSingletonInstance("InGe", 1, 0, "CalicataCloud", &calicataCloud);
     qmlRegisterSingletonInstance("InGe", 1, 0, "Dropbox", &dropboxBridge);
     qmlRegisterSingletonInstance("InGe", 1, 0, "GraphicsCore", &graphicsCore);
+    qmlRegisterSingletonInstance("InGe", 1, 0, "AccessRequests", &accessRequests);
     qmlRegisterSingletonInstance("InGe", 1, 0, "FlowHaptics", &flowHaptics);
     // Editor original de Calicatas: motor global único InGe.CoreFlow 3.0.
     qmlRegisterSingletonType(
@@ -343,10 +353,13 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("InGeAssistant", &geminiAssistant);
     renditionFlutterBridge->setCoreRemote(&coreRemote);
     engine.rootContext()->setContextProperty("FS", &fs);
+    static SatelliteTileProxy satelliteTiles;
+    engine.rootContext()->setContextProperty("SatelliteTiles", &satelliteTiles);
     engine.rootContext()->setContextProperty("Perms", &perms);
     engine.rootContext()->setContextProperty("EarthNative", &earthNative);
     engine.rootContext()->setContextProperty("appCtx", ctx);
     engine.rootContext()->setContextProperty("auth", static_cast<QObject*>(ctx->auth()));
+    engine.rootContext()->setContextProperty("biometric", new BiometricGate(&app));
     engine.rootContext()->setContextProperty("onboarding", &onboarding);
     engine.rootContext()->setContextProperty("renditions", renditions);
     engine.rootContext()->setContextProperty("renditionLocalStore", renditionLocalStore);

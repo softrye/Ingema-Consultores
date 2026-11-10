@@ -1,8 +1,11 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Shapes
+import QtQuick.Effects
 import "RStyle.js" as S
+import ".." as Mobile                          // GlassSurface: Liquid Glass oficial
 import "../flowcore" as FlowCore
+import InGe.CoreFlow 3.0 as CoreFlowModule           // ganchos «Extrema» del motor único
 
 // Subapp Rendiciones (QML nativo, misma APK). Arquitectura:
 // HomeScreen -> RenditionsApp -> RenditionsUi (C++) -> RenditionFlutterBridge
@@ -25,6 +28,13 @@ Item {
     property var haptics: null                 // FlowHaptics (motor háptico existente), opcional
     property Item dockAnchor: null             // dock contextual global (HomeScreen), sólo para anclar paneles
     property var flow: null                    // motor único InGeCoreFlow (teclado/IME), opcional
+    readonly property var extremeFlow: CoreFlowModule.InGeCoreFlow   // ganchos «Extrema»
+    property Item touchLayer: null             // anfitrión global de menús 3D Touch (HomeScreen)
+    // Caja con su menú 3D Touch abierto (HomeScreen desenfoca todo y la eleva).
+    property Item homeTouchItem: null
+    property var homeTouchMenu: null           // menú 3D Touch de la lista (Atrás lo cierra)          // tarjeta de la lista con su menú 3D Touch abierto
+    readonly property Item touchFocusItem: detailPage && detailPage.expensesTab && detailPage.expensesTab.focusTileItem
+                                           ? detailPage.expensesTab.focusTileItem : homeTouchItem
     property var authSession: typeof auth !== "undefined" ? auth : null   // AuthSession real (renovar sesión)
     signal requestBack()
     signal requestOpenDrive()
@@ -143,6 +153,82 @@ Item {
     }
 
     // ---------------------------------------------------------- Navegación
+    // Exportar desde la lista: abre la rendición y exporta cuando está seleccionada.
+    property string pendingExportId: ""
+    property string pendingExportFormat: ""
+    property string pendingExportDest: "phone"
+    // ---- Exportación híbrida (como Calicatas): teléfono, InGe Drive o Google Drive.
+    property var exportDestCallback: null
+    property string exportDestFormat: ""
+    function askExportDestination(format, callback) {
+        closeMenus()
+        exportDestFormat = format; exportDestCallback = callback
+        exportDestMenu.anchorX = width / 2; exportDestMenu.anchorY = height * 0.62
+        exportDestMenu.open = true
+    }
+    function chooseExportDestination(destination) {
+        var cb = exportDestCallback
+        exportDestCallback = null; exportDestMenu.close()
+        if (cb) cb(destination)
+    }
+    // Aviso breve de éxito con el destino (los errores conservan su mensaje).
+    // Google Drive avisa al terminar la subida real (evento exportFinished).
+    function exportDone(destination) {
+        if (destination === "google") return
+        shell.toast("Rendición exportada · " + (destination === "phone" ? "Teléfono" : "InGe Drive"), "success")
+    }
+    function runExport(format, destination) {
+        call("ownerExport", { format: format, destination: destination }, "export:" + format, function(ok, result, code, message) {
+            if (!ok) { shell.toast(shell.errorText(code, message), "error"); return }
+            var path = String(result.output || "")
+            if (destination === "phone" && typeof excelExporter !== "undefined" && excelExporter && path.length)
+                excelExporter.openExportedFile(path, true)
+            shell.exportDone(destination)
+        })
+    }
+    function exportFromList(localId, format) {
+        // Exporta directo desde la lista: sólo selecciona la rendición (trae su
+        // versión presentada) sin abrir su pantalla.
+        var id = String(localId)
+        askExportDestination(format, function(destination) {
+            shell.pendingExportId = id; shell.pendingExportFormat = format; shell.pendingExportDest = destination
+            shell.call("select", { localId: id }, "select", function(ok, result, code, message) {
+                if (!ok) { shell.pendingExportId = ""; shell.toast(shell.errorText(code, message), "error"); return }
+                exportRetry.tries = 0; exportRetry.restart()
+            })
+        })
+    }
+    Timer {
+        id: exportRetry
+        interval: 300; repeat: true
+        property int tries: 0
+        property bool retried: false
+        onTriggered: {
+            if (!shell.pendingExportId.length || ++tries > 50) { stop(); shell.pendingExportId = ""; return }
+            var c = shell.st.current || ({})
+            if (String(c.localId || "") !== shell.pendingExportId) return
+            // Espera a que la selección termine de traer la versión presentada.
+            if (shell.phase !== "IDLE" || !String(c.remoteId || "").length || !String(c.currentVersionId || "").length) return
+            stop()
+            var format = shell.pendingExportFormat
+            var retryId = shell.pendingExportId
+            shell.pendingExportId = ""
+            var destination = shell.pendingExportDest
+            shell.call("ownerExport", { format: format, destination: destination }, "export:" + format, function(ok, result, code, message) {
+                if (!ok && code === "SNAPSHOT_REQUIRED" && !exportRetry.retried) {
+                    exportRetry.retried = true                       // un reintento tras cargar la versión
+                    shell.pendingExportId = retryId; shell.pendingExportFormat = format; shell.pendingExportDest = destination
+                    exportRetry.tries = 0; exportRetry.restart(); return
+                }
+                exportRetry.retried = false
+                if (!ok) { shell.toast(shell.errorText(code, message), "error"); return }
+                var path = String(result.output || "")
+                if (destination === "phone" && typeof excelExporter !== "undefined" && excelExporter && path.length)
+                    excelExporter.openExportedFile(path, true)
+                shell.exportDone(destination)                        // sin la ruta interna
+            })
+        }
+    }
     function openDetail(localId) {
         call("select", { localId: localId }, "select", function(ok, result, code, message) {
             if (!ok) { shell.toast(shell.errorText(code, message), "error"); return }
@@ -151,6 +237,7 @@ Item {
     }
     // Nueva rendición: hoja contextual sobre la lista (misma lógica del editor).
     function openCreate() { closeMenus(); createSheet.open = true }
+    readonly property var createSheetEditor: sheetLoader.item
     function openEditor(rendition) { stack.push(editorComponent, { original: rendition }) }
     function openCreated(localId) {
         if (createSheet.open) {                     // creada desde la hoja: abrir su ficha
@@ -160,21 +247,61 @@ Item {
             stack.replace(detailComponent, { localId: localId })
         }
     }
-    readonly property bool modalOpen: createSheet.open || balanceMenu.open || folderMenu.open || statusPanel.open
+    // Hoja o menú modal abierto: el contenido de fondo no debe desplazarse.
+    readonly property bool modalOpen: createSheet.open || balanceMenu.open || folderMenu.open || statusPanel.open || filesPopup.open
+                                      || searchPanel.open || infoPanel.open || activityPanel.open || quickExpensePanel.open
     readonly property bool pageInteractionBusy: !!stack.currentItem && stack.currentItem.renderInteractionBusy === true
     readonly property bool editorActive: createSheet.visible
         || (!!stack.currentItem && stack.currentItem.editingInProgress === true)
+        || (!!detailPage && detailPage.expensesTab.editorActive === true)
+    readonly property bool halloweenBlocked: phase !== "IDLE" || (!!ctl && ctl.pendingKeys.length > 0)
+        || (active && (overlaysVisible || editorActive || navigationTransitionActive))
     readonly property bool overlaysVisible: createSheet.visible || balanceMenu.visible || folderMenu.visible
-        || statusPanel.visible || confirmDialog.visible || dockMenuVisible || pageInteractionBusy
+        || statusPanel.visible || filesPopup.visible || searchPanel.visible || infoPanel.visible
+        || activityPanel.visible || quickExpensePanel.visible || exportDestMenu.visible || notesPanel.visible
+        || confirmDialog.visible || stateSheet.visible || dockMenuVisible || pageInteractionBusy
+    // «+» → editor de gasto nuevo. Si la rendición recién abierta aún no está
+    // lista (sincronizando), el pedido espera hasta 4 s en vez de perderse.
+    property bool pendingNewExpense: false
+    function requestNewExpense() {
+        var d = shell.detailPage
+        if (d && d.editable && d.expensesTab) {
+            pendingNewExpense = false
+            newExpenseRetry.stop()
+            shell.closeMenus()
+            d.tab = "expenses"
+            d.expensesTab.createExpense()
+        } else if (d) {
+            console.info("INGE_RENDITIONS_NEW_EXPENSE queued")
+            pendingNewExpense = true
+            newExpenseRetry.tries = 0
+            newExpenseRetry.restart()
+        }
+    }
+    Timer {
+        id: newExpenseRetry
+        interval: 250; repeat: true
+        property int tries: 0
+        onTriggered: {
+            if (!shell.pendingNewExpense || !shell.detailPage || ++tries > 16) { stop(); shell.pendingNewExpense = false; return }
+            if (shell.detailPage.editable && shell.detailPage.expensesTab) shell.requestNewExpense()
+        }
+    }
     function closeMenus() {
         balanceMenu.close()
         folderMenu.close()
+        filesPopup.close()
+        searchPanel.close(); infoPanel.close(); activityPanel.close(); quickExpensePanel.close()
         statusPanel.close()
         if (stack.currentItem && stack.currentItem.closeMenus !== undefined) stack.currentItem.closeMenus()
     }
     // workingId: continuar un borrador en la nube (Working Document) en el MISMO editor.
     // section: abrir directamente en General | Comprobante | Pago e importe | Sustentos.
     function openExpense(renditionLocalId, expenseLocalId, workingId, section, prefill) {
+        if (detailPage && detailPage.expensesTab) {
+            if (detailPage.expensesTab.expenseSaveInProgress) return
+            detailPage.expensesTab.persistExpanded()
+        }
         stack.push(expenseComponent, { renditionLocalId: renditionLocalId, expenseLocalId: expenseLocalId || "",
                                        workingId: workingId || "", initialSection: section || "", prefill: prefill || null })
     }
@@ -216,9 +343,19 @@ Item {
     function closePage() { if (stack.depth > 1) stack.pop() }
 
     function handleBack() {
+        if (stateSheet.shown) { if (!stateSheet.busy) stateSheet.close(); return true }
+        if (exportDestMenu.open) { exportDestMenu.close(); return true }
+        if (notesPanel.open) { notesPanel.close(); return true }
         if (confirmDialog.opened) { confirmDialog.close(); return true }
+        if (homeTouchMenu && homeTouchMenu.open) { homeTouchMenu.close(); return true }
+        if (quickExpensePanel.open) { quickExpenseForm.persistLocal(); quickExpensePanel.close(); return true }
+        if (quickExpenseForm.saving) return true
+        if (infoPanel.open) { infoPanel.close(); return true }
+        if (activityPanel.open) { activityPanel.close(); return true }
+        if (searchPanel.open) { searchPanel.close(); return true }
         if (statusPanel.open) { statusPanel.close(); return true }
         if (balanceMenu.open) { balanceMenu.close(); return true }
+        if (filesPopup.open) { filesPopup.close(); return true }
         if (folderMenu.open) { folderMenu.close(); return true }
         if (createSheet.open) {
             if (createSheet.editor && createSheet.editor.handleBack()) return true
@@ -276,6 +413,14 @@ Item {
         }
         function onBridgeError(code, message) { shell.toast(shell.errorText(code, message), "error") }
         function onBridgeEvent(type, event) {
+            if (type === "exportFinished") {          // fin real de la subida a Google Drive
+                if (event.ok === true) shell.toast("Rendición exportada · Google Drive", "success")
+                else {
+                    var text = shell.errorText(event.code, event.message)
+                    if (text.length) shell.toast(text, "error")
+                }
+                return
+            }
             if (type === "receivedReset") {            // cambio de cuenta
                 shell.callbacks = ({})
                 if (stack.depth > 1) stack.popToIndex(0, StackView.Immediate)
@@ -303,10 +448,13 @@ Item {
         id: backdropLayer
         anchors.fill: parent
         Rectangle { anchors.fill: parent; color: S.background }
-        RendicionesSyncAura {
-            objectName: "syncAura"
+        RendicionesSyncBackdrop {
+            auraObjectName: "syncAura"
             anchors.fill: parent
             mode: shell.syncMode
+            dark: S.dark
+            skin: String(shell.ui.appSkin || "none")
+            halloweenController: shell.ui.seasonalController || null
             running: shell.active && shell.visible
             reducedMotion: shell.ui.reducedMotion === true
             lowCost: shell.ui.dockLowCostGlass === true
@@ -353,9 +501,12 @@ Item {
         }
         // Fluidez: el fondo (aurora/universo) se mueve lento; se recaptura a ~20 fps
         // y a baja resolución (el vidrio lo esmerila igual), no en cada cuadro.
-        live: false
+        // HIGH/MEDIUM_HIGH: en vivo a resolución completa con mipmaps (Liquid Glass
+        // oficial); el resto, a ~20 fps y reducida. En LOW las tarjetas usan el respaldo.
+        live: shell.cardCaptureAllowed && shell.ui.dockLiveGlass === true
+        mipmap: shell.ui.dockLowCostGlass !== true
         hideSource: false; visible: false; smooth: true
-        readonly property int divisor: shell.ui.dockLowCostGlass === true ? 8 : 6
+        readonly property int divisor: shell.ui.dockLiveGlass === true ? 1 : shell.ui.dockLowCostGlass === true ? 8 : 3
         textureSize: captureSize
     }
     function captureBackdrop() {
@@ -370,12 +521,13 @@ Item {
     onCardCaptureAllowedChanged: if (cardCaptureAllowed) Qt.callLater(shell.captureBackdrop)
     Timer {
         interval: 50; repeat: true
-        running: shell.cardCaptureAllowed && shell.ui.reducedMotion !== true
+        running: shell.cardCaptureAllowed && shell.ui.reducedMotion !== true && !backdropCapture.live
         onTriggered: shell.captureBackdrop()
     }
     // La posición de cada tarjeta (desplazamiento) sí se sigue en cada cuadro: es barato.
     FrameAnimation { running: shell.cardCaptureAllowed; onTriggered: shell.glassTick++ }
-    Binding { target: shell.ui; property: "cardGlassUi"; value: shell.ui.liquidGlass !== false ? cardGlassUi : null }
+    // Sólo con Rendiciones visible: otras subapps que reutilizan RConfirm/RSelect no muestrean este fondo.
+    Binding { target: shell.ui; property: "cardGlassUi"; value: shell.ui.liquidGlass !== false && shell.visible ? cardGlassUi : null }
 
     // El Liquid Glass del Dock global NO se configura aquí: HomeScreen captura
     // esta subapp (renditionsLoader) como fondo del Dock con su motor único.
@@ -500,7 +652,27 @@ Item {
     Component { id: receivedComponent; RenditionReceived { app: shell } }
     Component { id: filesComponent; FilesBrowser { app: shell } }
     // Archivero (sólo lectura) y Papelera global de Files v07, desde el menú Carpeta.
-    function openFiles(mode) { closeMenus(); stack.push(filesComponent, { mode: mode }) }
+    function openFiles(mode) {
+        var x = folderMenu.anchorX, y = folderMenu.anchorY
+        closeMenus()
+        filesPopup.mode = mode
+        filesPopup.anchorX = x; filesPopup.anchorY = y
+        filesPopup.open = true
+    }
+    RGlassMenu {
+        id: filesPopup
+        objectName: "filesPopup"
+        property string mode: "archive"
+        ui: shell.ui
+        z: 46
+        cardWidth: 340 * shell.ui.u
+        Loader {
+            width: parent.width
+            height: Math.min(item ? item.compactHeight : 120 * shell.ui.u, 440 * shell.ui.u, filesPopup.maxCardHeight - 16 * shell.ui.u)
+            active: filesPopup.open || filesPopup.visible
+            sourceComponent: Component { FilesBrowser { app: shell; mode: filesPopup.mode; compact: true } }
+        }
+    }
 
     RConfirm { id: confirmDialog; objectName: "confirmDialog"; ui: shell.ui }
 
@@ -513,10 +685,31 @@ Item {
         anchors.fill: parent
         z: 30
         visible: open || sheetCard.y < height
-        MouseArea {                                  // tocar fuera cierra (lo escrito queda en borrador)
+        // Hoja modal: ni el toque, ni el arrastre, ni la rueda (scrcpy/emulador) llegan
+        // a la lista de fondo; tocar fuera cierra (lo escrito queda en borrador).
+        MouseArea {
             anchors.fill: parent
             enabled: createSheet.open
+            preventStealing: true
             onClicked: createSheet.open = false
+            onWheel: function(wheel) { wheel.accepted = true }
+        }
+        // Fondo difuminado y atenuado: la lista de atrás no se lee a través de la hoja.
+        MultiEffect {
+            anchors.fill: parent
+            source: backdropLayer
+            blurEnabled: shell.ui.liquidGlass !== false; blurMax: 48; blur: 1.0
+            autoPaddingEnabled: false
+            opacity: createSheet.open ? 1 : 0
+            visible: opacity > 0.01
+            Behavior on opacity { NumberAnimation { duration: 220 } }
+        }
+        Rectangle {
+            anchors.fill: parent
+            color: S.dark ? Qt.rgba(0, 0, 0, 0.55) : Qt.rgba(1, 1, 1, 0.45)
+            opacity: createSheet.open ? 1 : 0
+            visible: opacity > 0.01
+            Behavior on opacity { NumberAnimation { duration: 220 } }
         }
         Rectangle {
             id: sheetCard
@@ -524,33 +717,90 @@ Item {
             x: 10 * shell.ui.u
             height: Math.min(parent.height * 0.76, 640 * shell.ui.u)
             y: createSheet.open ? parent.height - height - shell.ui.dockArea + 8 * shell.ui.u : parent.height + 20 * shell.ui.u
-            Behavior on y { NumberAnimation { duration: createSheet.open ? 260 : 180; easing.type: Easing.OutCubic } }
+            // Hero (sólo advancedMotion): .cover(.up) al presentar (deceleration) y .uncover al
+            // cerrar (standard), con optimizedDurationTo según la distancia recorrida.
+            readonly property var hero: shell.flow && shell.flow.advancedMotion === true ? shell.flow.hero : null
+            Behavior on y { NumberAnimation {
+                duration: sheetCard.hero ? sheetCard.hero.duration(sheetCard.height + 20 * shell.ui.u) : createSheet.open ? 260 : 180
+                easing.type: sheetCard.hero ? Easing.BezierSpline : Easing.OutCubic
+                easing.bezierCurve: sheetCard.hero ? (createSheet.open ? sheetCard.hero.deceleration : sheetCard.hero.standard) : [] } }
             radius: 30 * shell.ui.u
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.97) }
-                GradientStop { position: 1.0; color: Qt.rgba(246 / 255, 249 / 255, 253 / 255, 0.95) }
+            // Vidrio del Dock (preset único, dockGlassTint); sin vidrio, la hoja opaca anterior.
+            readonly property bool liquid: shell.ui.liquidGlass !== false && !!shell.ui.liquidGlassMaterial && !!shell.ui.cardGlassUi
+            color: "transparent"
+            property int geometryTick: 0
+            onYChanged: geometryTick++
+            QtObject {                                  // host con la posición de la hoja (deslizamiento)
+                id: sheetGlass
+                readonly property Item backdrop: shell.ui.cardGlassUi ? shell.ui.cardGlassUi.backdrop : null
+                readonly property bool glassReady: !!shell.ui.cardGlassUi && shell.ui.cardGlassUi.glassReady !== false
+                readonly property var glassTexture: shell.ui.cardGlassUi ? shell.ui.cardGlassUi.glassTexture : null
+                readonly property int glassTick: (shell.ui.cardGlassUi ? shell.ui.cardGlassUi.glassTick : 0) + sheetCard.geometryTick
             }
-            border.width: 1
-            border.color: Qt.rgba(1, 1, 1, 0.95)
-            MouseArea { anchors.fill: parent }          // no atraviesa a la lista
+            Mobile.DockGlassPanel {
+                visible: sheetCard.liquid
+                glassUi: sheetGlass
+                tint: shell.ui.dockGlassTint
+                radius: sheetCard.radius
+                u: shell.ui.u
+            }
+            Rectangle {                                 // claro: velo blanco leve; sin vidrio: hoja opaca
+                anchors.fill: parent
+                radius: parent.radius
+                visible: !sheetCard.liquid || !S.dark
+                color: Qt.rgba(1, 1, 1, 0.22)
+                gradient: sheetCard.liquid ? null : opaqueSheet
+                border.width: sheetCard.liquid ? 0 : 1
+                border.color: S.edge(0.95)
+                Gradient {
+                    id: opaqueSheet
+                    GradientStop { position: 0.0; color: S.dark ? Qt.rgba(20 / 255, 25 / 255, 36 / 255, 0.97) : S.glass(0.97) }
+                    GradientStop { position: 1.0; color: S.dark ? Qt.rgba(16 / 255, 20 / 255, 30 / 255, 0.97) : S.lite(246, 249, 253, 0.97) }
+                }
+            }
+            MouseArea { anchors.fill: parent; preventStealing: true; onWheel: function(wheel) { wheel.accepted = true } }   // no atraviesa a la lista
             Rectangle {                                 // asa
                 width: 40 * shell.ui.u; height: 5 * shell.ui.u; radius: height / 2
                 anchors.horizontalCenter: parent.horizontalCenter
                 y: 10 * shell.ui.u
                 color: S.ink(0.18)
             }
-            Column {
+            Item {                                      // encabezado aprobado (imagen 1)
                 id: sheetTitle
-                x: 22 * shell.ui.u
-                y: 28 * shell.ui.u
-                width: parent.width - 44 * shell.ui.u
-                spacing: 6 * shell.ui.u
-                Text { text: "Nueva rendición"; color: S.text; font.family: shell.ui.fontFamily; font.pixelSize: 24 * shell.ui.u; font.weight: Font.DemiBold }
-                Text {
-                    width: parent.width
-                    text: "¿Qué proyectos quiere asociar a la rendición?"
-                    color: S.muted; wrapMode: Text.WordWrap
-                    font.family: shell.ui.fontFamily; font.pixelSize: 16 * shell.ui.u
+                x: 18 * shell.ui.u
+                y: 24 * shell.ui.u
+                width: parent.width - 36 * shell.ui.u
+                height: 64 * shell.ui.u
+                Rectangle {
+                    id: sheetIcon
+                    width: 58 * shell.ui.u; height: width; radius: 16 * shell.ui.u
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: Qt.rgba(242 / 255, 140 / 255, 40 / 255, 0.14)
+                    border.width: 1; border.color: Qt.rgba(242 / 255, 140 / 255, 40 / 255, 0.35)
+                    Text { anchors.centerIn: parent; text: String.fromCharCode(0xE0C8); color: "#E8741C"
+                           font.family: shell.ui.iconFamily; font.pixelSize: 30 * shell.ui.u }
+                }
+                Column {
+                    x: sheetIcon.width + 14 * shell.ui.u
+                    width: parent.width - x - 56 * shell.ui.u
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 4 * shell.ui.u
+                    Text { width: parent.width; text: "Nueva Rendición"; color: S.text; elide: Text.ElideRight
+                           font.family: shell.ui.fontFamily; font.pixelSize: 22 * shell.ui.u; font.weight: Font.DemiBold }
+                    Text { width: parent.width; text: "Completa la información para crear una nueva rendición"
+                           color: S.muted; wrapMode: Text.WordWrap
+                           font.family: shell.ui.fontFamily; font.pixelSize: 14 * shell.ui.u }
+                }
+                Rectangle {
+                    width: 46 * shell.ui.u; height: width; radius: width / 2
+                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                    color: sheetCloseTap.pressed ? S.ink(0.12) : S.ink(0.05)
+                    border.width: 1; border.color: S.border
+                    Text { anchors.centerIn: parent; text: String.fromCharCode(0xE1B2); color: S.navy
+                           font.family: shell.ui.iconFamily; font.pixelSize: 22 * shell.ui.u }
+                    MouseArea { id: sheetCloseTap; anchors.fill: parent; onClicked: createSheet.open = false }
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "Cerrar"
                 }
             }
             Loader {
@@ -603,8 +853,88 @@ Item {
     }
     readonly property var pageDock: stack.currentItem && stack.currentItem.dockActions !== undefined ? stack.currentItem : null
     readonly property var detailPage: stack.currentItem && stack.currentItem.isRenditionDetail === true ? stack.currentItem : null
-    readonly property string liveRenditionId: detailPage ? String(detailPage.remoteId || "") : ""
-    onLiveRenditionIdChanged: { liveReload.stop(); liveReloadPending = false }
+
+    // ------------------------------------------- Edición en vivo (igual que la Web)
+    // Canal privado "rendition:<id>": presencia de quién la tiene abierta y aviso
+    // «invalidate» tras cada guardado; al recibirlo se vuelve a pedir al servidor.
+    // El canal se crea dinámicamente para que las pruebas de escritorio (sin el
+    // módulo C++) sigan funcionando.
+    // La presencia acompaña al editor: StackView deja de exponer detailPage al
+    // abrir ExpenseEditor o RenditionEditor, aunque seguimos en la misma rendición.
+    // La identidad remota se obtiene del documento seleccionado, no del índice de
+    // la página, y nunca se inventa para una rendición todavía local.
+    readonly property string liveRenditionId: {
+        var view = stack.currentItem
+        if (!view) return ""
+        if (view.isRenditionDetail === true) return String(view.remoteId || "")
+        if (view.isRenditionReceived === true) return String(view.identity.renditionId || "")
+        if (view.editingInProgress !== true) return ""
+        if (view.original !== undefined && view.original !== null)
+            return String(view.original.remoteId || "")
+        var id = String(view.renditionLocalId || "")
+        if (!id.length) return ""
+        var current = st.current || ({})
+        if (String(current.localId || "") === id) return String(current.remoteId || "")
+        var rows = st.renditions || []
+        for (var i = 0; i < rows.length; ++i)
+            if (String(rows[i].localId || "") === id) return String(rows[i].remoteId || "")
+        return ""
+    }
+
+    // ------------------------------------- Estado y revisión (contratos de la Web)
+    // get_rendition_review_context_v03 decide qué estados ofrece (admin) o si el
+    // dueño puede solicitar un cambio; list_rendition_review_observations_v08 trae
+    // los comentarios del revisor y get_document_review_observation_v07 el vigente (banner).
+    property var reviewCtx: null
+    property var reviewNotes: []
+    property var reviewNote: null
+    property bool reviewNotesFailed: false
+    property string dismissedReviewNote: ""
+    onLiveRenditionIdChanged: {
+        liveReload.stop()
+        liveReloadPending = false
+        loadReview()
+    }
+    function loadReview() {
+        var id = liveRenditionId
+        reviewCtx = null; reviewNotes = []; reviewNote = null; reviewNotesFailed = false
+        if (!id.length) return
+        call("reviewContext", { renditionId: id }, "reviewContext:" + id, function(ok, result) {
+            if (ok && shell.liveRenditionId === id) shell.reviewCtx = (result.rows || [])[0] || null
+        })
+        call("reviewObservations", { renditionId: id }, "reviewNotes:" + id, function(ok, result) {
+            if (shell.liveRenditionId !== id) return
+            if (!ok) { shell.reviewNotesFailed = true; return }
+            var rows = result.rows || []
+            if (rows.length === 1 && Array.isArray(rows[0])) rows = rows[0]
+            // En orden de llegada, como parseDocumentReviewObservations (Web).
+            shell.reviewNotes = rows.filter(function(n) { return n && String(n.body || "").trim().length })
+                .sort(function(a, b) { return Date.parse(a.created_at) - Date.parse(b.created_at)
+                                              || String(a.id).localeCompare(String(b.id)) })
+        })
+        call("reviewObservation", { renditionId: id }, "reviewNote:" + id, function(ok, result) {
+            if (!ok || shell.liveRenditionId !== id) return
+            var note = (result.rows || [])[0] || null
+            shell.reviewNote = note && note.id && String(note.body || "").trim().length ? note : null
+        })
+    }
+    readonly property var reviewMenu: {
+        var items = [], ctx = reviewCtx
+        var next = ctx ? (ctx.next_states || []) : []
+        for (var i = 0; i < next.length; ++i)
+            items.push({ id: "renditions.review.to." + next[i], label: "Pasar a «" + (ctl ? ctl.statusLabel(String(next[i])) : next[i]) + "»",
+                         icon: "action.check", command: "renditions.review.to." + next[i] })
+        if (ctx && ctx.can_request_edit === true && !next.length) {
+            var own = ["EN_REVISION", "OBSERVADO", "APROBADO"]
+            for (var j = 0; j < own.length; ++j)
+                items.push({ id: "renditions.review.req." + own[j], label: "Solicitar «" + (ctl ? ctl.statusLabel(own[j]) : own[j]) + "»",
+                             icon: "action.check", command: "renditions.review.req." + own[j] })
+        }
+        items.push({ id: "renditions.review.notes", label: "Observaciones" + (reviewNotes.length ? " (" + reviewNotes.length + ")" : ""),
+                     icon: "renditions.activity", command: "renditions.review.notes" })
+        items.push({ id: "renditions.activity", label: "Actividad", icon: "renditions.activity", command: "renditions.activity" })
+        return items
+    }
     property var liveChannel: null
     readonly property var livePeers: liveChannel ? liveChannel.members : []
     readonly property bool liveJoined: !!liveChannel && liveChannel.state === "JOINED"
@@ -641,8 +971,29 @@ Item {
               value: shell.liveRenditionId.length ? "rendition:" + shell.liveRenditionId : "" }
     Binding { target: shell.liveChannel; property: "active"; when: shell.liveChannel !== null
               value: shell.active && Qt.application.state === Qt.ApplicationActive }
+    Binding { target: shell.liveChannel; property: "fieldSettleMs"; when: shell.liveChannel !== null
+              value: 150 }
     Binding { target: shell.liveChannel; property: "trackMeta"; when: shell.liveChannel !== null
               value: ({ routeIds: shell.liveRenditionId.length ? [shell.liveRenditionId] : [] }) }
+    // Sector en foco: el ancestro más cercano del foco con `presenceField` se publica
+    // en la presencia (setField: 150 ms en Rendiciones, se limpia al cambiar de
+    // rendición o al salir). Los demás lo ven iluminado con FieldPresenceHighlight.
+    readonly property string liveFocusField: {
+        // Nunca publicar el foco de otra hoja/página (ni un campo oculto al
+        // suspender Android); se limpia con presencia vacía al perder el foco.
+        if (!shell.active || !shell.visible || !shell.liveRenditionId.length
+                || createSheet.open || Qt.application.state !== Qt.ApplicationActive) return ""
+        for (var item = shell.Window.activeFocusItem; item; item = item.parent)
+            if (item.presenceField !== undefined && String(item.presenceField).length) return String(item.presenceField)
+        return ""
+    }
+    onLiveFocusFieldChanged: if (liveChannel && typeof liveChannel.setField === "function") liveChannel.setField(liveFocusField)
+    // Etiqueta común del sector de un gasto («Gasto N», la numeración visible).
+    function expensePresenceField(localId) {
+        var rows = (st.expenses || []).filter(function(e) { return e.archived !== true })
+        for (var i = 0; i < rows.length; ++i) if (String(rows[i].localId) === String(localId)) return "Gasto " + (i + 1)
+        return ""
+    }
     Connections {
         target: shell.liveChannel
         ignoreUnknownSignals: true
@@ -668,45 +1019,31 @@ Item {
         if (stack.depth <= 1) return homeDockActions
         if (pageDock) return pageDock.dockActions
         if (!detailPage) return [back]
+        // Rendición abierta (imagen 2): [Buscar] [Información] [+ Nuevo] [Actividad].
+        // Sin botón Atrás en el Dock (Atrás nativo de Android). Cada acción abre su
+        // selector 3D Touch (RGlassMenu) anclado a su botón; "+" toca = Nuevo gasto
+        // y Deep Press = opciones de creación rápida.
         var d = detailPage
-        var suggestions = d.suggestions || []
-        var top = suggestions.length ? suggestions[0] : null
-        var children = suggestions.map(function(x, i) {
-            return { id: "renditions.suggest." + x.key, label: (i === 0 ? "Sugerido: " : "") + x.label,
-                     icon: x.icon, command: "renditions.suggest." + x.key, enabled: true, priority: i + 1 }
-        })
-        // «Editar gastos» es una RAMA sin comando propio: toque o Deep Press sólo
-        // abren el Quick Bubble oficial (dockSlotTap -> dockOpenMenu) y, al no
-        // tener `command`, dockMenuItems no inserta una entrada primaria. Sólo
-        // las subacciones elegidas ejecutan algo. Escritura sólo con permiso.
-        var expenseItems = [{ id: "renditions.expenses.list", label: "Ver todos los gastos", icon: "documents.file",
-                              command: "renditions.expenses.list", enabled: true, priority: 1 }]
-        var rows = (d.expenses || []).slice(-7).reverse()               // los más recientes
-        for (var i = 0; i < rows.length; ++i) {
-            var e = rows[i]
-            var concept = String(e.concept || "Gasto sin concepto")
-            expenseItems.push({ id: "renditions.expenses.open." + e.localId,
-                                label: (d.writable ? "Editar: " : "Ver: ") + concept + " · "
-                                       + (shell.ctl ? shell.ctl.formatMoney(e.amount, String(e.currencyCode || e.currency_code || "PEN")) : ""),
-                                icon: d.writable ? "action.edit" : "documents.file",
-                                command: "renditions.expenses.open." + e.localId, enabled: true, priority: i + 2 })
-        }
-        if (d.editable)
-            expenseItems.push({ id: "renditions.expenses.add", label: "Agregar gasto", icon: "action.add",
-                                command: "renditions.expenses.add", enabled: true, priority: 9 })
-        var list = [back,
-            { id: "renditions.editExpenses", label: "Editar gastos", icon: "action.edit",
-              children: expenseItems, enabled: d.exists, priority: 2 },
-            { id: "renditions.addExpense", label: "Agregar gasto", icon: "action.add",
-              command: "renditions.addExpense", enabled: d.editable, priority: 3 }]
-        children.push({ id: "renditions.status", label: "Estado de Rendiciones", icon: "renditions.status",
-                        command: "renditions.status", enabled: true, priority: children.length + 1 })
-        if (top)
-            list.push({ id: "renditions.suggest", label: top.label, icon: top.icon,
-                        command: "renditions.suggest." + top.key, children: children, enabled: true, priority: 4 })
-        else
-            list.push(statusAction)
-        return list
+        var last = (d.expenses || []).slice(-1)[0] || null
+        return [
+            { id: "renditions.search", label: "Buscar", icon: "renditions.search",
+              command: "renditions.search", enabled: d.exists, priority: 1 },
+            { id: "renditions.info", label: "Información", icon: "renditions.info",
+              command: "renditions.info", enabled: d.exists, priority: 2 },
+            { id: "renditions.new", label: "Nuevo", icon: "action.add", command: "renditions.quickExpense",
+              tapCommand: true, enabled: d.exists, priority: 3,
+              children: [
+                { id: "renditions.quickExpense", label: "Nuevo gasto", icon: "action.add",
+                  command: "renditions.quickExpense", enabled: d.editable, priority: 0 },
+                { id: "renditions.expenses.add", label: "Nuevo gasto (formulario completo)", icon: "documents.file",
+                  command: "renditions.expenses.add", enabled: d.editable, priority: 1 },
+                { id: "renditions.expenses.duplicate", label: "Duplicar último gasto", icon: "action.copy",
+                  command: "renditions.expenses.duplicate", enabled: d.editable && last !== null, priority: 2 },
+                { id: "renditions.expenses.list", label: "Ver todos los gastos", icon: "documents.file",
+                  command: "renditions.expenses.list", enabled: true, priority: 3 } ] },
+            { id: "renditions.review", label: "Estado", icon: "action.check",
+              enabled: d.exists, priority: 4, children: shell.reviewMenu }
+        ]
     }
     // El texto JSON sólo cambia cuando cambia el contenido: el dock no se
     // regenera (ni se cierra su menú) por cada estado publicado por el bridge.
@@ -740,6 +1077,21 @@ Item {
         else if (name.indexOf("renditions.expenses.open.") === 0) {
             if (shell.detailPage)
                 shell.openExpense(shell.detailPage.localId, name.substring("renditions.expenses.open.".length))
+        }
+        else if (name === "renditions.search") shell.togglePanel(searchPanel, 0)
+        else if (name === "renditions.info") shell.togglePanel(infoPanel, 1)
+        else if (name === "renditions.activity") shell.togglePanel(activityPanel, 3)
+        else if (name === "renditions.review.notes") shell.togglePanel(notesPanel, 3)
+        else if (name.indexOf("renditions.review.to.") === 0) stateSheet.openFor("transition", name.substring(21))
+        else if (name.indexOf("renditions.review.req.") === 0) stateSheet.openFor("request", name.substring(22))
+        else if (name === "renditions.expenses.duplicate") shell.duplicateLastExpense()
+        else if (name === "renditions.quickExpense") {
+            // Mismo editor aprobado que al abrir un gasto; si aún no está lista, espera.
+            if (shell.detailPage && shell.detailPage.editable && shell.detailPage.expensesTab) {
+                shell.closeMenus()
+                shell.detailPage.tab = "expenses"
+                shell.detailPage.expensesTab.createExpense()
+            } else shell.requestNewExpense()
         }
         else if (name === "renditions.addExpense") {
             if (shell.detailPage && shell.detailPage.editable) shell.openExpense(shell.detailPage.localId, "")
@@ -800,9 +1152,55 @@ Item {
         tools: [{ id: "renditions.assistant.expense", label: "Registrar gasto", glyph: 0xE412, primary: true,
                   enabled: assistantRendition !== null },
                 { id: "renditions.assistant.target", label: assistantRendition ? "Rendición: " + renditionName(assistantRendition) : "Sin rendición editable",
-                  glyph: 0xE0D7, offline: true, enabled: editableRenditions.length > 1 }]
+                  glyph: 0xE0D7, offline: true, enabled: editableRenditions.length > 1 },
+                // Opciones de la imagen 2 sobre el gasto activo (expandido o último): sólo consulta.
+                { id: "renditions.assistant.analyze", label: "Analizar gasto actual", glyph: 0xE151, enabled: assistantExpense !== null },
+                { id: "renditions.assistant.category", label: "Sugerir categoría", glyph: 0xE17F, enabled: assistantExpense !== null },
+                { id: "renditions.assistant.receipt", label: "Verificar comprobante", glyph: 0xE16A, enabled: assistantExpense !== null },
+                { id: "renditions.assistant.observation", label: "Generar observación", glyph: 0xE0CC, enabled: assistantExpense !== null },
+                { id: "renditions.assistant.help", label: "Ayuda de la pantalla", glyph: 0xE082 }]
+    })
+    // Gasto activo para InGe IA: el expandido en la lista o el último de la ficha abierta.
+    readonly property var assistantExpense: {
+        var d = detailPage
+        if (!d) return null
+        var tab = d.expensesTab
+        if (tab && tab.expandedRow) return tab.expandedRow
+        return (d.expenses || []).slice(-1)[0] || null
+    }
+    function catalogName(kind, code) {
+        if (!ctl) return code
+        var rows = ctl.catalog(kind)
+        for (var i = 0; i < rows.length; ++i) if (S.text_(rows[i], "code") === code) return S.text_(rows[i], "name") || code
+        return code || "sin dato"
+    }
+    function expenseSummaryForAi(e) {
+        if (!e || !ctl) return ""
+        var files = (e.attachments || []).filter(function(a) { return !S.text_(a, "archived_at").length }).length
+        return "Gasto: concepto «" + S.text_(e, "concept") + "», importe " + ctl.formatMoney(e.amount, S.text_(e, "currencyCode", "currency_code") || "PEN")
+               + ", fecha " + S.date(S.text_(e, "expenseDate", "expense_date")) + ", categoría " + catalogName("CATEGORY", S.text_(e, "categoryCode", "category_code"))
+               + ", medio de pago " + catalogName("PAYMENT_METHOD", S.text_(e, "paymentMethodCode", "payment_method_code"))
+               + ", comprobante " + catalogName("SUPPORT_TYPE", S.text_(e, "supportTypeCode", "support_type_code"))
+               + " número " + (S.text_(e, "supportNumber", "support_number") || "sin dato") + ", proveedor " + (S.text_(e, "beneficiary") || "sin dato")
+               + ", RUC " + (S.text_(e, "ruc") || "sin dato") + ", sustentos adjuntos: " + files + ". Categorías disponibles: " + catalogText("CATEGORY") + "."
+    }
+    readonly property var assistantPrompts: ({
+        "renditions.assistant.analyze": "Analiza este gasto de rendición: coherencia entre concepto, categoría, importe y comprobante, y qué falta para que el revisor lo valide.",
+        "renditions.assistant.category": "Sugiere la categoría más adecuada SOLO de la lista disponible y explica por qué. No cambies nada: el usuario decide.",
+        "renditions.assistant.receipt": "Revisa si el comprobante declarado es coherente (tipo, número, RUC, proveedor e IGV si es factura) y qué verificar en el documento físico.",
+        "renditions.assistant.observation": "Redacta una observación breve y profesional (máximo 2 frases) que el usuario pueda copiar en el campo Observaciones.",
+        "renditions.assistant.help": "Explica brevemente cómo usar esta pantalla de Rendiciones: Buscar, Información, + (gasto rápido o formulario completo), Actividad, y cómo editar un gasto tocándolo en la lista."
     })
     function assistantRunTool(toolId, assistant) {
+        if (assistantPrompts[toolId] !== undefined) {
+            var help = toolId === "renditions.assistant.help"
+            if (!help && !assistantExpense) return
+            assistant.note(help ? "Pedí a InGe IA la ayuda de esta pantalla."
+                                : "Se envió a InGe IA el gasto «" + S.text_(assistantExpense, "concept") + "» (sin identificadores). No se modifica nada.")
+            assistant.ask(assistantPrompts[toolId] + (help ? "" : " " + expenseSummaryForAi(assistantExpense)),
+                          function(answer) { assistant.push(assistant.key, { role: "assistant", text: answer, kind: "chat" }) })
+            return
+        }
         if (toolId === "renditions.assistant.target") {           // alterna entre rendiciones editables reales
             var rows = editableRenditions
             if (rows.length < 2) return
@@ -935,6 +1333,72 @@ Item {
             }
         }
     }
+    // Selectores 3D Touch de la rendición abierta (mismo RGlassMenu del resto).
+    function togglePanel(panel, cell) {
+        var open = !panel.open
+        closeMenus(); createSheet.open = false
+        if (!open) return
+        var p = dockCellPoint(cell)
+        panel.anchorX = p.x; panel.anchorY = p.y
+        panel.open = true
+    }
+    // "Duplicar último gasto": abre el formulario EXISTENTE prellenado (sin fecha ni
+    // número de comprobante); nada se guarda hasta que el usuario lo registre.
+    function duplicateLastExpense() {
+        var d = detailPage
+        if (!d || !d.editable) return
+        var last = (d.expenses || []).slice(-1)[0]
+        if (!last) return
+        var prefill = {}
+        ;["concept", "amount", "currencyCode", "projectId", "categoryCode", "paymentMethodCode", "paymentMethodDetail",
+          "supportTypeCode", "beneficiary", "ruc", "justification"].forEach(function(k) {
+            var snake = k.replace(/[A-Z]/g, function(c) { return "_" + c.toLowerCase() })
+            var v = S.text_(last, k, snake)
+            if (v.length) prefill[k] = v
+        })
+        openExpense(d.localId, "", "", "general", prefill)
+    }
+    // Actividad: SOLO marcas de tiempo reales de la ficha, sus gastos y sustentos
+    // (createdAt/updatedAt). El cliente no recibe el autor de cada cambio: no se muestra.
+    function activityEvents(d) {
+        var out = []
+        if (!d || !d.current) return out
+        var c = d.current
+        function add(ts, kind, title, detail, glyph, tone) {
+            var t = String(ts || "")
+            if (t.length >= 10) out.push({ at: t, kind: kind, title: title, detail: detail, glyph: glyph, tone: tone })
+        }
+        add(S.text_(c, "createdAt", "created_at"), "rendition", "Rendición creada", String(c.visibleCode || ""), 0xE0C8, S.corporateBlue)
+        var cu = S.text_(c, "updatedAt", "updated_at")
+        if (cu.length && cu !== S.text_(c, "createdAt", "created_at"))
+            add(cu, "rendition", "Rendición actualizada", ctl ? ctl.statusLabel(String(c.status || "")) : "", 0xE145, S.accentSoft)
+        var rows = d.expenses || []
+        for (var i = 0; i < rows.length; ++i) {
+            var e = rows[i]
+            var what = (S.text_(e, "concept") || "Gasto") + (ctl ? " · " + ctl.formatMoney(e.amount, S.text_(e, "currencyCode", "currency_code") || "PEN") : "")
+            var created = S.text_(e, "createdAt", "created_at"), updated = S.text_(e, "updatedAt", "updated_at")
+            add(created, "expense", "Gasto creado", what, 0xE13D, S.warning)
+            if (updated.length && updated !== created) add(updated, "expense", "Gasto actualizado", what, 0xE12F, S.corporateBlue)
+            var files = e.attachments || []
+            for (var k = 0; k < files.length; ++k)
+                add(S.text_(files[k], "createdAt", "created_at"), "file", "Comprobante agregado",
+                    S.text_(files[k], "fileName", "file_name") || "Sustento", 0xE0CC, S.success)
+        }
+        out.sort(function(a, b) { return a.at < b.at ? 1 : a.at > b.at ? -1 : 0 })
+        return out.slice(0, 60)
+    }
+    function dayLabel(iso) {
+        var d = new Date(iso)
+        if (isNaN(d.getTime())) return S.date(iso)
+        var today = new Date(); today.setHours(0, 0, 0, 0)
+        var day = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+        var diff = Math.round((today - day) / 86400000)
+        return diff === 0 ? "Hoy" : diff === 1 ? "Ayer" : S.date(day.getFullYear() + "-" + ("0" + (day.getMonth() + 1)).slice(-2) + "-" + ("0" + day.getDate()).slice(-2))
+    }
+    function timeLabel(iso) {
+        var d = new Date(iso)
+        return isNaN(d.getTime()) ? "" : ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2)
+    }
     function toggleBalance() {
         var open = !balanceMenu.open
         closeMenus(); createSheet.open = false
@@ -961,6 +1425,7 @@ Item {
         id: balanceMenu
         objectName: "balanceMenu"
         ui: shell.ui
+        liquidUi: shell.ui.cardGlassUi || null            // vidrio del Dock
         z: 45
         cardWidth: 360 * shell.ui.u
         readonly property var c: shell.balanceCounts
@@ -1053,6 +1518,7 @@ Item {
         id: folderMenu
         objectName: "folderMenu"
         ui: shell.ui
+        liquidUi: shell.ui.cardGlassUi || null            // vidrio del Dock
         z: 45
         cardWidth: 330 * shell.ui.u
         RMenuItem {
@@ -1108,10 +1574,400 @@ Item {
         }
     }
 
+
+    readonly property real keyboardTop: {
+        var rect = Qt.inputMethod.keyboardRectangle
+        if (!Qt.inputMethod.visible || rect.height <= 0) return height
+        var p = shell.mapFromItem(null, rect.x, rect.y)
+        return Math.max(0, Math.min(height, p.y))
+    }
+
+    // ---------------------------------------------- Rendición: + gasto rápido
+    // Mismo formulario compacto del gasto expandido (saveExpense / attachSupport reales).
+    // Instancia persistente: cerrar el selector no pierde lo escrito.
+    RGlassMenu {
+        id: quickExpensePanel
+        objectName: "quickExpensePanel"
+        ui: shell.ui
+        z: 45
+        cardWidth: 380 * shell.ui.u
+        viewportBottom: shell.keyboardTop
+        onDismissed: { quickExpenseForm.persistLocal(); Qt.inputMethod.hide() }
+        Text { width: parent.width; leftPadding: 6 * shell.ui.u; bottomPadding: 8 * shell.ui.u
+               text: "Nuevo gasto"; color: S.text
+               font.family: shell.ui.fontFamily; font.pixelSize: 18 * shell.ui.u; font.weight: Font.DemiBold }
+        FlowCore.ImeAwareFlickable {
+            flow: shell.flow
+            width: parent.width
+            id: quickExpenseFlick
+            height: Math.min(quickExpenseForm.implicitHeight, Math.max(80 * shell.ui.u, quickExpensePanel.availableHeight - 72 * shell.ui.u))
+            contentWidth: width
+            contentHeight: quickExpenseForm.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            interactive: contentHeight > height
+            RExpenseQuickForm {
+                id: quickExpenseForm
+                objectName: "quickExpenseForm"
+                width: parent.width
+                app: shell
+                renditionLocalId: shell.detailPage ? String(shell.detailPage.localId) : ""
+                expense: null
+                onFinished: function(saved) { quickExpensePanel.close(); if (saved) quickExpenseForm.load(true) }
+                onOpenFullForm: quickExpenseForm.openAdvanced()
+            }
+        }
+    }
+
+    // ---------------------------------------------- Rendición: Buscar
+    RGlassMenu {
+        id: searchPanel
+        objectName: "searchPanel"
+        ui: shell.ui
+        z: 45
+        cardWidth: 340 * shell.ui.u
+        readonly property var tab: shell.detailPage ? shell.detailPage.expensesTab : null
+        function sortBy(key) {
+            if (!tab) return
+            tab.sortBy = key
+            shell.detailPage.showSection("expenses")
+            close()
+        }
+        Rectangle {
+            width: parent.width; height: 48 * shell.ui.u; radius: 14 * shell.ui.u
+            color: S.ink(0.05); border.width: 1; border.color: S.fieldBorder
+            Text { x: 14 * shell.ui.u; anchors.verticalCenter: parent.verticalCenter; text: String.fromCharCode(0xE151); color: S.muted
+                   font.family: shell.ui.iconFamily; font.pixelSize: 20 * shell.ui.u }
+            TextField {
+                objectName: "searchExpensesInput"
+                x: 44 * shell.ui.u; width: parent.width - x - 10 * shell.ui.u
+                anchors.verticalCenter: parent.verticalCenter
+                background: null
+                placeholderText: "Buscar gastos…"
+                placeholderTextColor: S.faint
+                color: S.text
+                text: searchPanel.tab ? searchPanel.tab.query : ""
+                font.family: shell.ui.fontFamily; font.pixelSize: 15 * shell.ui.u
+                onTextEdited: if (searchPanel.tab) { searchPanel.tab.query = text; shell.detailPage.tab = "expenses" }
+                onAccepted: searchPanel.close()
+            }
+        }
+        Item { width: 1; height: 6 * shell.ui.u }
+        RMenuItem { ui: shell.ui; label: "Por concepto"; glyph: 0xE151; glyphColor: S.navy; onActivated: searchPanel.sortBy("concept") }
+        RMenuItem { ui: shell.ui; label: "Por fecha"; glyph: 0xE063; glyphColor: S.navy; onActivated: searchPanel.sortBy("date") }
+        RMenuItem { ui: shell.ui; label: "Por categoría"; glyph: 0xE17F; glyphColor: S.navy; onActivated: searchPanel.sortBy("category") }
+        RMenuItem { ui: shell.ui; label: "Por proveedor"; glyph: 0xE19F; glyphColor: S.navy; onActivated: searchPanel.sortBy("beneficiary") }
+        RMenuItem { ui: shell.ui; label: "Por proyecto"; glyph: 0xE0D7; glyphColor: S.navy; separator: false; onActivated: searchPanel.sortBy("project") }
+    }
+
+    // ---------------------------------------------- Rendición: Información
+    RGlassMenu {
+        id: infoPanel
+        objectName: "infoPanel"
+        ui: shell.ui
+        z: 45
+        cardWidth: 360 * shell.ui.u
+        readonly property var d: shell.detailPage
+        readonly property var c: d ? d.current : ({})
+        readonly property var t: d && shell.ctl ? shell.ctl.totals(d.expenses || []) : ({})
+        readonly property var b: d ? d.balance || ({}) : ({})
+        readonly property var financialRows: [
+            { label: "Estado", value: d ? shell.ctl.statusLabel(String(c.status || "BORRADOR")) + (d.writable ? " · Editable" : " · Solo lectura") : "—", action: "review" },
+            { label: "Tipo de cambio", value: d && S.text_(d.rate, "rate").length ? "S/ " + S.text_(d.rate, "rate") : "Sin configurar", action: "financial" },
+            { label: "Fondo asignado", value: b.enabled && !b.error ? shell.ctl.formatCents(b.fundPenCents, "PEN") + " / " + shell.ctl.formatCents(b.fundUsdCents, "USD") : b.enabled ? "Revisar importes" : "Sin fondo", action: "financial" },
+            { label: "Saldo del fondo", value: b.enabled && b.penCents !== undefined && b.penCents !== null ? shell.ctl.formatCents(b.penCents, "PEN") : "No disponible", action: "financial" },
+            { label: "Total gastado", value: !d || !d.expensesKnown ? "Cargando…" : t.error ? "Importes por revisar" : shell.ctl.formatCents(t.penCents || 0, "PEN") + " / " + shell.ctl.formatCents(t.usdCents || 0, "USD"), action: "expenses" },
+            { label: "Número de gastos", value: d && d.expensesKnown ? String(t.count || 0) : "—", action: "expenses" }
+        ]
+        readonly property var generalRows: [
+            { label: "Cliente", value: d ? d.clientName || "Sin cliente" : "—" },
+            { label: "Ubicación", value: d ? d.locationName || "Sin ubicación" : "—" },
+            { label: "Proyecto", value: d ? d.projectLine : "—" },
+            { label: "Descripción", value: S.text_(c, "description") || S.text_(c, "displayName", "display_name") || "Sin descripción" }
+        ]
+        Text { width: parent.width; leftPadding: 6 * shell.ui.u; bottomPadding: 8 * shell.ui.u
+               text: "Información de la rendición"; color: S.text
+               font.family: shell.ui.fontFamily; font.pixelSize: 18 * shell.ui.u; font.weight: Font.DemiBold }
+        Flickable {
+            width: parent.width
+            height: Math.min(infoColumn.implicitHeight, shell.height * 0.5)
+            contentHeight: infoColumn.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            interactive: contentHeight > height
+            Grid {
+                id: infoColumn
+                width: parent.width
+                columns: 2
+                columnSpacing: 12 * shell.ui.u
+                rowSpacing: 10 * shell.ui.u
+                Repeater {
+                    model: infoPanel.financialRows.concat(infoPanel.generalRows)
+                    delegate: Rectangle {
+                        required property var modelData
+                        width: (infoColumn.width - infoColumn.columnSpacing) / 2
+                        height: Math.max(66 * shell.ui.u, infoCell.implicitHeight + 16 * shell.ui.u)
+                        radius: 12 * shell.ui.u
+                        color: S.cardGlass
+                        border.width: 1; border.color: S.fieldBorder
+                        Column {
+                            id: infoCell
+                            x: 8 * shell.ui.u; y: 8 * shell.ui.u; width: parent.width - 16 * shell.ui.u
+                            spacing: 4 * shell.ui.u
+                            Text { width: parent.width; text: modelData.label; color: S.muted; wrapMode: Text.WordWrap
+                                   font.family: shell.ui.fontFamily; font.pixelSize: 12 * shell.ui.u }
+                            Text { width: parent.width; text: modelData.value; color: S.text; wrapMode: Text.WordWrap
+                                   font.family: shell.ui.fontFamily; font.pixelSize: 14 * shell.ui.u; font.weight: Font.DemiBold }
+                        }
+                        MouseArea { anchors.fill: parent; enabled: modelData.action !== undefined
+                                    onClicked: { infoPanel.close(); if (infoPanel.d) infoPanel.d.showSection(modelData.action) } }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------- Exportar: elegir destino
+    RGlassMenu {
+        id: exportDestMenu
+        objectName: "exportDestMenu"
+        ui: shell.ui
+        z: 46
+        cardWidth: 300 * shell.ui.u
+        Text { width: parent.width; leftPadding: 6 * shell.ui.u; bottomPadding: 6 * shell.ui.u; color: S.text
+               text: "Exportar " + (shell.exportDestFormat === "xlsx" ? "Excel" : "PDF")
+               font.family: shell.ui.fontFamily; font.pixelSize: 17 * shell.ui.u; font.weight: Font.DemiBold }
+        RMenuItem { ui: shell.ui; label: "Guardar en el teléfono"; glyph: 0xE163; glyphColor: S.navy; onActivated: shell.chooseExportDestination("phone") }
+        RMenuItem { ui: shell.ui; label: "InGe Drive"; glyph: 0xE0D7; glyphColor: S.navy; onActivated: shell.chooseExportDestination("inge") }
+        RMenuItem { ui: shell.ui; label: "Google Drive"; glyph: 0xE088; glyphColor: S.navy; separator: false; onActivated: shell.chooseExportDestination("google") }
+    }
+
+    // ---------------------------------------- Rendición: Observaciones del revisor
+    RGlassMenu {
+        id: notesPanel
+        objectName: "notesPanel"
+        ui: shell.ui
+        z: 45
+        cardWidth: 360 * shell.ui.u
+        Text { width: parent.width; leftPadding: 6 * shell.ui.u; bottomPadding: 6 * shell.ui.u
+               text: "Observaciones del revisor"; color: S.text
+               font.family: shell.ui.fontFamily; font.pixelSize: 18 * shell.ui.u; font.weight: Font.DemiBold }
+        Text { width: parent.width; leftPadding: 6 * shell.ui.u; bottomPadding: 8 * shell.ui.u
+               text: shell.reviewNotesFailed ? "No se pudo consultar el historial de observaciones."
+                     : shell.reviewNotes.length === 0 ? "Sin observaciones de revisión."
+                     : shell.reviewNotes.length + (shell.reviewNotes.length === 1 ? " observación" : " observaciones") + " · En orden de llegada"
+               color: shell.reviewNotesFailed ? S.warning : S.muted; wrapMode: Text.WordWrap
+               font.family: shell.ui.fontFamily; font.pixelSize: 14 * shell.ui.u }
+        RButton { visible: shell.reviewNotesFailed; ui: shell.ui; label: "Reintentar historial"
+                  width: parent.width; height: 44 * shell.ui.u; radius: height / 2; color: S.cardGlass
+                  onActivated: shell.loadReview() }
+        ListView {
+            width: parent.width
+            height: Math.min(contentHeight, shell.height * 0.5)
+            clip: true; spacing: 8 * shell.ui.u
+            boundsBehavior: Flickable.StopAtBounds
+            interactive: contentHeight > height
+            model: shell.reviewNotes
+            delegate: Rectangle {
+                required property var modelData
+                required property int index
+                width: ListView.view.width; height: noteCol.implicitHeight + 20 * shell.ui.u
+                radius: 14 * shell.ui.u; color: S.tintSoft; border.width: 1; border.color: S.tintSoftBorder
+                Column {
+                    id: noteCol
+                    x: 12 * shell.ui.u; y: 10 * shell.ui.u; width: parent.width - 24 * shell.ui.u; spacing: 4 * shell.ui.u
+                    Text { width: parent.width; elide: Text.ElideRight; color: S.accent
+                           text: "Observación " + (index + 1) + " · " + String(modelData.author || "Revisor") + " · " + S.date(String(modelData.created_at || ""))
+                           font.family: shell.ui.fontFamily; font.pixelSize: 12 * shell.ui.u; font.weight: Font.DemiBold }
+                    Text { width: parent.width; wrapMode: Text.WordWrap; color: S.text; text: String(modelData.body || "")
+                           font.family: shell.ui.fontFamily; font.pixelSize: 14 * shell.ui.u }
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------- Hoja: cambiar o solicitar estado
+    Item {
+        id: stateSheet
+        objectName: "stateSheet"
+        anchors.fill: parent
+        z: 60
+        property string mode: ""            // transition | request
+        property string target: ""
+        property bool busy: false
+        property string errorText: ""
+        readonly property bool returnToDraft: mode === "transition" && target === "BORRADOR"
+        readonly property bool shown: mode.length > 0
+        visible: opacity > 0.01
+        opacity: shown ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+        function openFor(m, t) {
+            closeMenus(); errorText = ""; reasonField.text = ""; target = t; mode = m
+            Qt.callLater(function() {
+                if (stateSheet.returnToDraft) Qt.inputMethod.hide()
+                else reasonField.forceActiveFocus()
+            })
+        }
+        function close() { Qt.inputMethod.hide(); mode = ""; busy = false }
+        function submit() {
+            var reason = returnToDraft ? "" : reasonField.text.trim()
+            if (!returnToDraft && !reason.length) { errorText = "Escribe el motivo del cambio."; return }
+            if (!shell.reviewCtx) { errorText = "No se pudo leer el estado actual. Vuelve a intentarlo."; return }
+            busy = true; errorText = ""
+            var args = { renditionId: shell.liveRenditionId, expectedRowVersion: Number(shell.reviewCtx.row_version), reason: reason }
+            var op = mode === "transition" ? "reviewTransition" : "reviewRequest"
+            if (mode === "transition") args.nextState = target
+            else { args.requestedState = target; args.requestId = ctl.newId() }
+            shell.call(op, args, "reviewAction:" + shell.liveRenditionId, function(ok, result, code, message) {
+                stateSheet.busy = false
+                if (!ok) { stateSheet.errorText = shell.errorText(code, message); return }
+                shell.toast(stateSheet.mode === "transition" ? "Estado actualizado." : "Solicitud enviada a administración.", "success")
+                stateSheet.close()
+                shell.refresh()
+                shell.loadReview()
+            })
+        }
+        Rectangle { anchors.fill: parent; color: Qt.rgba(14 / 255, 24 / 255, 44 / 255, 0.38) }
+        MouseArea { anchors.fill: parent; enabled: stateSheet.shown && !stateSheet.busy; onClicked: stateSheet.close() }
+        Rectangle {
+            width: parent.width - 2 * shell.ui.gutter; x: shell.ui.gutter
+            height: sheetCol.implicitHeight + 44 * shell.ui.u
+            // Android ya achica la ventana con el teclado: sólo se centra en el alto visible.
+            y: Math.max(shell.ui.topInset + 12 * shell.ui.u, (parent.height - height) / 2)
+            radius: 26 * shell.ui.u
+            readonly property bool liquid: (shell.ui.liquidGlass !== false && !!shell.ui.liquidGlassMaterial && !!shell.ui.cardGlassUi)
+            color: liquid ? "transparent" : S.halloween ? S.popup : S.dark ? Qt.rgba(18 / 255, 22 / 255, 32 / 255, 0.97) : S.glass(0.97)
+            border.width: liquid ? 0 : 1; border.color: S.edge(1)
+            Mobile.GlassSurface {                // Liquid Glass oficial (preset único del Dock)
+                visible: shell.ui.liquidGlass !== false && !!shell.ui.liquidGlassMaterial && !!shell.ui.cardGlassUi && (textureReady || fallbackOn)
+                ui: shell.ui.cardGlassUi || null
+                material: shell.ui.liquidGlassMaterial || null
+                tint: shell.ui.dockGlassTint                  // oscuro igual que claro y el Dock: sin tinte negro
+                radius: 26 * shell.ui.u
+                margin: 12 * shell.ui.u
+            }
+            scale: stateSheet.shown ? 1 : (shell.extremeFlow.extremeMotion === true ? shell.extremeFlow.sheetStartScale : 0.92)
+            Behavior on scale { NumberAnimation { duration: 320; easing.type: Easing.OutBack; easing.overshoot: 1.15 } }
+            MouseArea { anchors.fill: parent }
+            Column {
+                id: sheetCol
+                x: 22 * shell.ui.u; y: 22 * shell.ui.u; width: parent.width - 44 * shell.ui.u; spacing: 10 * shell.ui.u
+                Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; color: S.text
+                       text: (stateSheet.mode === "transition" ? "Pasar a «" : "Solicitar «") + (ctl ? ctl.statusLabel(stateSheet.target) : stateSheet.target) + "»"
+                       font.family: shell.ui.fontFamily; font.pixelSize: 19 * shell.ui.u; font.weight: Font.Bold }
+                Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; color: S.muted
+                       text: stateSheet.returnToDraft ? "Se devolverá a Borrador para permitir la edición, sin registrar una observación."
+                             : stateSheet.target === "OBSERVADO" ? "El dueño verá tu observación y podrá corregir la rendición."
+                             : stateSheet.mode === "request" ? "Administración recibirá tu solicitud con este motivo."
+                             : "El cambio queda registrado con tu motivo."
+                       font.family: shell.ui.fontFamily; font.pixelSize: 13.5 * shell.ui.u }
+                // Campo propio: no desplaza la pantalla de atrás al enfocarse (evita saltos y parpadeo).
+                Rectangle {
+                    id: reasonBox
+                    objectName: "stateChangeReason"
+                    visible: !stateSheet.returnToDraft
+                    width: parent.width; height: Math.max(52 * shell.ui.u, reasonField.contentHeight + 28 * shell.ui.u)
+                    radius: 14 * shell.ui.u; color: S.glass(0.78)
+                    border.width: reasonField.activeFocus ? 2 : 1; border.color: reasonField.activeFocus ? S.accent : S.fieldBorder
+                    TextEdit {
+                        id: reasonField
+                        objectName: "stateChangeReasonInput"
+                        x: 14 * shell.ui.u; y: 14 * shell.ui.u; width: parent.width - 28 * shell.ui.u
+                        wrapMode: TextEdit.Wrap; color: S.text; selectByMouse: true
+                        font.family: shell.ui.fontFamily; font.pixelSize: 15 * shell.ui.u
+                        onTextChanged: if (length > 500) remove(500, length)
+                    }
+                    Text { x: 14 * shell.ui.u; y: 14 * shell.ui.u; visible: reasonField.length === 0 && !reasonField.activeFocus
+                           text: (stateSheet.target === "OBSERVADO" ? "Observación: " : "Motivo: ") + "explica por qué se cambia el estado"
+                           color: S.faint; font.family: shell.ui.fontFamily; font.pixelSize: 15 * shell.ui.u }
+                    MouseArea { anchors.fill: parent; enabled: !reasonField.activeFocus; onClicked: reasonField.forceActiveFocus() }
+                }
+                Text { width: parent.width; visible: stateSheet.errorText.length > 0; text: stateSheet.errorText; color: S.danger
+                       wrapMode: Text.Wrap; font.family: shell.ui.fontFamily; font.pixelSize: 13 * shell.ui.u }
+                Row {
+                    id: sheetActions
+                    width: parent.width; spacing: 10 * shell.ui.u
+                    RButton { ui: shell.ui; label: "Cancelar"; width: (sheetActions.width - sheetActions.spacing) / 2; height: 48 * shell.ui.u
+                              radius: height / 2; color: S.cardGlass; enabledButton: !stateSheet.busy; onActivated: stateSheet.close() }
+                    RButton { ui: shell.ui; primary: true; label: stateSheet.mode === "transition" ? "Confirmar" : "Enviar"
+                              width: (sheetActions.width - sheetActions.spacing) / 2; height: 48 * shell.ui.u; radius: height / 2
+                              busy: stateSheet.busy; onActivated: stateSheet.submit() }
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------- Rendición: Actividad
+    RGlassMenu {
+        id: activityPanel
+        objectName: "activityPanel"
+        ui: shell.ui
+        z: 45
+        cardWidth: 360 * shell.ui.u
+        readonly property var events: open ? shell.activityEvents(shell.detailPage) : []
+        Text { width: parent.width; leftPadding: 6 * shell.ui.u; bottomPadding: 6 * shell.ui.u
+               text: "Actividad"; color: S.text
+               font.family: shell.ui.fontFamily; font.pixelSize: 18 * shell.ui.u; font.weight: Font.DemiBold }
+        Text { width: parent.width; visible: activityPanel.events.length === 0; leftPadding: 6 * shell.ui.u; bottomPadding: 8 * shell.ui.u
+               text: "Aún no hay cambios registrados en esta rendición."; color: S.muted; wrapMode: Text.WordWrap
+               font.family: shell.ui.fontFamily; font.pixelSize: 14 * shell.ui.u }
+        ListView {
+            id: activityList
+            width: parent.width
+            height: Math.min(contentHeight, shell.height * 0.5)
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            interactive: contentHeight > height
+            model: activityPanel.events
+            delegate: Item {
+                id: eventRow
+                required property var modelData
+                required property int index
+                readonly property string day: shell.dayLabel(modelData.at)
+                readonly property bool firstOfDay: index === 0 || shell.dayLabel(activityPanel.events[index - 1].at) !== day
+                readonly property color tone: modelData.tone
+                width: activityList.width
+                height: (firstOfDay ? 30 * shell.ui.u : 0) + 62 * shell.ui.u
+                Text { visible: eventRow.firstOfDay; x: 6 * shell.ui.u; y: 6 * shell.ui.u; text: eventRow.day; color: S.text
+                       font.family: shell.ui.fontFamily; font.pixelSize: 15 * shell.ui.u; font.weight: Font.DemiBold }
+                Item {
+                    y: eventRow.firstOfDay ? 30 * shell.ui.u : 0
+                    width: parent.width; height: 62 * shell.ui.u
+                    Rectangle {                          // línea de tiempo
+                        x: 25 * shell.ui.u; width: 2; height: parent.height
+                        color: S.ink(0.08)
+                        visible: eventRow.index < activityPanel.events.length - 1
+                    }
+                    Rectangle {
+                        x: 8 * shell.ui.u; anchors.verticalCenter: parent.verticalCenter
+                        width: 36 * shell.ui.u; height: width; radius: 10 * shell.ui.u
+                        color: Qt.rgba(eventRow.tone.r, eventRow.tone.g, eventRow.tone.b, 0.14)
+                        Text { anchors.centerIn: parent; text: String.fromCharCode(eventRow.modelData.glyph); color: eventRow.tone
+                               font.family: shell.ui.iconFamily; font.pixelSize: 18 * shell.ui.u }
+                    }
+                    Column {
+                        x: 54 * shell.ui.u; width: parent.width - x - 54 * shell.ui.u
+                        anchors.verticalCenter: parent.verticalCenter
+                        Text { width: parent.width; text: eventRow.modelData.title; color: S.text; elide: Text.ElideRight
+                               font.family: shell.ui.fontFamily; font.pixelSize: 14 * shell.ui.u; font.weight: Font.DemiBold }
+                        Text { width: parent.width; text: eventRow.modelData.detail; color: S.muted; elide: Text.ElideRight
+                               font.family: shell.ui.fontFamily; font.pixelSize: 12 * shell.ui.u }
+                    }
+                    Text { anchors.right: parent.right; anchors.rightMargin: 6 * shell.ui.u; anchors.verticalCenter: parent.verticalCenter
+                           text: shell.timeLabel(eventRow.modelData.at); color: S.muted
+                           font.family: shell.ui.fontFamily; font.pixelSize: 12 * shell.ui.u }
+                }
+            }
+        }
+        Text { width: parent.width; topPadding: 6 * shell.ui.u; leftPadding: 6 * shell.ui.u
+               text: "Basado en las fechas de creación y modificación registradas; el autor de cada cambio no está disponible en la app."
+               color: S.faint; wrapMode: Text.WordWrap; font.family: shell.ui.fontFamily; font.pixelSize: 11 * shell.ui.u }
+    }
     // ------------------------------------------ Estado de Rendiciones
     RenditionsDiagnostics {
         id: statusPanel
         ui: shell.ui
+        liquidUi: shell.ui.cardGlassUi || null            // vidrio del Dock
         app: shell
         z: 46
         diagnostics: shell.diagnostics

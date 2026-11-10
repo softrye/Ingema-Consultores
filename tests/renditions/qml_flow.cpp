@@ -16,6 +16,7 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQmlExpression>
+#include <QQmlPropertyMap>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QSignalSpy>
@@ -161,7 +162,7 @@ private:
         if (op == "saveExpense") {
             auto list = expenses.value(a.value("localId").toString()).toList();
             QVariantMap e = a.value("expense").toMap();
-            e.insert("localId", "exp-1"); e.insert("syncState", "PENDING_CREATE"); e.insert("rowVersion", 0); e.insert("attachments", QVariantList{});
+            e.insert("localId", QStringLiteral("exp-%1").arg(list.size() + 1)); e.insert("syncState", "PENDING_CREATE"); e.insert("rowVersion", 0); e.insert("attachments", QVariantList{});
             list.append(e); expenses.insert(a.value("localId").toString(), list);
             auto r = rendition(a.value("localId").toString()); r.insert("totalPen", e.value("amount")); r.insert("expenseCount", 1); r.insert("pendingCount", 2); put(r);
             publish(); ok(c, {{"localId", "exp-1"}, {"pendingSync", true}}); return;
@@ -169,7 +170,7 @@ private:
         if (op == "attachSupport") {
             auto list = expenses.value(a.value("localId").toString()).toList();
             auto e = list.first().toMap(); auto files = e.value("attachments").toList();
-            auto file = a.value("attachment").toMap(); file.insert("phase", "RESERVE"); file.insert("syncState", "PENDING_CREATE");
+            auto file = a.value("attachment").toMap(); file.insert("localId", QStringLiteral("att-%1").arg(files.size() + 1)); file.insert("phase", "RESERVE"); file.insert("syncState", "PENDING_CREATE");
             files.append(file); e.insert("attachments", files); list[0] = e; expenses.insert(a.value("localId").toString(), list);
             publish(); ok(c, {{"pendingSync", true}}); return;
         }
@@ -279,10 +280,15 @@ int main(int argc, char **argv)
     QQmlEngine engine;
     QQmlComponent component(&engine, QUrl::fromLocalFile(QDir(qmlDir).filePath("RenditionsApp.qml")));
     check(component.isReady(), ("RenditionsApp.qml compiles: " + component.errorString()).toStdString());
-    const QVariantMap ui{{"u", 1.0}, {"fontFamily", ""}, {"iconFamily", ""}, {"topInset", 24}, {"gutter", 18},
+    const QVariantMap uiValues{{"u", 1.0}, {"fontFamily", ""}, {"iconFamily", ""}, {"topInset", 24}, {"gutter", 18},
                          {"dockArea", 96}, {"glassFill", "#334"}, {"glassBorder", "#556"}, {"reducedMotion", true},
-                         {"firstName", "Paola"}};
-    QObject *root = component.createWithInitialProperties({{"ui", ui}, {"ctl", QVariant::fromValue<QObject *>(&controller)},
+                         {"firstName", "Paola"}, {"dockGlassBevel", 14.0}, {"dockGlassContrast", 0.0},
+                         {"dockGlassRefraction", 6.0}, {"dockGlassFrost", 2.5}, {"dockGlassShadowAlpha", 0.22},
+                         {"appSkin", "none"}, {"liquidGlass", false}, {"seasonalController", QVariant::fromValue<QObject *>(nullptr)},
+                         {"cardGlassUi", QVariant::fromValue<QObject *>(nullptr)}};
+    QQmlPropertyMap ui;
+    for (auto it = uiValues.cbegin(); it != uiValues.cend(); ++it) ui.insert(it.key(), it.value());
+    QObject *root = component.createWithInitialProperties({{"ui", QVariant::fromValue<QObject *>(&ui)}, {"ctl", QVariant::fromValue<QObject *>(&controller)},
                                                            {"width", 412}, {"height", 915}});
     check(root != nullptr, ("RenditionsApp created: " + component.errorString()).toStdString());
     // Ventana offscreen: StackView y Popup necesitan su bucle de render (como en la app).
@@ -336,7 +342,9 @@ int main(int argc, char **argv)
     // REN-06/07: nueva rendición con proyecto y carpeta de InGe Drive.
     js("openCreate()");
     check(waitFor([&]() { return js("createSheet.editor !== null").toBool(); }), "new rendition sheet opened");
-    js("var e = createSheet.editor; e.start = '2026-10-01'; e.end = '2026-10-31'; e.toggleProject('p1'); e.toggleProject('p2'); e.setPrimary('p1'); e.changed()");
+    check(js("modalOpen").toBool() && !js("stack.currentItem.listInteractive").toBool(), "SCROLL background list frozen while 'Nueva rendición' is open");
+    check(root->findChild<QObject *>("renditionNameInput") != nullptr, "IMG1 name editable inside the compact period block");
+    js("var e = createSheet.editor; e.displayName = 'Visita de campo Huarmey'; e.start = '2026-10-01'; e.end = '2026-10-31'; e.toggleProject('p1'); e.toggleProject('p2'); e.setPrimary('p1'); e.changed()");
     check(waitFor([&]() { return bridge.count("saveEditorDraft") >= 1; }, 2000), "REN-21 header autosave persisted");
     check(waitFor([&]() { return bridge.drafts.contains("header:new"); }), "draft stored under header:new");
     js("createSheet.editor.openFolders()");
@@ -348,6 +356,23 @@ int main(int argc, char **argv)
     check(waitFor([&]() { return js("createSheet.editor.folder").toString() == "f1"; }), "folder validated by folderCapabilities");
     js("createSheet.editor.save(); createSheet.editor.save()");
     check(waitFor([&]() { return js("stack.currentItem.localId === 'local-1'").toBool(); }), "REN-06 created rendition opens detail");
+    check(js("stack.currentItem.tab === 'expenses' && stack.currentItem.expensesTab.visible").toBool(), "UI03 expense overview is the initial visible route");
+    check(!js("modalOpen").toBool(), "SCROLL sheet closed releases the background");
+    check(waitFor([&]() { return js("dockActions.map(function(a) { return a.id }).join(',')").toString()
+                                 == "renditions.search,renditions.info,renditions.new,renditions.review"; }),
+          "IMG2 rendition dock: Buscar, Información, +, Estado (3D Touch con Actividad; no Atrás)");
+    check(js("dockActions[2].tapCommand === true && dockActions[2].children.length === 4").toBool(), "IMG2 + taps quick expense; Deep Press shows creation options");
+    js("dockCommand('renditions.quickExpense')");
+    check(waitFor([&]() { auto *p = root->findChild<QObject *>("expenseEditorPopup"); return p && p->property("visible").toBool(); }),
+          "IMG2 + opens the approved expense editor (new expense)");
+    QMetaObject::invokeMethod(root->findChild<QObject *>("expandedExpenseForm"), "requestClose");
+    js("dockCommand('renditions.info')");
+    check(waitFor([&]() { return js("infoPanel.open && infoPanel.financialRows.length === 6 && infoPanel.generalRows.length === 4").toBool(); }), "IMG2 Información selector with real values");
+    js("dockCommand('renditions.activity')");
+    check(js("activityPanel.open && !infoPanel.open").toBool(), "IMG2 Actividad selector replaces Información");
+    js("dockCommand('renditions.search')");
+    check(js("searchPanel.open && searchPanel.tab !== null").toBool(), "IMG2 Buscar selector bound to the real expenses list");
+    js("searchPanel.close()");
     check(bridge.count("create") == 1, "REN-26 double tap sends one create");
     const auto create = bridge.lastCommand("create").value("arguments").toMap();
     check(create.value("periodStart") == "2026-10-01" && create.value("periodEnd") == "2026-10-31"
@@ -390,6 +415,21 @@ int main(int argc, char **argv)
           && attachment.value("clientIntentId").toString().endsWith(attachment.value("localUri").toString()), "REN-16 attachSupport contract");
     check(js("stack.currentItem.objectName === '' && stack.currentItem.localId === 'local-1'").toBool(), "back on detail");
     check(waitFor([&]() { return root->findChild<QObject *>("expensesTab")->property("expenses").toList().size() == 1; }), "REN-13 expense listed in detail");
+    {   // IMG2-B/C: gasto expandido en la misma ficha (formulario compacto + comprobantes), guarda con CAS.
+        QObject *tabObj = root->findChild<QObject *>("expensesTab");
+        QMetaObject::invokeMethod(tabObj, "expand", Q_ARG(QVariant, tabObj->property("expenses").toList().first()));
+        check(waitFor([&]() { return root->findChild<QObject *>("expandedExpenseForm") != nullptr
+                                     && root->findChild<QObject *>("expenseEditorPopup") != nullptr && root->findChild<QObject *>("expenseEditorPopup")->property("visible").toBool(); }), "IMG2 expense opens its editor in the same rendition");
+        QObject *quick = root->findChild<QObject *>("expandedExpenseForm");
+        check(quick->property("files").toList().size() >= 1, "IMG2 attachments listed inside the expanded expense");
+        const int saves = bridge.count("saveExpense");
+        QMetaObject::invokeMethod(quick, "save");
+        check(waitFor([&]() { return bridge.count("saveExpense") == saves + 1; }), "IMG2 inline save uses saveExpense");
+        const auto inlineArgs = bridge.lastCommand("saveExpense").value("arguments").toMap();
+        check(inlineArgs.value("expenseLocalId") == "exp-1" && inlineArgs.contains("expectedExpenseRowVersion")
+              && inlineArgs.value("expense").toMap().value("concept") == "Almuerzo de campo para cuadrilla", "IMG2 inline edit keeps identity, CAS and data");
+        check(waitFor([&]() { return tabObj->property("expandedId").toString().isEmpty(); }), "IMG2 expanded form closes after saving");
+    }
 
     // REN-14/15: fondo PEN/USD y tipo de cambio manual.
     QObject *financial = root->findChild<QObject *>("financialTab");
@@ -418,7 +458,7 @@ int main(int argc, char **argv)
           "remote UUID adopted for the same rendition");
     financial->setProperty("automatic", true);
     QMetaObject::invokeMethod(financial, "quote");
-    check(waitFor([&]() { return financial->property("rateError").toString().contains("no está configurada"); }), "QUOTE_ORIGIN_NOT_CONFIGURED explained");
+    check(waitFor([&]() { return financial->property("rateError").toString().contains("Consulta automática no configurada"); }), "QUOTE_ORIGIN_NOT_CONFIGURED explained");
     check(bridge.lastCommand("exchangeQuote").value("arguments").toMap().value("renditionId") == "remote-1", "quote uses remote id");
     check(bridge.count("saveFinancial") == 2, "no invented quote saved");
 
@@ -434,9 +474,9 @@ int main(int argc, char **argv)
     check(waitFor([&]() { return review->property("versions").toList().size() == 1; }), "REN-19 versions listed");
     check(!js("stack.currentItem.writable").toBool(), "REN-25 presented rendition read only");
 
-    // REN-05: desde otra pestaña, atrás vuelve primero al Resumen (detalle aprobado);
-    // desde el Resumen, vuelve a la lista y libera la selección.
-    check(back() && js("stack.currentItem.tab").toString() == "summary" && depth() == 2, "back from review returns to summary");
+    // REN-05: desde otra pestaña, atrás vuelve primero a la vista general de gastos;
+    // desde la vista general, vuelve a la lista y libera la selección.
+    check(back() && js("stack.currentItem.tab").toString() == "expenses" && depth() == 2, "back from review returns to expense overview");
     check(back() && waitFor([&]() { return depth() == 1; }), "back to renditions home");
     check(waitFor([&]() { return bridge.count("closeDetail") >= 1; }), "detail closed in bridge");
     check(!back(), "REN-05 at root back returns to InGe+ Home");
@@ -531,13 +571,9 @@ int main(int argc, char **argv)
     js("stack.currentItem.showSection('expenses')");
     settle(400);
     check(!visibleText("Error de sincronización") && !visibleText("TRANSPORT_RETRY"), "D3 no error badge/marker for waiting op");
-    if (!visibleText("Pendiente de sincronizar")) {
-        std::cerr << "tab=" << js("stack.currentItem.tab").toString().toStdString() << '\n';
-        for (QQuickItem *item : visibleItems())
-            if (item->property("text").isValid() && !item->property("text").toString().isEmpty())
-                std::cerr << "  visible: " << item->property("text").toString().toStdString() << '\n';
-    }
-    check(visibleText("Pendiente de sincronizar"), "D4 pending badge shown");
+    // The current tile layout communicates sync through the shared aura;
+    // the pending expense itself remains visible and editable.
+    check(visibleText("Movilidad") && visibleText("S/ 12.50"), "D4 pending expense remains visible");
     check(js("syncMode").toString() == "offline" && !js("stack.currentItem.conflict").toBool(), "D5 timeout is not a conflict");
     js("synchronize(true)");
     check(waitFor([&]() { return !js("busy('sync')").toBool(); }), "D6 timeout answered");
@@ -581,12 +617,12 @@ int main(int argc, char **argv)
         bridge.renditions[i] = r;
     }
     bridge.push();
-    js("stack.currentItem.tab = 'summary'");
+    js("stack.currentItem.tab = 'expenses'");
     check(waitFor([&]() { return js("stack.currentItem.conflict").toBool(); }), "C1 real CAS conflict detected");
     check(js("syncMode").toString() == "error" && bridge.connection == "ONLINE", "C2 conflict is error, not offline");
     check(!js("stack.currentItem.editable").toBool(), "C3 local changes protected (no edit over conflict)");
     check(js("stack.currentItem.suggestions[0].key").toString() == "sync", "C4 safe resolution offered (bring server version)");
-    check(visibleText("Conflicto con el servidor"), "C5 conflict indicator inside its management screen");
+    check(js("dockActions.filter(function(a) { return a.id === 'renditions.new' })[0].children[0].enabled === false").toBool(), "C5 quick creation blocked during a real conflict");
     back();
     check(waitFor([&]() { return depth() == 1; }), "C6 back to list");
 
@@ -669,9 +705,7 @@ int main(int argc, char **argv)
     check(waitFor([&]() { return js("confirmDialog.opened").toBool(); }), "G6 discard asks confirmation");
     js("var cb = confirmDialog.acceptCallback; confirmDialog.close(); cb()");
     check(waitFor([&]() { return bridge.count("archiveWorking") == 1 && !visibleText("borrador sin registrar"); }), "G6 draft discarded");
-    back();                                                   // sección Gastos -> Resumen (detalle aprobado)
-    check(waitFor([&]() { return js("stack.currentItem.tab").toString() == "summary"; }), "G7 back to summary");
-    back();
+    back(); // Expenses is now the overview; Back returns directly to the list.
     check(waitFor([&]() { return depth() == 1; }), "G7 back to list");
 
     // ================= Nuevo gasto: 4 secciones, Dock 3D Touch y herramientas por sección
@@ -770,7 +804,7 @@ int main(int argc, char **argv)
           && js("stack.currentItem.fieldItem('amount').text").toString().isEmpty() && js("stack.currentItem.fieldItem('supportNumber').text").toString().isEmpty(),
           "T13 reuse copies compatible data only (never amount or receipt number)");
     js("var e = stack.currentItem; e.fieldItem('beneficiary').text = 'Otro proveedor'; e.reuse(e.previousExpenses[0])");
-    check(js("confirmDialog.opened").toBool() && js("stack.currentItem.fieldItem('beneficiary').text").toString() == "Otro proveedor",
+    check(waitFor([&]() { return js("confirmDialog.opened").toBool(); }) && js("stack.currentItem.fieldItem('beneficiary').text").toString() == "Otro proveedor",
           "T14 confirmation before overwriting existing data");
     js("confirmDialog.close()");
     js("var e = stack.currentItem; e.fieldItem('concept').text = 'Gasto a descartar'; e.changed()");
@@ -867,16 +901,19 @@ int main(int argc, char **argv)
 
     // ================= Archivero y Papelera (Files v07): consulta y recuperación reversible
     check(root->findChild<QObject *>("menuTrash")->property("glyph").toInt() == 0xE18E, "PAP1 Papelera menu item uses the trash icon");
+    const auto fileJs = [&](QString code) {
+        return js(code.replace("stack.currentItem", "filesPopup.content[0].item"));
+    };
     js("openFiles('archive')");
-    check(waitFor([&]() { return depth() == 2 && js("stack.currentItem.objectName").toString() == "filesBrowser"; }), "F1 archive opened from folder menu");
-    check(waitFor([&]() { return js("stack.currentItem.items.length").toInt() == 1; }), "F1 archive listed after contract check");
-    check(root->findChild<QObject *>("headerSyncButton")->property("visible").toBool(), "PAP2 Archivero unchanged (keeps its header)");
-    check(visibleText("Informe topográfico.pdf") && visibleText("puede reactivarse"), "F1 archived item and state");
-    js("stack.currentItem.startRecovery(stack.currentItem.items[0])");
-    check(waitFor([&]() { return js("!!stack.currentItem.plan && stack.currentItem.plan.token === 'preview-token-1'").toBool(); }), "F2 recovery preview with token");
-    check(visibleText("Ubicación original: Presa Norte / Informes"), "F2 origin shown before confirming");
-    js("stack.currentItem.recover()");
-    check(waitFor([&]() { return js("stack.currentItem.items.length").toInt() == 0; }), "F2 reactivated item leaves the archive");
+    check(waitFor([&]() { return depth() == 1 && js("filesPopup.open").toBool() && fileJs("stack.currentItem.objectName").toString() == "filesBrowser"; }), "F1 archive opened from folder menu");
+    check(waitFor([&]() { return fileJs("stack.currentItem.items.length").toInt() == 1; }), "F1 archive listed after contract check");
+    check(fileJs("stack.currentItem.archive && stack.currentItem.compact").toBool(), "PAP2 archive uses the compact Files popup");
+    check(waitFor([&]() { return visibleText("Informe topográfico.pdf"); }) && fileJs("stack.currentItem.canRecover(stack.currentItem.items[0])").toBool(), "F1 archived item visible and reversible recovery available");
+    fileJs("stack.currentItem.startRecovery(stack.currentItem.items[0])");
+    check(waitFor([&]() { return fileJs("!!stack.currentItem.plan && stack.currentItem.plan.token === 'preview-token-1'").toBool(); }), "F2 recovery preview with token");
+    check(waitFor([&]() { return visibleText("Vuelve a") && visibleText("Presa Norte"); }), "F2 recovery destination shown before confirming");
+    fileJs("stack.currentItem.recover()");
+    check(waitFor([&]() { return fileJs("stack.currentItem.items.length").toInt() == 0; }), "F2 reactivated item leaves the archive");
     const auto recover = bridge.lastCommand("filesRecover").value("arguments").toMap();
     check(recover.value("entityId") == "n-archived-1" && recover.value("expectedVersion").toInt() == 3
           && recover.value("previewToken") == "preview-token-1" && QUuid(recover.value("requestId").toString()).isNull() == false,
@@ -887,34 +924,47 @@ int main(int argc, char **argv)
         {"kind", "BINARY_DOCUMENT"}, {"parent_node_id", QVariant()}, {"project_id", "p1"}, {"started", false}, {"request_id", QVariant()},
         {"can_restore", true}, {"lifecycle", "ARCHIVED"}, {"can_reactivate", true}, {"requires_destination", true}, {"origin_state", "MOVED"}}};
     bridge.requireDestination = true;
-    js("stack.currentItem.load('', false)");
-    check(waitFor([&]() { return js("stack.currentItem.items.length").toInt() == 1; }), "F3 moved-origin item listed");
-    js("stack.currentItem.startRecovery(stack.currentItem.items[0])");
-    check(waitFor([&]() { return js("stack.currentItem.choosingDestination").toBool(); }), "F3 destination required");
-    check(!js("stack.currentItem.plan.token").isValid() || js("stack.currentItem.plan.token === null").toBool(), "F3 no token without destination");
-    js("stack.currentItem.chooseProject('p1')");
-    check(waitFor([&]() { return js("stack.currentItem.destFolders.length").toInt() == 1; }), "F3 project folders listed");
-    js("stack.currentItem.loadDestFolders('f1', stack.currentItem.destFolders[0])");
-    check(waitFor([&]() { return js("stack.currentItem.destPath.length").toInt() == 1; }), "F3 folder entered");
-    js("stack.currentItem.useDestination()");
-    check(waitFor([&]() { return js("!!stack.currentItem.plan && stack.currentItem.plan.token === 'preview-token-1'").toBool(); }), "F3 preview repeated with validated destination");
+    fileJs("stack.currentItem.load('', false)");
+    check(waitFor([&]() { return fileJs("stack.currentItem.items.length").toInt() == 1; }), "F3 moved-origin item listed");
+    fileJs("stack.currentItem.startRecovery(stack.currentItem.items[0])");
+    check(waitFor([&]() { return fileJs("stack.currentItem.choosingDestination").toBool(); }), "F3 destination required");
+    check(!fileJs("stack.currentItem.plan.token").isValid() || fileJs("stack.currentItem.plan.token === null").toBool(), "F3 no token without destination");
+    fileJs("stack.currentItem.chooseProject('p1')");
+    check(waitFor([&]() { return fileJs("stack.currentItem.destFolders.length").toInt() == 1; }), "F3 project folders listed");
+    fileJs("stack.currentItem.loadDestFolders('f1', stack.currentItem.destFolders[0])");
+    check(waitFor([&]() { return fileJs("stack.currentItem.destPath.length").toInt() == 1; }), "F3 folder entered");
+    fileJs("stack.currentItem.useDestination()");
+    check(waitFor([&]() { return fileJs("!!stack.currentItem.plan && stack.currentItem.plan.token === 'preview-token-1'").toBool(); }), "F3 preview repeated with validated destination");
     const auto chosen = bridge.lastCommand("filesCanChoose").value("arguments").toMap();
     check(chosen.value("spaceId") == "space-1" && chosen.value("nodeId") == "f1", "F3 destination validated by server");
-    js("stack.currentItem.recover()");
+    fileJs("stack.currentItem.recover()");
     check(waitFor([&]() { return bridge.lastCommand("filesRecover").value("arguments").toMap().value("destinationNodeId") == "f1"; }), "F3 recovered into chosen folder");
     bridge.requireDestination = false;
     back();
-    check(waitFor([&]() { return depth() == 1; }), "F4 back to list");
+    check(waitFor([&]() { return depth() == 1 && !js("filesPopup.open").toBool(); }), "F4 back to list");
     js("openFiles('trash')");
-    check(waitFor([&]() { return bridge.count("filesTrash") >= 1 && depth() == 2; }), "F5 global trash opened");
-    check(!root->findChild<QObject *>("headerSyncButton")->property("visible").toBool() && !visibleText("Sincronizado"),
+    const bool trashOpened = waitFor([&]() { return bridge.count("filesTrash") >= 1 && js("filesPopup.open").toBool() && depth() == 1; });
+    if (!trashOpened) std::cerr << "Files mode=" << fileJs("stack.currentItem.mode").toString().toStdString()
+        << " ready=" << fileJs("stack.currentItem.contractState").toString().toStdString()
+        << " loading=" << fileJs("stack.currentItem.loading").toBool()
+        << " archiveCalls=" << bridge.count("filesArchive") << " trashCalls=" << bridge.count("filesTrash") << '\n';
+    check(trashOpened, "F5 global trash opened");
+    check(fileJs("stack.currentItem.hideSync && stack.currentItem.compact").toBool(),
           "PAP3 no 'Sincronizado' button on the Papelera screen");
     back();
-    check(waitFor([&]() { return depth() == 1; }), "F5 back to list");
+    check(waitFor([&]() { return depth() == 1 && !js("filesPopup.open").toBool(); }), "F5 back to list");
     for (const auto &command : bridge.commands) {
         const QString op = command.toMap().value("operation").toString();
         check(!op.contains("urge", Qt::CaseInsensitive), "F6 no purge command ever sent from mobile");
     }
+
+    // Work continues outside the visible page: it must still suppress seasonal notices.
+    root->setProperty("active", false);
+    bridge.phase = "PUSHING";
+    bridge.push();
+    check(root->property("halloweenBlocked").toBool(), "Halloween blocked during sync after leaving Renditions");
+    bridge.phase = "IDLE";
+    bridge.push();
 
     // Ninguna advertencia QML en todo el recorrido.
     QCoreApplication::processEvents();

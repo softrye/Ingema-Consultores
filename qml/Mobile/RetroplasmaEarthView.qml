@@ -115,6 +115,8 @@ Item {
     }
     Component.onDestruction: finishGps()
 
+    // Espacio: negro con estrellas estáticas (se pintan una vez; sin animación por
+    // fotograma). El globo (RetroplasmaView) limpia en transparente y queda encima.
     Rectangle { anchors.fill: parent; color: "#000000" }
     Canvas {
         id: starfield

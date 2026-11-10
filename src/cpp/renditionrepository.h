@@ -126,6 +126,10 @@ public:
                                    qint64 expectedExpenseRowVersion,
                                    qint64 expectedRenditionRowVersion);
     void deleteDraft(const QString &renditionId, qint64 expectedRowVersion);
+    void trashDraft(const QString &renditionId, qint64 expectedRowVersion,
+                    const QString &requestId);
+    void archiveRendition(const QString &renditionId, qint64 expectedRowVersion,
+                          const QString &requestId);
 
     Q_INVOKABLE void listVersions(const QString &renditionId);
     Q_INVOKABLE void presentRendition(const QString &renditionId,
@@ -204,6 +208,8 @@ signals:
     void expenseEdited(const QVariantMap &result);
     void expenseDeleted(const QVariantMap &result);
     void draftDeleted(const QVariantMap &result);
+    void draftTrashed(const QVariantMap &result);
+    void renditionArchived(const QVariantMap &result);
     void renditionPresented(const QVariantMap &result);
     void attachmentReserved(const QVariantMap &result);
     void attachmentUploaded(const QString &attachmentId);
@@ -225,7 +231,8 @@ private:
     void callRpc(const QString &operation,
                  const QString &rpcName,
                  const QVariantMap &arguments,
-                 SuccessHandler onSuccess);
+                 SuccessHandler onSuccess,
+                 bool tokenRefreshAttempted = false);
     bool requireV02(const QString &operation);
     void signObject(const QString &operation, const QString &requestId, const QString &bucket,
                     const QString &path, const QString &fileName);
